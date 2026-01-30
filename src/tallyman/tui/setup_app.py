@@ -68,6 +68,8 @@ class SetupApp(App[set[str] | None]):
         tree.root.data = {'path': '', 'gitignored': False, 'excluded': False}
         self._populate(tree.root, self.root, '')
         tree.root.expand_all()
+        if self.user_excluded:
+            self._collapse_excluded(tree.root)
         tree.show_root = True
         yield tree
         with Horizontal(id='buttons'):
@@ -103,6 +105,15 @@ class SetupApp(App[set[str] | None]):
             # Don't recurse into gitignored dirs
             if not is_gitignored:
                 self._populate(node, entry, child_rel)
+
+    @staticmethod
+    def _collapse_excluded(node: TreeNode[dict[str, object]]) -> None:
+        """Collapse nodes that are excluded so they start folded."""
+        for child in node.children:
+            if child.data and child.data.get('excluded'):
+                child.collapse()
+            else:
+                SetupApp._collapse_excluded(child)
 
     @staticmethod
     def _make_label(name: str, gitignored: bool, excluded: bool) -> str:
