@@ -11,13 +11,83 @@ import pathspec
 from tallyman.languages import Language, identify_language
 
 
-def load_gitignore(root: Path) -> pathspec.PathSpec:
-    """Load gitignore patterns from .gitignore and .git/info/exclude."""
+def find_git_root(start: Path) -> Path | None:
+    """Walk up from *start* looking for a directory containing ``.git``.
+
+    Returns the git repo root, or None if not inside a git repository.
+    """
+    current = start.resolve()
+    while True:
+        if (current / '.git').exists():
+            return current
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
+
+
+class GitIgnoreSpec:
+    """Wraps a pathspec with an optional path prefix for subdirectory matching.
+
+    When tallyman runs from a subdirectory of a git repo, gitignore patterns
+    are relative to the repo root.  This wrapper transparently prepends the
+    prefix so callers can keep using paths relative to the analysis directory.
+    """
+
+    def __init__(self, spec: pathspec.PathSpec, prefix: str = '') -> None:
+        self._spec = spec
+        self._prefix = prefix
+
+    def match_file(self, path: str) -> bool:
+        if self._prefix:
+            full = f'{self._prefix}/{path}'
+        else:
+            full = path
+        return self._spec.match_file(full)
+
+
+def load_gitignore(root: Path) -> GitIgnoreSpec:
+    """Load gitignore patterns, traversing up to find the git repo root.
+
+    Collects patterns from:
+    - ``<git-root>/.gitignore``
+    - ``<git-root>/.git/info/exclude``
+    - Any ``.gitignore`` in directories between the git root and *root*
+    """
+    git_root = find_git_root(root)
     lines: list[str] = []
-    for ignore_file in [root / '.gitignore', root / '.git' / 'info' / 'exclude']:
+
+    if git_root is None:
+        # Not in a git repo — just check for a local .gitignore
+        local_ignore = root / '.gitignore'
+        if local_ignore.is_file():
+            lines.extend(local_ignore.read_text(encoding='utf-8', errors='replace').splitlines())
+        return GitIgnoreSpec(pathspec.PathSpec.from_lines('gitignore', lines))  # type: ignore[arg-type]
+
+    # Load repo-root files
+    for ignore_file in [git_root / '.gitignore', git_root / '.git' / 'info' / 'exclude']:
         if ignore_file.is_file():
             lines.extend(ignore_file.read_text(encoding='utf-8', errors='replace').splitlines())
-    return pathspec.PathSpec.from_lines('gitignore', lines)  # type: ignore[arg-type]
+
+    # Load intermediate .gitignore files between git root and analysis root
+    if root.resolve() != git_root:
+        rel = root.resolve().relative_to(git_root)
+        current = git_root
+        for part in rel.parts:
+            current = current / part
+            ignore_file = current / '.gitignore'
+            if ignore_file.is_file():
+                lines.extend(ignore_file.read_text(encoding='utf-8', errors='replace').splitlines())
+
+    spec = pathspec.PathSpec.from_lines('gitignore', lines)  # type: ignore[arg-type]
+
+    # Compute the prefix: path from git root to analysis root
+    if root.resolve() != git_root:
+        prefix = str(root.resolve().relative_to(git_root))
+    else:
+        prefix = ''
+
+    return GitIgnoreSpec(spec, prefix)
 
 
 def _is_binary(path: Path) -> bool:
@@ -32,7 +102,7 @@ def _is_binary(path: Path) -> bool:
 def walk_project(
     root: Path,
     excluded_dirs: set[str],
-    gitignore_spec: pathspec.PathSpec | None = None,
+    gitignore_spec: GitIgnoreSpec | None = None,
 ) -> Iterator[tuple[Path, Language]]:
     """Yield (file_path, language) for every countable source file under root.
 

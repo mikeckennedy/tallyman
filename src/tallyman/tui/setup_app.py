@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pathspec
+from tallyman.walker import GitIgnoreSpec
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -48,7 +48,7 @@ class SetupApp(App[set[str] | None]):
     def __init__(
         self,
         root: Path,
-        gitignore_spec: pathspec.PathSpec,
+        gitignore_spec: GitIgnoreSpec,
         existing_exclusions: set[str],
     ) -> None:
         super().__init__()
@@ -197,7 +197,7 @@ class SetupApp(App[set[str] | None]):
 
 def run_setup(
     root: Path,
-    gitignore_spec: pathspec.PathSpec,
+    gitignore_spec: GitIgnoreSpec,
     existing_exclusions: set[str],
 ) -> set[str] | None:
     """Launch the TUI setup app.

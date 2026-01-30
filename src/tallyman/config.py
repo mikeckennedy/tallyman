@@ -9,9 +9,19 @@ CONFIG_FILENAME = '.tally-config.toml'
 
 
 def find_config(root: Path) -> Path | None:
-    """Return the config file path if it exists, else None."""
-    config_path = root / CONFIG_FILENAME
-    return config_path if config_path.is_file() else None
+    """Search for .tally-config.toml starting at *root* and walking up.
+
+    Returns the first config file found, or None.
+    """
+    current = root.resolve()
+    while True:
+        config_path = current / CONFIG_FILENAME
+        if config_path.is_file():
+            return config_path
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
 
 
 def load_config(config_path: Path) -> set[str]:

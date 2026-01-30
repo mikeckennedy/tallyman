@@ -42,6 +42,7 @@ class LanguageStats:
 class CategoryStats:
     name: str  # 'Code', 'Design', 'Docs', 'Data'
     total_lines: int = 0
+    effective_lines: int = 0  # non-blank non-comment (or non-blank for languages without comment detection)
     languages: list[str] = field(default_factory=list)
 
 
@@ -74,10 +75,15 @@ def aggregate(file_results: Iterable[tuple[Language, FileCount]]) -> TallyResult
 
     # Build category stats
     cat_lines: dict[str, int] = {}
+    cat_effective: dict[str, int] = {}
     cat_langs: dict[str, list[str]] = {}
     for stats in sorted_langs:
         cat = stats.language.category
         cat_lines[cat] = cat_lines.get(cat, 0) + stats.total_lines
+        if stats.language.single_line_comment is not None:
+            cat_effective[cat] = cat_effective.get(cat, 0) + stats.non_blank_non_comment
+        else:
+            cat_effective[cat] = cat_effective.get(cat, 0) + stats.non_blank
         if cat not in cat_langs:
             cat_langs[cat] = []
         cat_langs[cat].append(stats.language.name)
@@ -89,6 +95,7 @@ def aggregate(file_results: Iterable[tuple[Language, FileCount]]) -> TallyResult
                 CategoryStats(
                     name=CATEGORY_DISPLAY_NAMES[cat_key],
                     total_lines=cat_lines[cat_key],
+                    effective_lines=cat_effective[cat_key],
                     languages=cat_langs[cat_key],
                 )
             )

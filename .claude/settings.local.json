@@ -37,7 +37,11 @@
       "Bash(python -m tallyman:*)",
       "Bash(python -m pytest:*)",
       "Bash(ruff check:*)",
-      "Bash(uv run pytest:*)"
+      "Bash(uv run pytest:*)",
+      "Bash(gh repo view:*)",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)"
     ],
     "additionalDirectories": [
       "/Volumes/owc-envoy-ultra/github/mk/commandbookapp/CommandBook/CommandBook/{Models,Managers,Views/MainWindow,Views/CommandPalette,Views/CommandEditor,Views",

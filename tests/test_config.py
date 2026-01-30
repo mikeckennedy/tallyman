@@ -13,6 +13,23 @@ class TestFindConfig:
     def test_returns_none_when_missing(self, tmp_path: Path):
         assert find_config(tmp_path) is None
 
+    def test_finds_config_in_parent_directory(self, tmp_path: Path):
+        config = tmp_path / CONFIG_FILENAME
+        config.write_text('[exclude]\ndirectories = []\n')
+        sub = tmp_path / 'src' / 'app'
+        sub.mkdir(parents=True)
+        assert find_config(sub) == config
+
+    def test_finds_nearest_config(self, tmp_path: Path):
+        root_config = tmp_path / CONFIG_FILENAME
+        root_config.write_text('[exclude]\ndirectories = ["root"]\n')
+        sub = tmp_path / 'sub'
+        sub.mkdir()
+        sub_config = sub / CONFIG_FILENAME
+        sub_config.write_text('[exclude]\ndirectories = ["sub"]\n')
+        # From sub, should find sub's config (nearest)
+        assert find_config(sub) == sub_config
+
 
 class TestLoadConfig:
     def test_loads_excluded_directories(self, tmp_path: Path):

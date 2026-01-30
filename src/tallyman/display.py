@@ -76,7 +76,7 @@ def _display_category_totals(console: Console, result: TallyResult) -> None:
 
     console.print('  [bold]Totals:[/bold]')
 
-    max_name_len = max(len(c.name) for c in active_categories)
+    max_name_len = max(max(len(c.name) for c in active_categories), len('Combined'))
 
     for cat in active_categories:
         # Build the parenthetical language list
@@ -86,7 +86,10 @@ def _display_category_totals(console: Console, result: TallyResult) -> None:
             lang_list = ' + '.join(cat.languages[:3]) + ', etc'
 
         padded_name = f'{cat.name}:'
-        console.print(f'  {padded_name:<{max_name_len + 1}} {cat.total_lines:>7,} lines ({lang_list})')
+        console.print(f'  {padded_name:<{max_name_len + 1}} {cat.effective_lines:>10,} lines ({lang_list})')
+
+    combined = sum(c.effective_lines for c in active_categories)
+    console.print(f'  [bold]{"Combined:":<{max_name_len + 1}} {combined:>10,} lines[/bold]')
 
 
 def _display_percentage_bar(console: Console, result: TallyResult) -> None:
