@@ -3,7 +3,8 @@
     "allow": [
       "Bash(uv pip compile:*)",
       "WebFetch(domain:interviewcue.app)",
-      "Bash(http POST:*)"
+      "Bash(http POST:*)",
+      "WebFetch(domain:textual.textualize.io)"
     ]
   }
 }

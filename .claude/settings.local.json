@@ -29,7 +29,15 @@
       "Read(//Users/michaelkennedy/Library/Developer/Xcode/DerivedData/CommandBook-afmvmjhkxymcifghdwdgbuxheakn/Build/Products/Debug/CommandBook.app/Contents/MacOS/**)",
       "Bash(# Check symlink target and binary timestamp echo \"\"=== Symlink ===\"\" /bin/ls -la \"\"$HOME/.local/bin/commandbook\"\" echo \"\"\"\" echo \"\"=== Binary timestamp ===\"\" stat -f \"\"%Sm\"\" \"\"$HOME/Library/Developer/Xcode/DerivedData/CommandBook-afmvmjhkxymcifghdwdgbuxheakn/Build/Products/Debug/CommandBook.app/Contents/MacOS/commandbook-cli\"\" echo \"\"\"\" echo \"\"=== Current time ===\"\" date echo \"\"\"\" echo \"\"=== Check if RunCommand.swift compiled recently ===\"\" # Look for the compiled object file /usr/bin/find \"\"$HOME/Library/Developer/Xcode/DerivedData/CommandBook-afmvmjhkxymcifghdwdgbuxheakn/Build/Intermediates.noindex\"\" -name \"\"RunCommand*.o\"\" -newer \"\"$HOME/github/mk/commandbookapp/CommandBook/commandbook-cli/Commands/RunCommand.swift\"\")",
       "Read(//usr/bin/**)",
-      "Bash(osascript:*)"
+      "Bash(osascript:*)",
+      "Bash(uv venv:*)",
+      "Bash(uv pip install:*)",
+      "Bash(tallyman --help:*)",
+      "Bash(tallyman:*)",
+      "Bash(python -m tallyman:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(ruff check:*)",
+      "Bash(uv run pytest:*)"
     ],
     "additionalDirectories": [
       "/Volumes/owc-envoy-ultra/github/mk/commandbookapp/CommandBook/CommandBook/{Models,Managers,Views/MainWindow,Views/CommandPalette,Views/CommandEditor,Views",
