@@ -77,7 +77,7 @@ class SetupApp(App[tuple[set[str], set[str]] | None]):
             'spec': False,
             'auto_spec': False,
         }
-        self._populate(tree.root, self.root, '', parent_is_spec=False)
+        self._populate(tree.root, self.root, '')
         tree.root.expand_all()
         if self.user_excluded:
             self._collapse_excluded(tree.root)
