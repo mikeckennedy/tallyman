@@ -47,17 +47,18 @@ A few things that set it apart:
 - **Gitignore-aware** - Tallyman reads your `.gitignore` and `.git/info/exclude` patterns automatically. It skips virtual environments, `node_modules`, build artifacts, and anything else you've already told Git to ignore.
 - **Visual composition bar** - A colored percentage bar at the bottom shows you the language distribution of your project in a single glance.
 
-![Tallyman interactive TUI setup showing directory tree with include/exclude toggles and spec directory markers](https://mkennedy-shared.nyc3.digitaloceanspaces.com/github/tallyman-setup.webp)
 
 ## Features
 
 - **Dual line counts** - Total lines and effective lines (excluding comments and blanks) per language
 - **Six categories** - Code, DevOps, Design, Docs, Specs, and Data, each with aggregated totals
 - **40 languages** - From Python and Rust to Terraform and Docker, with full template support for HTML (Jinja, Nunjucks, Handlebars, and more)
-- **Interactive TUI setup** - Visual directory tree for configuring exclusions and spec directories, powered by [Textual](https://github.com/Textualize/textual)
 - **Beautiful output** - Colored, formatted results with a language composition bar, powered by [Rich](https://github.com/Textualize/rich)
 - **Realistic metrics** - Only counts files *you* wrote, not third-party dependencies or generated code
 - **Persistent config** - Your setup choices are saved to `.tally-config.toml` and reused on every run
+- **Interactive TUI setup** - Visual directory tree for configuring exclusions and spec directories, powered by [Textual](https://github.com/Textualize/textual)
+
+![Tallyman interactive TUI setup showing directory tree with include/exclude toggles and spec directory markers](https://mkennedy-shared.nyc3.digitaloceanspaces.com/github/tallyman-setup.webp)
 
 ## Supported Languages
 
