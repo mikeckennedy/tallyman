@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from tallyman.aggregator import LanguageStats, TallyResult, aggregate, language_percentages
 from tallyman.counter import FileCount
 from tallyman.languages import Language

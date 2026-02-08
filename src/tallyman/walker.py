@@ -72,8 +72,9 @@ def load_gitignore(root: Path) -> GitIgnoreSpec:
             lines.extend(ignore_file.read_text(encoding='utf-8', errors='replace').splitlines())
 
     # Load intermediate .gitignore files between git root and analysis root
-    if root.resolve() != git_root:
-        rel = root.resolve().relative_to(git_root)
+    resolved_root = root.resolve()
+    if resolved_root != git_root:
+        rel = resolved_root.relative_to(git_root)
         current = git_root
         for part in rel.parts:
             current = current / part
@@ -84,10 +85,7 @@ def load_gitignore(root: Path) -> GitIgnoreSpec:
     spec = pathspec.PathSpec.from_lines('gitignore', lines)  # type: ignore[arg-type]
 
     # Compute the prefix: path from git root to analysis root
-    if root.resolve() != git_root:
-        prefix = str(root.resolve().relative_to(git_root))
-    else:
-        prefix = ''
+    prefix = str(resolved_root.relative_to(git_root)) if resolved_root != git_root else ''
 
     return GitIgnoreSpec(spec, prefix)
 
@@ -123,7 +121,7 @@ def walk_project(
     for dirpath_str, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
         dirpath = Path(dirpath_str)
         rel_dir = dirpath.relative_to(root)
-        rel_dir_str = str(rel_dir) if str(rel_dir) != '.' else ''
+        rel_dir_str = str(rel_dir) if rel_dir.parts else ''
 
         # Prune excluded and gitignored subdirectories in-place
         filtered_dirs: list[str] = []
@@ -131,7 +129,7 @@ def walk_project(
             # Skip hidden directories (e.g. .git, .venv)
             if d.startswith('.'):
                 continue
-            child_rel = str(rel_dir / d) if str(rel_dir) != '.' else d
+            child_rel = f'{rel_dir_str}/{d}' if rel_dir_str else d
             # Check config exclusions
             if child_rel in excluded_dirs:
                 continue
@@ -163,7 +161,7 @@ def walk_project(
         for filename in sorted(filenames):
             file_path = dirpath / filename
             # Skip files matched by gitignore
-            file_rel = str(rel_dir / filename) if str(rel_dir) != '.' else filename
+            file_rel = f'{rel_dir_str}/{filename}' if rel_dir_str else filename
             if gitignore_spec.match_file(file_rel):
                 continue
 

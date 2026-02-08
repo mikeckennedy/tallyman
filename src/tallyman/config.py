@@ -35,7 +35,7 @@ def find_config(root: Path) -> Path | None:
 
 def load_config(config_path: Path) -> TallyConfig:
     """Load a .tally-config.toml and return the configuration."""
-    with open(config_path, 'rb') as f:
+    with config_path.open('rb') as f:
         data = tomllib.load(f)
     excluded = set(data.get('exclude', {}).get('directories', []))
     specs = set(data.get('specs', {}).get('directories', []))

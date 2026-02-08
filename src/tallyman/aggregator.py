@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
@@ -39,7 +40,7 @@ class LanguageStats:
         return self.total_lines - self.blank_lines
 
 
-@dataclass
+@dataclass(slots=True)
 class CategoryStats:
     name: str  # 'Code', 'Design', 'Docs', 'Specs', 'Data'
     total_lines: int = 0
@@ -47,7 +48,7 @@ class CategoryStats:
     languages: list[str] = field(default_factory=list)
 
 
-@dataclass
+@dataclass(slots=True)
 class TallyResult:
     by_language: list[LanguageStats]  # Sorted by total_lines descending
     by_category: list[CategoryStats]  # In display order: Code, Design, Docs, Specs, Data
@@ -76,18 +77,16 @@ def aggregate(file_results: Iterable[tuple[Language, FileCount]]) -> TallyResult
     sorted_langs = sorted(by_lang.values(), key=lambda s: s.total_lines, reverse=True)
 
     # Build category stats
-    cat_lines: dict[str, int] = {}
-    cat_effective: dict[str, int] = {}
-    cat_langs: dict[str, list[str]] = {}
+    cat_lines: defaultdict[str, int] = defaultdict(int)
+    cat_effective: defaultdict[str, int] = defaultdict(int)
+    cat_langs: defaultdict[str, list[str]] = defaultdict(list)
     for stats in sorted_langs:
         cat = stats.language.category
-        cat_lines[cat] = cat_lines.get(cat, 0) + stats.total_lines
+        cat_lines[cat] += stats.total_lines
         if stats.language.single_line_comment is not None:
-            cat_effective[cat] = cat_effective.get(cat, 0) + stats.non_blank_non_comment
+            cat_effective[cat] += stats.non_blank_non_comment
         else:
-            cat_effective[cat] = cat_effective.get(cat, 0) + stats.non_blank
-        if cat not in cat_langs:
-            cat_langs[cat] = []
+            cat_effective[cat] += stats.non_blank
         cat_langs[cat].append(stats.language.name)
 
     categories = []

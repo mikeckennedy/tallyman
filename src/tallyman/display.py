@@ -23,10 +23,12 @@ def display_results(result: TallyResult, directory: str, no_color: bool = False)
         console.print('[dim]No recognized source files found.[/dim]')
         return
 
-    _display_languages(console, result)
+    display_names = _language_display_names(result)
+
+    _display_languages(console, result, display_names)
     _display_separator(console)
     _display_category_totals(console, result)
-    _display_percentage_bar(console, result)
+    _display_percentage_bar(console, result, display_names)
 
 
 SECTION_WIDTH = 58
@@ -64,9 +66,7 @@ def _language_display_names(result: TallyResult) -> dict[Language, str]:
     return display_names
 
 
-def _display_languages(console: Console, result: TallyResult) -> None:
-    display_names = _language_display_names(result)
-
+def _display_languages(console: Console, result: TallyResult, display_names: dict[Language, str]) -> None:
     for stats in result.by_language:
         lang = stats.language
         name = display_names[lang]
@@ -116,13 +116,12 @@ def _display_category_totals(console: Console, result: TallyResult) -> None:
     console.print(f'  [bold]{"Combined:":<{max_name_len + 1}} {combined:>10,} lines[/bold]')
 
 
-def _display_percentage_bar(console: Console, result: TallyResult) -> None:
+def _display_percentage_bar(console: Console, result: TallyResult, display_names: dict[Language, str]) -> None:
     if result.grand_total_lines == 0:
         return
 
     console.print()
 
-    display_names = _language_display_names(result)
     percentages = language_percentages(result)
 
     # Group small languages into "Other"

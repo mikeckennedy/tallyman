@@ -42,7 +42,10 @@
       "Bash(git remote add:*)",
       "Bash(git branch:*)",
       "Bash(git push:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Bash(pytest:*)",
+      "Bash(venv/bin/python -m pytest:*)",
+      "Bash(venv/bin/python:*)"
     ],
     "additionalDirectories": [
       "/Volumes/owc-envoy-ultra/github/mk/commandbookapp/CommandBook/CommandBook/{Models,Managers,Views/MainWindow,Views/CommandPalette,Views/CommandEditor,Views",

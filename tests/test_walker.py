@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from tallyman.walker import _is_binary, find_git_root, load_gitignore, walk_project

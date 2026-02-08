@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from tallyman.config import CONFIG_FILENAME, find_config, load_config, save_config

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -75,9 +76,7 @@ def identify_language(path: Path) -> Language | None:
     return EXTENSION_MAP.get(path.suffix.lower())
 
 
-_SPEC_CACHE: dict[Language, Language] = {}
-
-
+@functools.cache
 def as_spec(lang: Language) -> Language:
     """Return a spec-category variant of a docs-category language.
 
@@ -88,12 +87,10 @@ def as_spec(lang: Language) -> Language:
     """
     if lang.category != 'docs':
         raise ValueError(f'as_spec() only applies to docs languages, got {lang.category!r}')
-    if lang not in _SPEC_CACHE:
-        _SPEC_CACHE[lang] = Language(
-            lang.name,
-            'specs',
-            lang.color,
-            lang.single_line_comment,
-            lang.extensions,
-        )
-    return _SPEC_CACHE[lang]
+    return Language(
+        lang.name,
+        'specs',
+        lang.color,
+        lang.single_line_comment,
+        lang.extensions,
+    )
