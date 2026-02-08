@@ -2,6 +2,8 @@
 
 A command-line tool that summarizes the size of a codebase by language, showing lines of code with and without comments and blank lines.
 
+![](https://raw.githubusercontent.com/mikeckennedy/tallyman/refs/heads/main/readme-resources/tallyman-for-commandbook.webp)
+
 ## Overview
 
 Point Tallyman at any project directory and get a quick breakdown of what's in it. It counts lines across languages  -  Python, Rust, JavaScript, CSS, HTML, Markdown, and more  -  and reports both the raw line count and the count excluding comments and blank lines. Results are grouped into categories (Code, Design, Docs) so you can see the shape of your project at a glance.
