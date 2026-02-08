@@ -91,9 +91,16 @@ cython_debug/
 # IDE
 .idea/
 .vscode/
+.cursor/
 *.swp
 *.swo
 *~
+
+# AI tool settings
+.claude/settings.local.json
+
+# Agent files
+plans/agents/
 
 # OS
 .DS_Store
