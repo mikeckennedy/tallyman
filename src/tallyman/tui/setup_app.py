@@ -184,10 +184,6 @@ class SetupApp(App[tuple[set[str], set[str]] | None]):
         if node.data['excluded']:
             return
 
-        # Can't toggle auto-detected spec dirs
-        if node.data['auto_spec']:
-            return
-
         new_state = not node.data['spec']
         self._set_spec(node, new_state)
 
@@ -240,6 +236,8 @@ class SetupApp(App[tuple[set[str], set[str]] | None]):
     def _set_spec(self, node: TreeNode[dict[str, object]], spec: bool) -> None:
         """Set spec state on a node and cascade to all children."""
         node.data['spec'] = spec  # type: ignore[index]
+        if not spec:
+            node.data['auto_spec'] = False  # type: ignore[index]
         rel_path = str(node.data['path'])  # type: ignore[index]
 
         if spec:
@@ -256,7 +254,7 @@ class SetupApp(App[tuple[set[str], set[str]] | None]):
 
         # Cascade to children
         for child in node.children:
-            if child.data and not child.data['gitignored'] and not child.data['auto_spec']:
+            if child.data and not child.data['gitignored']:
                 self._set_spec(child, spec)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
