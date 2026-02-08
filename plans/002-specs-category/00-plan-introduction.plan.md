@@ -1,8 +1,8 @@
-# Specs Category — Build Plan
+# Specs Category  -  Build Plan
 
 ## Problem
 
-As AI-assisted development becomes the norm, projects accumulate large volumes of specification markdown — plans, prompts, agent instructions, architecture docs, and similar files. These are fundamentally different from user-facing documentation (READMEs, API docs, tutorials) but currently get lumped into the "Docs" category. This inflates the docs count and skews the project summary, making it harder to see the true documentation footprint.
+As AI-assisted development becomes the norm, projects accumulate large volumes of specification markdown  -  plans, prompts, agent instructions, architecture docs, and similar files. These are fundamentally different from user-facing documentation (READMEs, API docs, tutorials) but currently get lumped into the "Docs" category. This inflates the docs count and skews the project summary, making it harder to see the true documentation footprint.
 
 ## What We're Building
 
@@ -12,11 +12,11 @@ A new **Specs** category that separates specification markdown from regular docu
 
 A directory is a spec directory in one of four ways:
 
-1. **Name is `specs`** — auto-detected at any depth in the tree
-2. **Name is `specifications`** — auto-detected at any depth in the tree
-3. **Name is `plans`** — auto-detected at any depth in the tree
-4. **Name is `agents`** — auto-detected at any depth in the tree
-5. **User-designated via S key** in the TUI — persisted in `.tally-config.toml`
+1. **Name is `specs`**  -  auto-detected at any depth in the tree
+2. **Name is `specifications`**  -  auto-detected at any depth in the tree
+3. **Name is `plans`**  -  auto-detected at any depth in the tree
+4. **Name is `agents`**  -  auto-detected at any depth in the tree
+5. **User-designated via S key** in the TUI  -  persisted in `.tally-config.toml`
 
 Auto-detection by name (#1–3) is always active during counting, regardless of config state. The S key (#4) allows users to designate additional directories beyond the auto-detected ones. Both sources are merged at count time.
 
@@ -26,7 +26,7 @@ Files in subdirectories of a spec directory also count as specs (spec status cas
 
 ### Directory-Based Categorization (not file-based)
 
-The current category system maps file extensions to categories via the `Language` dataclass. Specs break this model — a `.md` file can be either "docs" or "specs" depending on where it lives. Rather than changing the Language model, we:
+The current category system maps file extensions to categories via the `Language` dataclass. Specs break this model  -  a `.md` file can be either "docs" or "specs" depending on where it lives. Rather than changing the Language model, we:
 
 1. Create spec-variant `Language` instances (identical to docs languages but with `category='specs'`) via an `as_spec()` function in `languages.py`.
 2. Swap to the spec variant in the walker when a docs-category file is found inside a spec directory.
@@ -41,7 +41,7 @@ The S key works like X but for a different purpose:
 | X | Excluded | `[red]✗[/red] [dim]name[/dim]` | Directory and children skipped entirely |
 | S | Spec | `[bright_cyan]S[/bright_cyan] name` | Docs files recategorized as specs |
 
-Both cascade to children. They are mutually exclusive — pressing S on an excluded directory does nothing (un-exclude first with X). Pressing X on a spec directory excludes it (removes spec status).
+Both cascade to children. They are mutually exclusive  -  pressing S on an excluded directory does nothing (un-exclude first with X). Pressing X on a spec directory excludes it (removes spec status).
 
 Auto-detected spec directories (named `specs`, `specifications`, `plans`) are shown pre-marked in the TUI with a slightly different indicator: `[dim bright_cyan]S[/dim bright_cyan] [dim]name (auto)[/dim]` and cannot be toggled via S (similar to how gitignored directories can't be toggled via X).
 
@@ -116,4 +116,4 @@ The percentage bar includes spec files alongside other languages.
 | [Phase 2](phase-02-tui-s-key.plan.md) | TUI S Key | Interactive spec directory designation in the setup TUI |
 | [Phase 3](phase-03-aggregator-display-tests.plan.md) | Aggregator, Display & Tests | Category rendering, per-language disambiguation, test coverage |
 
-Phase 1 is the backend foundation — after it's done, spec directories are detected and files are categorized correctly. Phase 2 adds the interactive configuration experience. Phase 3 makes the output look right and adds test coverage.
+Phase 1 is the backend foundation  -  after it's done, spec directories are detected and files are categorized correctly. Phase 2 adds the interactive configuration experience. Phase 3 makes the output look right and adds test coverage.

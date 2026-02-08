@@ -1,4 +1,4 @@
-"""Language registry — maps file extensions to language metadata."""
+"""Language registry  -  maps file extensions to language metadata."""
 
 from __future__ import annotations
 

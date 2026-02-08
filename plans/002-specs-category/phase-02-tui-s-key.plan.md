@@ -1,4 +1,4 @@
-# Phase 2: TUI S Key — Interactive Spec Directory Designation
+# Phase 2: TUI S Key  -  Interactive Spec Directory Designation
 
 ## Goal
 
@@ -25,15 +25,15 @@ Excluded ──→ Included    Spec     ──→ Included
 Spec     ──→ Excluded    Excluded ──→ (no effect)
 ```
 
-Pressing S on an excluded directory does nothing — the user must first un-exclude it (press X) before marking it as spec. This avoids confusing "is it excluded or is it a spec?" ambiguity.
+Pressing S on an excluded directory does nothing  -  the user must first un-exclude it (press X) before marking it as spec. This avoids confusing "is it excluded or is it a spec?" ambiguity.
 
 Pressing X on a spec directory excludes it (removes spec status). The directory is now fully skipped.
 
-Auto-detected spec directories (named `specs`, `specifications`, `plans`) cannot be toggled via S. They are always spec directories. They CAN be excluded via X (which takes precedence — if you exclude it, nothing is counted regardless of spec status).
+Auto-detected spec directories (named `specs`, `specifications`, `plans`) cannot be toggled via S. They are always spec directories. They CAN be excluded via X (which takes precedence  -  if you exclude it, nothing is counted regardless of spec status).
 
 ## Steps
 
-### 2.1 — Update Node Data Model
+### 2.1  -  Update Node Data Model
 
 Add a `'spec'` boolean and an `'auto_spec'` boolean to each tree node's data dict:
 
@@ -57,7 +57,7 @@ is_auto_spec = entry.name.lower() in SPEC_DIR_NAMES and not is_gitignored
 is_spec = child_rel in self.user_spec_dirs or is_auto_spec
 ```
 
-### 2.2 — Update SetupApp Constructor
+### 2.2  -  Update SetupApp Constructor
 
 Accept and track spec dirs alongside exclusions:
 
@@ -77,7 +77,7 @@ def __init__(
     self.user_spec_dirs: set[str] = set(existing_specs)
 ```
 
-### 2.3 — Add S Key Binding
+### 2.3  -  Add S Key Binding
 
 ```python
 BINDINGS = [
@@ -99,7 +99,7 @@ yield Static(
 )
 ```
 
-### 2.4 — Implement `action_toggle_spec`
+### 2.4  -  Implement `action_toggle_spec`
 
 ```python
 def action_toggle_spec(self) -> None:
@@ -113,7 +113,7 @@ def action_toggle_spec(self) -> None:
     if node.data['gitignored']:
         return
 
-    # Can't toggle excluded dirs — un-exclude first
+    # Can't toggle excluded dirs  -  un-exclude first
     if node.data['excluded']:
         return
 
@@ -125,9 +125,9 @@ def action_toggle_spec(self) -> None:
     self._set_spec(node, new_state)
 ```
 
-### 2.5 — Implement `_set_spec` with Cascading
+### 2.5  -  Implement `_set_spec` with Cascading
 
-Mirror the `_set_excluded` pattern — when a directory is marked as spec, all its children cascade:
+Mirror the `_set_excluded` pattern  -  when a directory is marked as spec, all its children cascade:
 
 ```python
 def _set_spec(self, node: TreeNode[dict[str, object]], spec: bool) -> None:
@@ -153,7 +153,7 @@ def _set_spec(self, node: TreeNode[dict[str, object]], spec: bool) -> None:
             self._set_spec(child, spec)
 ```
 
-### 2.6 — Update `_make_label` for Spec States
+### 2.6  -  Update `_make_label` for Spec States
 
 Extend the label builder to handle spec states:
 
@@ -179,7 +179,7 @@ def _make_label(
 
 **Priority order:** gitignored > excluded > auto_spec > user spec > included. This matches the existing pattern where gitignored takes highest visual priority.
 
-### 2.7 — Update `_set_excluded` to Clear Spec Status
+### 2.7  -  Update `_set_excluded` to Clear Spec Status
 
 When a directory is excluded, any spec status should be cleared:
 
@@ -210,7 +210,7 @@ def _set_excluded(self, node: TreeNode[dict[str, object]], excluded: bool) -> No
             self._set_excluded(child, excluded)
 ```
 
-### 2.8 — Update `_make_label` Call Sites
+### 2.8  -  Update `_make_label` Call Sites
 
 All existing calls to `_make_label` pass only 3 arguments. Update them to pass the new `spec` and `auto_spec` parameters. This affects:
 
@@ -218,7 +218,7 @@ All existing calls to `_make_label` pass only 3 arguments. Update them to pass t
 - `_set_excluded` (line 173 in current code)
 - `action_toggle_node` path through `_set_excluded`
 
-### 2.9 — Update Save and Return
+### 2.9  -  Update Save and Return
 
 The TUI currently returns `set[str] | None` (excluded dirs). Change it to return both sets:
 
@@ -237,9 +237,9 @@ class SetupApp(App[tuple[set[str], set[str]] | None]):
             self.exit(None)
 ```
 
-The `_clean_exclusions` method works for spec dirs too — if a parent is marked as spec, children don't need separate entries (the walker cascades spec status).
+The `_clean_exclusions` method works for spec dirs too  -  if a parent is marked as spec, children don't need separate entries (the walker cascades spec status).
 
-### 2.10 — Update `run_setup` Signature
+### 2.10  -  Update `run_setup` Signature
 
 ```python
 def run_setup(
@@ -256,7 +256,7 @@ def run_setup(
     return app.run()
 ```
 
-### 2.11 — Update CLI Integration (`cli.py`)
+### 2.11  -  Update CLI Integration (`cli.py`)
 
 Wire the new TUI return type into the CLI flow:
 

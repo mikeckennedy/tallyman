@@ -172,7 +172,7 @@ class SetupApp(App[tuple[set[str], set[str]] | None]):
         if node.data['gitignored']:
             return
 
-        # Can't toggle excluded dirs — un-exclude first
+        # Can't toggle excluded dirs  -  un-exclude first
         if node.data['excluded']:
             return
 

@@ -6,7 +6,7 @@ Establish the backend foundation for spec categorization. After this phase, runn
 
 ## Steps
 
-### 1.1 — Spec Variant Languages (`languages.py`)
+### 1.1  -  Spec Variant Languages (`languages.py`)
 
 Add a function that creates a spec-category copy of any docs language. Since `Language` is frozen, we create new instances.
 
@@ -37,7 +37,7 @@ def as_spec(lang: Language) -> Language:
 
 **Why not pre-define spec languages in `LANGUAGES`?** Because spec variants shouldn't appear in `EXTENSION_MAP`. The extension `.md` should always resolve to docs-category Markdown. The swap to specs happens in the walker based on directory context, not file extension.
 
-### 1.2 — Config Changes (`config.py`)
+### 1.2  -  Config Changes (`config.py`)
 
 Update `load_config` and `save_config` to handle both `[exclude]` and `[specs]` sections.
 
@@ -95,7 +95,7 @@ def save_config(config_path: Path, excluded_dirs: set[str], spec_dirs: set[str])
 
 **Backward compatibility:** Configs without a `[specs]` section load with an empty `spec_dirs` set. Existing configs continue to work without modification.
 
-### 1.3 — Update CLI to Use New Config Format (`cli.py`)
+### 1.3  -  Update CLI to Use New Config Format (`cli.py`)
 
 Update all `load_config` and `save_config` call sites to use the new `TallyConfig` dataclass:
 
@@ -124,7 +124,7 @@ for file_path, language in walk_project(root, excluded_dirs, gitignore_spec, spe
     file_results.append((language, counts))
 ```
 
-### 1.4 — Walker Spec Directory Detection (`walker.py`)
+### 1.4  -  Walker Spec Directory Detection (`walker.py`)
 
 This is the core logic change. The walker needs to:
 
@@ -157,7 +157,7 @@ Inside the walk loop, track which relative directory paths are spec directories.
 - Its name (case-insensitive) is in `SPEC_DIR_NAMES` (auto-detected), OR
 - Its parent (any ancestor back to root) is a spec directory (cascading)
 
-**Implementation approach — `active_spec_roots` set:**
+**Implementation approach  -  `active_spec_roots` set:**
 
 Maintain a set of relative directory paths that are confirmed spec roots. For each directory visited during the walk, check if it's a spec root or if it descends from one. This is efficient because `os.walk` with `topdown=True` visits parents before children.
 
@@ -205,11 +205,11 @@ for dirpath_str, dirnames, filenames in os.walk(root, topdown=True, followlinks=
         yield file_path, language
 ```
 
-**Edge case — spec dir inside excluded dir:** Not possible. Excluded dirs are pruned from `os.walk` via `dirnames[:]` filtering, so their children (including any spec dirs) are never visited. This is correct behavior.
+**Edge case  -  spec dir inside excluded dir:** Not possible. Excluded dirs are pruned from `os.walk` via `dirnames[:]` filtering, so their children (including any spec dirs) are never visited. This is correct behavior.
 
-**Edge case — excluded dir inside spec dir:** The exclusion prune still works. A subdirectory of a spec dir that's excluded gets pruned normally. Only non-excluded children inherit spec status.
+**Edge case  -  excluded dir inside spec dir:** The exclusion prune still works. A subdirectory of a spec dir that's excluded gets pruned normally. Only non-excluded children inherit spec status.
 
-### 1.5 — Verify End-to-End (Manual Testing)
+### 1.5  -  Verify End-to-End (Manual Testing)
 
 After implementing steps 1.1–1.4, verify by running tallyman on a project that has:
 - A `plans/` directory with `.md` files
@@ -219,7 +219,7 @@ After implementing steps 1.1–1.4, verify by running tallyman on a project that
 Expected behavior:
 - Markdown files in `plans/` and `specs/` appear with `category='specs'`
 - Markdown files elsewhere appear with `category='docs'`
-- The aggregator (not yet updated with 'specs' in display order) should still collect them — they'll appear as an unnamed category or fall through gracefully
+- The aggregator (not yet updated with 'specs' in display order) should still collect them  -  they'll appear as an unnamed category or fall through gracefully
 
 ## Acceptance Criteria
 

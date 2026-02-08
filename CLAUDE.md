@@ -1,4 +1,4 @@
-# CLAUDE.md — Tallyman
+# CLAUDE.md  -  Tallyman
 
 ## What This Is
 
@@ -29,15 +29,15 @@ ruff format src/ tests/
 ## Tech Stack
 
 - **Python 3.14+** (uses match statements, dataclass slots, `tomllib`)
-- **textual** — TUI framework for first-run setup wizard
-- **rich** — colored terminal output
-- **pathspec** — gitignore pattern matching
+- **textual**  -  TUI framework for first-run setup wizard
+- **rich**  -  colored terminal output
+- **pathspec**  -  gitignore pattern matching
 - **pytest** + **ruff** for dev tooling
 - Build backend: **hatchling**
 
 ## Architecture
 
-Linear pipeline — each stage feeds the next:
+Linear pipeline  -  each stage feeds the next:
 
 ```
 cli.main()
@@ -88,7 +88,7 @@ TallyConfig                   # excluded_dirs: set[str], spec_dirs: set[str]
 
 5. **Config search walks up.** `find_config()` walks up from target dir to filesystem root looking for `.tally-config.toml`.
 
-6. **Auto-detected spec dirs:** `specs/`, `plans/`, `specifications/`, `agents/` — detected even without config.
+6. **Auto-detected spec dirs:** `specs/`, `plans/`, `specifications/`, `agents/`  -  detected even without config.
 
 7. **Gitignore integration** loads patterns from repo root `.gitignore`, `.git/info/exclude`, and intermediate `.gitignore` files. Directory names get `/` appended for pattern matching.
 

@@ -6,7 +6,7 @@ Make the Specs category render correctly in the output report and add comprehens
 
 ## Steps
 
-### 3.1 — Add Specs to Category Constants (`aggregator.py`)
+### 3.1  -  Add Specs to Category Constants (`aggregator.py`)
 
 Add `'specs'` to both the display name mapping and the ordering:
 
@@ -22,9 +22,9 @@ CATEGORY_DISPLAY_NAMES: dict[str, str] = {
 CATEGORY_ORDER: list[str] = ['code', 'design', 'docs', 'specs', 'data']
 ```
 
-Specs appears between Docs and Data — logically it's documentation-adjacent but distinct.
+Specs appears between Docs and Data  -  logically it's documentation-adjacent but distinct.
 
-### 3.2 — Change Aggregation Grouping Key (`aggregator.py`)
+### 3.2  -  Change Aggregation Grouping Key (`aggregator.py`)
 
 **Problem:** The current aggregator groups by `language.name`. When Markdown appears in both `docs` and `specs` categories (via `as_spec()`), both would merge into one `LanguageStats` entry, losing the category distinction.
 
@@ -49,13 +49,13 @@ def aggregate(file_results: Iterable[tuple[Language, FileCount]]) -> TallyResult
     # Sort by total lines descending
     sorted_langs = sorted(by_lang.values(), key=lambda s: s.total_lines, reverse=True)
 
-    # Build category stats (unchanged — already uses stats.language.category)
+    # Build category stats (unchanged  -  already uses stats.language.category)
     # ...
 ```
 
 The rest of the function (category stats building, grand total) works unchanged because it already reads `stats.language.category` from each `LanguageStats`.
 
-### 3.3 — Detect Duplicate Language Names for Display
+### 3.3  -  Detect Duplicate Language Names for Display
 
 When the same language name appears in multiple categories (e.g., Markdown in both docs and specs), the per-language display section needs to distinguish them. Add a helper to detect this:
 
@@ -78,7 +78,7 @@ def _language_display_names(result: TallyResult) -> dict[Language, str]:
 
 Import `CATEGORY_DISPLAY_NAMES` from `aggregator` in `display.py`.
 
-### 3.4 — Update Per-Language Display (`display.py`)
+### 3.4  -  Update Per-Language Display (`display.py`)
 
 Use the display name helper in `_display_languages`:
 
@@ -104,7 +104,7 @@ def _display_languages(console: Console, result: TallyResult) -> None:
             console.print(f'  {non_blank_str:>10} excluding blank lines')
 ```
 
-**When there's only Markdown in docs (no specs), the header reads `Markdown` as before — no suffix.**
+**When there's only Markdown in docs (no specs), the header reads `Markdown` as before  -  no suffix.**
 
 **When Markdown appears in both docs and specs:**
 ```
@@ -116,7 +116,7 @@ def _display_languages(console: Console, result: TallyResult) -> None:
      2,800 excluding blank lines
 ```
 
-### 3.5 — Update `language_percentages` (`aggregator.py`)
+### 3.5  -  Update `language_percentages` (`aggregator.py`)
 
 The percentage bar function also needs to use display-aware names. Currently it returns `language.name`, which would be duplicated. Two options:
 
@@ -184,9 +184,9 @@ def _display_percentage_bar(console: Console, result: TallyResult) -> None:
     console.print(f'  {legend}')
 ```
 
-### 3.6 — Tests
+### 3.6  -  Tests
 
-#### `test_languages.py` — Add spec variant tests
+#### `test_languages.py`  -  Add spec variant tests
 
 ```python
 def test_as_spec_creates_spec_category():
@@ -213,7 +213,7 @@ def test_as_spec_rst():
     assert spec_rst.name == 'reStructuredText'
 ```
 
-#### `test_config.py` — Add spec config tests
+#### `test_config.py`  -  Add spec config tests
 
 ```python
 def test_save_load_with_specs(tmp_path):
@@ -239,7 +239,7 @@ def test_save_config_no_specs_omits_section(tmp_path):
     assert '[specs]' not in content
 ```
 
-#### `test_walker.py` — Add spec directory detection tests
+#### `test_walker.py`  -  Add spec directory detection tests
 
 ```python
 def test_auto_detect_specs_dir(tmp_path):
@@ -316,7 +316,7 @@ def test_excluded_spec_dir_not_walked(tmp_path):
     assert len(results) == 0
 ```
 
-#### `test_aggregator.py` — Add specs category tests
+#### `test_aggregator.py`  -  Add specs category tests
 
 ```python
 def test_specs_category_in_output():
@@ -359,7 +359,7 @@ def test_aggregation_groups_by_language_object():
     assert tally.grand_total_lines == 300
 ```
 
-### 3.7 — Run Full Test Suite and Lint
+### 3.7  -  Run Full Test Suite and Lint
 
 After all changes:
 

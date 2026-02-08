@@ -79,7 +79,7 @@ Implementation details:
 
 ## Steps
 
-### 4.1 — Display Module (`display.py`)
+### 4.1  -  Display Module (`display.py`)
 
 Use Rich's `Console` for all output. This gives us:
 - Color support with automatic fallback.
@@ -101,7 +101,7 @@ def display_results(result: TallyResult, no_color: bool = False) -> None:
     _display_percentage_bar(console, result)
 ```
 
-### 4.2 — Per-Language Display
+### 4.2  -  Per-Language Display
 
 ```python
 def _display_languages(console: Console, result: TallyResult) -> None:
@@ -131,15 +131,15 @@ def _display_languages(console: Console, result: TallyResult) -> None:
 
 Note: Right-aligning the numbers so they form a clean column, matching the sketch.
 
-### 4.3 — Separator
+### 4.3  -  Separator
 
 ```python
 def _display_separator(console: Console) -> None:
     console.print()
-    console.print(f'  {"—" * 58}')
+    console.print(f'  {" - " * 58}')
 ```
 
-### 4.4 — Category Totals
+### 4.4  -  Category Totals
 
 ```python
 CATEGORY_DISPLAY_ORDER = ['Code', 'Design', 'Docs', 'Data']
@@ -166,7 +166,7 @@ def _display_category_totals(console: Console, result: TallyResult) -> None:
         )
 ```
 
-### 4.5 — GitHub-Style Percentage Bar
+### 4.5  -  GitHub-Style Percentage Bar
 
 ```python
 def _display_percentage_bar(console: Console, result: TallyResult) -> None:
@@ -209,7 +209,7 @@ def _display_percentage_bar(console: Console, result: TallyResult) -> None:
     console.print(f'  {legend}')
 ```
 
-### 4.6 — Wire into `cli.py`
+### 4.6  -  Wire into `cli.py`
 
 Replace the temporary `print` loop with:
 
@@ -221,7 +221,7 @@ no_color = args.no_color or os.environ.get('NO_COLOR') is not None
 display_results(result, no_color=no_color)
 ```
 
-### 4.7 — Handle Empty Projects
+### 4.7  -  Handle Empty Projects
 
 If no files are found:
 
@@ -231,7 +231,7 @@ if not result.by_language:
     sys.exit(0)
 ```
 
-### 4.8 — Final `cli.py` Main Flow
+### 4.8  -  Final `cli.py` Main Flow
 
 The complete main function after all phases:
 
@@ -277,7 +277,7 @@ def main() -> None:
     display_results(tally, no_color=no_color)
 ```
 
-### 4.9 — Tests
+### 4.9  -  Tests
 
 **`test_display.py`:**
 

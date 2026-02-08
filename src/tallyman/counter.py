@@ -21,7 +21,7 @@ def count_lines(path: Path, language: Language) -> FileCount:
 
     For languages with a single_line_comment marker, a line is a comment if
     the stripped line starts with that marker. For languages without one,
-    comment_lines stays 0 — we only distinguish blank from non-blank.
+    comment_lines stays 0  -  we only distinguish blank from non-blank.
 
     Encoding errors are replaced to avoid crashes on non-UTF-8 files.
     """

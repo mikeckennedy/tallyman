@@ -1,4 +1,4 @@
-# Tallyman CLI Tool — Build Plan
+# Tallyman CLI Tool  -  Build Plan
 
 ## What We're Building
 
@@ -12,7 +12,7 @@ On first run, when no `.tally-config.toml` exists, Tallyman launches a Textual T
 - **Textual** for the first-run setup TUI.
 - **Rich** for colored terminal output (Textual already depends on Rich).
 - **`pathspec`** for parsing `.gitignore` files using the same glob rules Git uses.
-- **Simple line counting initially** — for each line, check if it starts with the language's single-line comment marker, is blank, or has content. Multi-line comment detection deferred to a future iteration.
+- **Simple line counting initially**  -  for each line, check if it starts with the language's single-line comment marker, is blank, or has content. Multi-line comment detection deferred to a future iteration.
 - **`tomllib`** (stdlib in Python 3.11+) for reading TOML config; manual string building for writing it (avoids a `tomli-w` dependency for simple output).
 
 ## Package Structure

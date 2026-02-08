@@ -6,7 +6,7 @@ Implement the engine that walks a directory, identifies source files by language
 
 ## Steps
 
-### 2.1 — Language Registry (`languages.py`)
+### 2.1  -  Language Registry (`languages.py`)
 
 Define a `Language` dataclass and a registry dict mapping file extensions to languages.
 
@@ -24,9 +24,9 @@ class Language:
 ```
 
 **Fields explained:**
-- `single_line_comment` — The marker that starts a single-line comment. `None` for languages where we skip comment detection in this phase (Markdown, JSON, HTML, CSS — these use block comments or have none).
-- `category` — One of `'code'`, `'design'`, `'docs'`, `'data'`.
-- `color` — A Rich color name. Chosen to roughly match the GitHub language color wheel where possible.
+- `single_line_comment`  -  The marker that starts a single-line comment. `None` for languages where we skip comment detection in this phase (Markdown, JSON, HTML, CSS  -  these use block comments or have none).
+- `category`  -  One of `'code'`, `'design'`, `'docs'`, `'data'`.
+- `color`  -  A Rich color name. Chosen to roughly match the GitHub language color wheel where possible.
 
 **Initial language set:**
 
@@ -76,7 +76,7 @@ def identify_language(path: Path) -> Language | None:
     return EXTENSION_MAP.get(path.suffix.lower())
 ```
 
-### 2.2 — File Walker (`walker.py`)
+### 2.2  -  File Walker (`walker.py`)
 
 Walk a project directory tree and yield files that should be counted.
 
@@ -130,7 +130,7 @@ def _is_binary(path: Path) -> bool:
 - Sort `dirs` in-place for deterministic output.
 - Convert paths to `Path` objects for the language lookup.
 
-### 2.3 — Line Counter (`counter.py`)
+### 2.3  -  Line Counter (`counter.py`)
 
 Classify each line of a source file.
 
@@ -170,11 +170,11 @@ def count_lines(path: Path, language: Language) -> FileCount:
 ```
 
 **Implementation notes:**
-- Open with `encoding='utf-8', errors='replace'` — good enough for line counting.
+- Open with `encoding='utf-8', errors='replace'`  -  good enough for line counting.
 - The `stripped.startswith(comment_marker)` check is intentionally naive. It will miscount comments inside strings and miss block comments. That's fine for v1. The README already notes multi-line comment detection is a future enhancement.
-- For Markdown, there's no concept of "comment lines" — just blank vs. content. This matches the sketch output ("2,102 lines / 1,932 excluding blank lines" with no mention of comments).
+- For Markdown, there's no concept of "comment lines"  -  just blank vs. content. This matches the sketch output ("2,102 lines / 1,932 excluding blank lines" with no mention of comments).
 
-### 2.4 — Aggregator (`aggregator.py`)
+### 2.4  -  Aggregator (`aggregator.py`)
 
 Collect per-file counts into per-language and per-category summaries.
 
@@ -239,7 +239,7 @@ def language_percentages(result: TallyResult) -> list[tuple[str, str, float]]:
     """
 ```
 
-### 2.5 — Wire it all together in `cli.py`
+### 2.5  -  Wire it all together in `cli.py`
 
 Update `cli.py` to call the real engine:
 
@@ -253,7 +253,7 @@ def main() -> None:
         print(f'Error: {root} is not a directory', file=sys.stderr)
         sys.exit(1)
 
-    # Load config (Phase 3 — for now, empty set)
+    # Load config (Phase 3  -  for now, empty set)
     excluded_dirs: set[str] = set()
 
     # Walk and count
@@ -265,7 +265,7 @@ def main() -> None:
     # Aggregate
     result = aggregate(iter(file_results))
 
-    # Display (Phase 4 — for now, plain text)
+    # Display (Phase 4  -  for now, plain text)
     for stats in result.by_language:
         print(f'{stats.language.name}: {stats.total_lines:,} lines, '
               f'{stats.non_blank_non_comment:,} excluding comments and blank lines')
@@ -273,7 +273,7 @@ def main() -> None:
 
 This gives us a working tool with plain-text output. Phases 3 and 4 layer config and formatting on top.
 
-### 2.6 — Tests
+### 2.6  -  Tests
 
 Write tests for the core logic. Use `tmp_path` fixtures to create small file trees.
 

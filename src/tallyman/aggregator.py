@@ -1,4 +1,4 @@
-"""Statistics aggregation — collect per-file counts into language and category summaries."""
+"""Statistics aggregation  -  collect per-file counts into language and category summaries."""
 
 from __future__ import annotations
 

@@ -6,7 +6,7 @@ Create a properly structured Python package that installs with UV and provides a
 
 ## Steps
 
-### 1.1 — Create `pyproject.toml`
+### 1.1  -  Create `pyproject.toml`
 
 This is the single source of truth for the package. Use the modern `[project]` table format (PEP 621).
 
@@ -49,12 +49,12 @@ testpaths = ["tests"]
 ```
 
 Key details:
-- Entry point: `tallyman.cli:main` — the `main()` function in `src/tallyman/cli.py`.
+- Entry point: `tallyman.cli:main`  -  the `main()` function in `src/tallyman/cli.py`.
 - Build backend: `hatchling` with explicit src layout.
 - Ruff configured for 120-char lines, single quotes, Python 3.14.
 - `rich` is listed explicitly even though `textual` depends on it, so we can pin/import it directly.
 
-### 1.2 — Create the `src/tallyman/` package directory
+### 1.2  -  Create the `src/tallyman/` package directory
 
 Create these files:
 
@@ -105,36 +105,36 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    print(f'Tallyman v0.1.0 — analyzing: {args.path}')
+    print(f'Tallyman v0.1.0  -  analyzing: {args.path}')
     print('(not yet implemented)')
     sys.exit(0)
 ```
 
 Stub entry point. Parses arguments, prints a placeholder. Replaced with real logic in later phases.
 
-### 1.3 — Create empty module stubs
+### 1.3  -  Create empty module stubs
 
 Create these files with just a module docstring so the package structure exists:
 
-- `src/tallyman/languages.py` — `"""Language registry."""`
-- `src/tallyman/walker.py` — `"""File and directory walking."""`
-- `src/tallyman/counter.py` — `"""Line counting and classification."""`
-- `src/tallyman/aggregator.py` — `"""Statistics aggregation."""`
-- `src/tallyman/config.py` — `"""Configuration file handling."""`
-- `src/tallyman/display.py` — `"""Terminal output formatting."""`
-- `src/tallyman/tui/__init__.py` — empty
-- `src/tallyman/tui/setup_app.py` — `"""Textual TUI for first-run setup."""`
+- `src/tallyman/languages.py`  -  `"""Language registry."""`
+- `src/tallyman/walker.py`  -  `"""File and directory walking."""`
+- `src/tallyman/counter.py`  -  `"""Line counting and classification."""`
+- `src/tallyman/aggregator.py`  -  `"""Statistics aggregation."""`
+- `src/tallyman/config.py`  -  `"""Configuration file handling."""`
+- `src/tallyman/display.py`  -  `"""Terminal output formatting."""`
+- `src/tallyman/tui/__init__.py`  -  empty
+- `src/tallyman/tui/setup_app.py`  -  `"""Textual TUI for first-run setup."""`
 
-### 1.4 — Create test directory
+### 1.4  -  Create test directory
 
-- `tests/__init__.py` — empty
-- `tests/test_counter.py` — empty, placeholder
-- `tests/test_languages.py` — empty, placeholder
-- `tests/test_walker.py` — empty, placeholder
-- `tests/test_aggregator.py` — empty, placeholder
-- `tests/test_config.py` — empty, placeholder
+- `tests/__init__.py`  -  empty
+- `tests/test_counter.py`  -  empty, placeholder
+- `tests/test_languages.py`  -  empty, placeholder
+- `tests/test_walker.py`  -  empty, placeholder
+- `tests/test_aggregator.py`  -  empty, placeholder
+- `tests/test_config.py`  -  empty, placeholder
 
-### 1.5 — Install in development mode
+### 1.5  -  Install in development mode
 
 ```bash
 uv venv

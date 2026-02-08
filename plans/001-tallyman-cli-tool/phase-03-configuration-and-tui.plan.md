@@ -23,11 +23,11 @@ directories = [
 
 That's it. Simple. The gitignore-based exclusions are always applied automatically and don't need to be duplicated here. This file only captures the *additional* user-chosen exclusions from the TUI.
 
-**Why not store includes?** — Inclusion is the default. We only need to record what the user explicitly turned off. This keeps the file short and easy to understand.
+**Why not store includes?**  -  Inclusion is the default. We only need to record what the user explicitly turned off. This keeps the file short and easy to understand.
 
 ## Steps
 
-### 3.1 — Config Reader/Writer (`config.py`)
+### 3.1  -  Config Reader/Writer (`config.py`)
 
 **Reading:**
 
@@ -78,7 +78,7 @@ def save_config(config_path: Path, excluded_dirs: set[str]) -> None:
 
 We write TOML by hand rather than pulling in `tomli-w` because the format is trivially simple.
 
-### 3.2 — Gitignore Loader (addition to `walker.py`)
+### 3.2  -  Gitignore Loader (addition to `walker.py`)
 
 Extract the gitignore-loading logic into a reusable function so the TUI can also use it:
 
@@ -108,7 +108,7 @@ def list_directories(root: Path, gitignore_spec: pathspec.PathSpec) -> list[tupl
     """
 ```
 
-### 3.3 — Textual TUI (`tui/setup_app.py`)
+### 3.3  -  Textual TUI (`tui/setup_app.py`)
 
 This is the main interactive component. It runs when:
 1. No `.tally-config.toml` exists (first run), OR
@@ -224,7 +224,7 @@ def action_toggle_node(self) -> None:
     if node is None or node.data is None:
         return
 
-    # Can't toggle gitignored dirs — they're always excluded
+    # Can't toggle gitignored dirs  -  they're always excluded
     if node.data['gitignored']:
         return
 
@@ -318,7 +318,7 @@ def run_setup(root: Path, gitignore_spec, existing_exclusions: set[str]) -> set[
     return result
 ```
 
-### 3.4 — Wire config and TUI into `cli.py`
+### 3.4  -  Wire config and TUI into `cli.py`
 
 Update the main flow:
 
@@ -365,7 +365,7 @@ def main() -> None:
         print(f'{stats.language.name}: {stats.total_lines:,} lines')
 ```
 
-### 3.5 — Tests
+### 3.5  -  Tests
 
 **`test_config.py`:**
 - `save_config` then `load_config` round-trips correctly.

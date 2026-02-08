@@ -4,7 +4,7 @@ A command-line tool that summarizes the size of a codebase by language, showing 
 
 ## Overview
 
-Point Tallyman at any project directory and get a quick breakdown of what's in it. It counts lines across languages — Python, Rust, JavaScript, CSS, HTML, Markdown, and more — and reports both the raw line count and the count excluding comments and blank lines. Results are grouped into categories (Code, Design, Docs) so you can see the shape of your project at a glance.
+Point Tallyman at any project directory and get a quick breakdown of what's in it. It counts lines across languages  -  Python, Rust, JavaScript, CSS, HTML, Markdown, and more  -  and reports both the raw line count and the count excluding comments and blank lines. Results are grouped into categories (Code, Design, Docs) so you can see the shape of your project at a glance.
 
 Tallyman automatically skips things that aren't your code: virtual environments, `node_modules`, build artifacts, `.git`, and generated or minified files. What you get back is a realistic picture of the code *you* wrote.
 
@@ -38,17 +38,17 @@ $ tallyman
 
 ## Features
 
-- **Dual line counts** — Total lines and lines excluding comments and blank lines, per language
-- **Category totals** — Aggregated summaries across Code, Design, and Docs
-- **Multi-language support** — Python, Rust, JavaScript, TypeScript, CSS, HTML, Markdown, and more
-- **Smart exclusions** — Automatically ignores:
+- **Dual line counts**  -  Total lines and lines excluding comments and blank lines, per language
+- **Category totals**  -  Aggregated summaries across Code, Design, and Docs
+- **Multi-language support**  -  Python, Rust, JavaScript, TypeScript, CSS, HTML, Markdown, and more
+- **Smart exclusions**  -  Automatically ignores:
   - Virtual environments (`venv/`, `.venv/`, `env/`)
   - Node modules (`node_modules/`)
   - Build artifacts and caches
   - Version control directories (`.git/`)
   - Generated and minified files
-- **Colorful terminal output** — Clean, readable formatting in the terminal
-- **Realistic metrics** — Only counts the code you wrote, not third-party dependencies
+- **Colorful terminal output**  -  Clean, readable formatting in the terminal
+- **Realistic metrics**  -  Only counts the code you wrote, not third-party dependencies
 
 ## Language Categories
 

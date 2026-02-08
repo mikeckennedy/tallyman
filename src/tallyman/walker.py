@@ -60,7 +60,7 @@ def load_gitignore(root: Path) -> GitIgnoreSpec:
     lines: list[str] = []
 
     if git_root is None:
-        # Not in a git repo — just check for a local .gitignore
+        # Not in a git repo  -  just check for a local .gitignore
         local_ignore = root / '.gitignore'
         if local_ignore.is_file():
             lines.extend(local_ignore.read_text(encoding='utf-8', errors='replace').splitlines())
