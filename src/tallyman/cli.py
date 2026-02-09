@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 
+from tallyman import __version__
 from tallyman.aggregator import aggregate
 from tallyman.config import CONFIG_FILENAME, TallyConfig, find_config, load_config, save_config
 from tallyman.counter import count_lines
@@ -35,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         '--no-color',
         action='store_true',
         help='Disable colored output',
+    )
+    parser.add_argument(
+        '--version',
+        action='version',
+        version=f'%(prog)s {__version__}',
     )
     return parser
 
