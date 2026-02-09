@@ -2,644 +2,122 @@
 alwaysApply: true
 ---
 
-# Command Book Project - Cursor AI Rules
+# Tallyman Project - Cursor AI Rules
 
-You are an AI assistant helping with the Command Book project, which includes a native macOS application and its marketing website/license backend. Follow these rules and patterns when working on this codebase.
+You are an AI assistant helping with the Tallyman project, a Python CLI tool that scans a project directory and reports codebase size by language.
+
+## Important Rules
+
+- **NEVER run commit or push git commands.** Only provide commit messages as text when asked.
 
 ## Project Overview
 
-This repository contains both the **Command Book macOS application** and its **marketing website/license backend**. Command Book is a native macOS app for managing long-running terminal commands through a dedicated, persistent interface.
+Tallyman scans a project directory and reports codebase size by language. It shows raw line counts and "effective" lines (excluding comments and blanks), grouped into categories: **Code**, **Design**, **Docs**, **Specs**, and **Data**.
 
-### The Problem It Solves
+### How It Works
 
-Developers frequently run long-running processes: web servers, background workers, database containers, log tails, monitoring tools. The current workflow is fragile:
-- Manually open terminal tabs
-- Navigate to the right directory
-- Remember and type commands
-- Rename tabs for clarity
-- Risk losing everything if the terminal crashes or is closed
+Linear pipeline - each stage feeds the next:
 
-### The Solution
-
-A macOS application that:
-- Saves and catalogs commands with metadata (name, working directory, command text)
-- Runs commands through the user's login shell (preserving environment, aliases, PATH)
-- Captures real-time output in a persistent buffer (100K line ring buffer per process)
-- Shows only running processes in the sidebar (clean, focused interface)
-- Provides a command palette (⌘K) for quick access to saved and running commands
-- Auto-restarts crashed processes with configurable delays
-- Persists everything to SQLite with optional sync support
+```
+cli.main()
+  → Load/create .tally-config.toml (or launch TUI)
+  → walker.walk_project()    yields (path, Language) tuples
+  → counter.count_lines()    returns FileCount per file
+  → aggregator.aggregate()   produces TallyResult
+  → display.display_results() renders to terminal
+```
 
 ### Repository Structure
 
 | Directory | Purpose |
 |-----------|---------|
-| `CommandBook/` | Native macOS app (Swift/SwiftUI) |
-| `commandbookapp_com/` | Marketing website & license API (Python/Quart) |
+| `src/tallyman/` | Main package source code |
+| `tests/` | pytest test suite |
 | `plans/` | Development plans and specifications |
 
----
-
-## macOS Application (`CommandBook/`)
-
-### Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| Platform | macOS 15.0+ (Sequoia) |
-| Language | Swift 6 |
-| UI Framework | SwiftUI |
-| State Management | @Observable macro |
-| Persistence | GRDB.swift (SQLite) |
-| Process Execution | Foundation.Process |
-| Bundle ID | com.talkpython.commandbook |
-
-### Project Structure
-
-```
-CommandBook/
-├── CommandBook/                    # Main app target
-│   ├── CommandBookApp.swift        # App entry point
-│   ├── ContentView.swift           # Main window layout
-│   ├── Models/                     # Data models
-│   │   ├── CommandConfig.swift     # Saved command structure (GRDB-enabled)
-│   │   ├── ProcessStatus.swift     # Status enum with color/display helpers
-│   │   ├── RunningProcess.swift    # Active process model (@Observable)
-│   │   ├── OutputLine.swift        # Output line structure
-│   │   └── ...
-│   ├── Managers/                   # Business logic
-│   │   ├── AppState.swift          # Central state container (@Observable)
-│   │   ├── DatabaseManager.swift   # SQLite operations via GRDB
-│   │   ├── ProcessManager.swift    # Process lifecycle management
-│   │   └── SettingsStore.swift     # Settings & storage location config
-│   ├── Views/                      # UI components
-│   │   ├── DesignSystem.swift      # Colors, fonts, reusable components
-│   │   ├── MainWindow/             # Sidebar, ProcessDetailView, etc.
-│   │   ├── CommandPalette/         # ⌘K palette
-│   │   ├── CommandEditor/          # Command editing sheet
-│   │   └── Settings/               # Settings tabs
-│   └── Utilities/                  # Helpers
-│       ├── ShellExecutor.swift     # Shell detection & process creation
-│       ├── RingBuffer.swift        # Circular buffer for output
-│       ├── ANSIParser.swift        # ANSI escape code parsing
-│       └── CommandIconResolver.swift  # Technology-specific icons
-├── CommandBookTests/               # Unit tests
-└── CommandBookUITests/             # UI tests
-```
-
-### Key Architecture Decisions
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Sidebar Content | Running processes only | Cleaner, focuses on active work |
-| Shell Execution | User's login shell with `-l -c` | Picks up PATH, aliases, environment |
-| Output Buffer | 100K line ring buffer | Balance memory vs history |
-| Termination | SIGINT → SIGTERM → SIGKILL | Full signal hierarchy |
-| Storage | SQLite via GRDB | Portable, sync-friendly |
-| Sandbox | Disabled | Needs process spawning + arbitrary dirs |
-
-### Key Files to Understand
-
-- `AppState.swift` - Central state container (@Observable)
-- `CommandConfig.swift` - Saved command model (GRDB)
-- `ProcessManager.swift` - Process lifecycle management
-- `DesignSystem.swift` - Colors, fonts, reusable UI components
-- `ANSIParser.swift` - ANSI escape code parsing for terminal colors
-
-### Process Signals
-
-| Method | Signal | Use Case |
-|--------|--------|----------|
-| `interruptProcess()` | SIGINT | Ctrl+C equivalent |
-| `sendEOF()` | SIGHUP | Ctrl+D equivalent |
-| `stopProcess()` | SIGTERM | Graceful termination |
-| `forceStopProcess()` | SIGKILL | Force kill |
-
-### Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| ⌘K | Open palette / Clear output |
-| ⌘N | New command |
-| ⌘. | Stop process |
-| ⌘⇧. | Force stop |
-| ⌘R | Restart process |
-| Ctrl+C | Send SIGINT |
-| Ctrl+D | Send EOF |
-
-### Building the macOS App
+## Quick Reference
 
 ```bash
-xcodebuild -project CommandBook/CommandBook.xcodeproj -scheme CommandBook -configuration Debug build
+# Install (dev mode)
+uv pip install -e ".[dev]"
+
+# Run
+tallyman                    # analyze current directory
+tallyman /path/to/project   # analyze specific path
+tallyman --setup            # re-run interactive TUI setup
+tallyman --no-color         # disable colors
+
+# Tests
+pytest                      # all tests
+pytest -v                   # verbose
+pytest tests/test_walker.py # single module
+
+# Lint & Format
+ruff check src/ tests/
+ruff format src/ tests/
 ```
 
-### Features Implemented (v1.0)
+## Module Map
 
-- **Command Management**: Full CRUD, ad-hoc commands, env vars, auto-restart, 40+ technology icons
-- **Process Management**: Full signal hierarchy, batch operations, graceful termination
-- **Output Display**: ANSI colors (8/bright/256/24-bit), clickable URLs, configurable buffer
-- **Sidebar**: Drag & drop, keyboard navigation, visual separators, live memory stats
-- **Command Palette**: Search, keyboard nav, context menus, running status indicators
-- **Settings**: Output buffer size, database export/import, shell detection
+| Module | Role |
+|--------|------|
+| `src/tallyman/cli.py` | Entry point. Arg parsing, orchestrates the pipeline |
+| `src/tallyman/languages.py` | Language registry (40+ languages). Frozen dataclasses with name, category, color, comment marker, extensions. `EXTENSION_MAP` for O(1) lookup |
+| `src/tallyman/walker.py` | Directory traversal. Respects gitignore + config exclusions. Detects spec dirs. Yields `(Path, Language)` |
+| `src/tallyman/counter.py` | Reads files, classifies lines as code/comment/blank. Returns `FileCount` |
+| `src/tallyman/aggregator.py` | Accumulates FileCount into LanguageStats, groups by category. Produces `TallyResult` |
+| `src/tallyman/display.py` | Rich-based rendering. Per-language stats, category totals, percentage bar |
+| `src/tallyman/config.py` | `.tally-config.toml` read/write. Searches up directory tree for nearest config |
+| `src/tallyman/tui/setup_app.py` | Textual App for interactive directory selection (exclude/spec marking) |
+| `src/tallyman/__main__.py` | Enables `python -m tallyman` |
+| `src/tallyman/__init__.py` | Package init, `__version__` |
 
----
+## Test Structure
 
-## Web Application (`commandbookapp_com/`)
+| Test File | Covers |
+|-----------|--------|
+| `tests/test_counter.py` | Line counting, encoding errors |
+| `tests/test_languages.py` | Language registry, extension map, `as_spec` |
+| `tests/test_walker.py` | Git root, gitignore, walking, spec detection |
+| `tests/test_aggregator.py` | Stats aggregation, categories, percentages |
+| `tests/test_config.py` | Config find/load/save, directory cleanup |
 
-The web app handles marketing, documentation, and license management for the macOS app:
+Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` create test Language instances.
 
-- Marketing pages (landing, FAQ, documentation)
-- License verification and activation API
-- Purchase and download flows
-- Documentation CMS
+## Environment & Config
 
-### Web App Tech Stack
-
-- **Web Framework**: Quart (async Flask-like)
-- **Database**: MongoDB with Motor async driver (no ORM)
-- **Data Models**: Python dataclasses with `to_dict()` / `from_dict()` conversion
-- **Template Engine**: Chameleon with PageTemplates (.pt files)
-- **CSS Framework**: Bulma CSS
-- **Python Version**: 3.14+
-- **JavaScript**: Vanilla JavaScript (minimal, for progressive enhancement)
-
----
+- **NO_COLOR** env var disables colored output (standard convention)
+- `.tally-config.toml` is gitignored and generated per-project
+- No other env vars needed
+- Entry point defined in `pyproject.toml`: `tallyman = "tallyman.cli:main"`
+- Auto-detected spec dirs: `specs/`, `plans/`, `specifications/`, `agents/` - detected even without config
+- Gitignore integration loads patterns from repo root `.gitignore`, `.git/info/exclude`, and intermediate `.gitignore` files
 
 ## History of Changes and Motivation
 
-We have been extensively documenting each major feature change in the /plans folder. The easiest way to get a quick orientation of that area is to use the file names and to look at the table of contents file we've created that summarizes each major plan. The table of contents/index file is called /plans/000-all-plans-table-of-contents.md
+We have been documenting each major feature change in the `/plans` folder. Plans are numbered by time (e.g., `001-tallyman-cli-tool/`, `002-specs-category/`). Consult existing plans when implementing related features.
 
-Any time you add a new plan, please update this document with the new file and a paragraph summarizing what it is about so you can use it as reference later. If you change a plan file, see if its entry needs updated there.
-
-We are keeping a changelog (see https://keepachangelog.com/en/1.1.0/) in the file change-log.md. Whenever you make significant changes to this codebase, please amend that to the unreleased section of the changelog. If you're working in a multi-phase style (phase one, phase two, phase three) with many details, when all of the phases are complete, please combine this into a single squashed summary of the work completed.
+`plans/planning-rules.md` has project planning guidelines. `plans/agents/` has AI agent prompts.
 
 ## Planning Large Features
 
-We like to plan large features (not small changes though). We do this by creating a markdown document in the /plans folder. They are numbered by time so keep this in mind for naming.
+We like to plan large features (not small changes though). We do this by creating a markdown document in the `/plans` folder. They are numbered by time so keep this in mind for naming.
 
 Remember to update the plan document when progress is made so we can understand and resume. When originally creating the plan, be sure to make note in the doc that we want to update it as changes are made.
 
-## Data Safety
-
-Never delete production database data. Ask the user if this is absolutely required.
-
-## Web Template Partial Pattern
-
-We use the Chameleon Partials package to render HTML templates. This looks like:
-
-```python
-@home_blueprint.get('/')
-@template('home/index.pt')  # <-- specify the template with the decorator
-async def index():
-    vm = HomeViewModel()
-    await vm.load_async()
-
-    # ... work of the function
-
-    return vm.to_dict()  # <-- return a dictionary which is passed to the template
-```
-
-Never write template code like this:
-
-```python
-await quart.render_template('home/index.pt', **vm.to_dict())
-```
-
-This uses Quart which assumes the template is a Jinja template and will not render correctly. You can do JSON responses like this however.
-
-## Web App Project Structure
-
-```
-commandbookapp_com/
-├── commandbookapp.py        # Main Quart app setup and entry point
-├── requirements.txt          # Compiled dependencies (via uv pip-compile)
-├── requirements.piptools     # Source dependencies
-│
-├── db/                       # Database layer
-│   ├── mongo_setup.py        # MongoDB connection (Motor async driver)
-│   ├── app_database.py       # Typed database wrapper with collection properties
-│   ├── license_record.py     # LicenseRecord dataclass
-│   └── activation_record.py  # ActivationRecord dataclass
-│
-├── services/                 # Business logic layer
-│   ├── license_service.py    # License operations (verify, activate, deactivate)
-│   ├── markdown_cms_service.py  # Markdown content management
-│   └── docs_search_service.py   # Documentation search
-│
-├── views/                    # Route handlers (blueprints)
-│   ├── home_views.py         # Home, FAQ, sitemap, robots.txt
-│   ├── license_views.py      # License API endpoints (JSON)
-│   ├── docs_views.py         # Documentation pages
-│   └── store_views.py        # Purchase/download flows
-│
-├── viewmodels/               # MVVM pattern - data preparation for templates
-│   ├── shared/
-│   │   └── base_viewmodel.py # Base class with common functionality
-│   ├── home/
-│   │   ├── home_viewmodel.py
-│   │   └── faq_viewmodel.py
-│   ├── docs/
-│   │   ├── docs_page_viewmodel.py
-│   │   └── docs_index_viewmodel.py
-│   └── store/
-│       ├── buy_viewmodel.py
-│       └── download_viewmodel.py
-│
-├── infrastructure/           # Cross-cutting concerns
-│   ├── app_logging.py        # Loguru-based structured logging
-│   ├── cache_service.py      # Disk cache management (diskcache)
-│   ├── durable_cache.py      # Resilient cache wrapper
-│   ├── webutils.py           # File hashing, URL formatting, markdown
-│   ├── validation.py         # Input validation (injection prevention)
-│   ├── request_logging_middleware.py
-│   └── app_secrets.py        # Secrets management
-│
-├── templates/                # Chameleon .pt templates
-│   ├── shared/
-│   │   └── _layout.pt        # Base layout (metal macros)
-│   ├── home/
-│   │   ├── index.pt
-│   │   └── faq.pt
-│   ├── docs/
-│   │   ├── index.pt
-│   │   └── page.pt
-│   └── store/
-│       ├── buy.pt
-│       └── download.pt
-│
-├── static/                   # Static assets
-│   ├── css/                  # Custom stylesheets
-│   ├── js/                   # JavaScript (docs search, etc.)
-│   ├── img/                  # Screenshots and images
-│   └── external/
-│       ├── bulma/            # Bulma CSS framework
-│       └── fontawesome-pro/  # Font Awesome icons
-│
-├── cms/docs/                 # Markdown documentation files
-│   ├── 01-getting-started.md
-│   ├── 02-commands.md
-│   └── ...
-│
-└── deployment/               # Deployment configurations
-    ├── docker-compose/
-    └── nginx/
-```
-
-## Code Style & Standards
-
-### Python Standards
-- **Line Length**: 120 characters max (per ruff.toml)
-- **Quotes**: Use single quotes for strings (per ruff.toml)
-- **Target Python**: 3.14+ features are allowed
-- **Linting**: Follow ruff configuration in ruff.toml
-- **Type Hints**: Use modern Python type hints (`Optional[str]`, `list[T]`, `dict[str, Any]`)
-- **Async/Await**: ALL database and I/O operations must be async
-- **Route Handlers**: Should be `async def` when they interact with database
-
-### HTML/Template Standards
-- **Template Engine**: Chameleon PageTemplates (.pt files)
-- **Layout Pattern**: Use `metal:use-macro` for layout inheritance
-- **Variable Interpolation**: `${variable_name}`
-- **Conditionals**: `tal:condition="expression"`
-- **Forms**: Traditional HTML forms with POST methods
-- **Bulma CSS**: Use Bulma classes for styling
-
-### JavaScript Standards (Minimal Usage)
-- **Progressive Enhancement**: Pages work without JavaScript
-- **ES6+ Syntax**: Use modern JavaScript features
-- **Async/Await**: Use async/await for any AJAX calls
-- **Vanilla JS**: No frameworks required
-- **Linting**: Run `npx eslint . --fix` after editing JS files (excluding `external/` folder)
-
-## MVVM Pattern
-
-This application follows the Model-View-ViewModel (MVVM) pattern:
-
-### Model Layer (`/db/`)
-- Python dataclasses representing database entities
-- Manual `to_dict()` / `from_dict()` conversion for MongoDB
-- No ORM - raw Motor queries
-
-Example:
-```python
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Optional
-
-@dataclass
-class LicenseRecord:
-    license_key_hash: str
-    gumroad_email: str
-    max_activations: int = 3
-    activations: list['ActivationRecord'] = None
-    created_date: Optional[datetime] = None
-
-    def __post_init__(self):
-        if self.activations is None:
-            self.activations = []
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            'license_key_hash': self.license_key_hash,
-            'gumroad_email': self.gumroad_email,
-            'max_activations': self.max_activations,
-            'activations': [a.to_dict() for a in self.activations],
-            'created_date': self.created_date,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> 'LicenseRecord':
-        return cls(
-            license_key_hash=data.get('license_key_hash', ''),
-            gumroad_email=data.get('gumroad_email', ''),
-            max_activations=data.get('max_activations', 3),
-            activations=[ActivationRecord.from_dict(a) for a in data.get('activations', [])],
-            created_date=data.get('created_date'),
-        )
-```
-
-### View Layer (`/templates/`)
-- Chameleon PageTemplates (.pt files)
-- Presentation logic only
-- Access viewmodel properties via `${property}`
-- No business logic in templates
-
-Example template structure:
-```html
-<div metal:use-macro="load: ../shared/_layout.pt">
-    <div metal:fill-slot="content">
-        <h1 class="title">${page_title}</h1>
-        <div tal:condition="error" class="notification is-danger">
-            ${error}
-        </div>
-        <!-- More template content -->
-    </div>
-</div>
-```
-
-### ViewModel Layer (`/viewmodels/`)
-- Inherits from `BaseViewModel`
-- Prepares data for templates
-- Coordinates with service layer
-- No direct database access (use services instead)
-
-Example viewmodel pattern:
-```python
-from viewmodels.shared.base_viewmodel import BaseViewModel
-
-class DocsPageViewModel(BaseViewModel):
-    def __init__(self):
-        super().__init__()
-        self.page_title = ''
-        self.content_html = ''
-        self.slug = ''
-
-    async def load_async(self):
-        await super().load_async()
-        # Load data from services
-        from services import markdown_cms_service
-        doc = await markdown_cms_service.get_doc_by_slug(self.slug)
-        if doc:
-            self.page_title = doc.title
-            self.content_html = doc.html_content
-```
-
-## Route Handlers (`/views/`)
-
-Route handlers connect URLs to viewmodels and render templates.
-
-### Pattern for GET Routes (Display Page)
-```python
-import quart
-from chameleon_partials import template
-
-blueprint = quart.Blueprint('docs', __name__, url_prefix='/docs')
-
-@blueprint.get('/<slug>')
-@template('docs/page.pt')
-async def docs_page(slug: str):
-    from viewmodels.docs.docs_page_viewmodel import DocsPageViewModel
-    vm = DocsPageViewModel()
-    vm.slug = slug
-    await vm.load_async()
-    return vm.to_dict()
-```
-
-### Pattern for JSON API Routes
-```python
-@blueprint.post('/verify')
-async def verify_license():
-    from services import license_service
-    data = await quart.request.get_json()
-
-    # Validate input
-    try:
-        license_key = validation.validate_license_key(data.get('license_key'))
-        machine_id = validation.validate_machine_id(data.get('machine_id'))
-    except validation.ValidationError as e:
-        return quart.jsonify({'success': False, 'error': str(e)}), 400
-
-    # Process request
-    result = await license_service.verify_license(license_key, machine_id)
-    return quart.jsonify(result)
-```
-
-## Service Layer (`/services/`)
-
-Services contain business logic and database operations. ViewModels call services, not database directly.
-
-### Service Pattern
-```python
-from typing import Optional
-from db.mongo_setup import get_db
-from db.license_record import LicenseRecord
-from loguru import logger
-
-def _ensure_str(value: Any, field_name: str) -> str:
-    """Defense-in-depth: prevent MongoDB injection"""
-    if not isinstance(value, str):
-        raise ValueError(f'{field_name} must be a string')
-    return value
-
-async def find_license_by_hash(key_hash: str) -> Optional[LicenseRecord]:
-    """Find a license by its key hash."""
-    key_hash = _ensure_str(key_hash, 'key_hash')
-    db = get_db()
-    doc = await db.licenses.find_one({'license_key_hash': key_hash})
-    return LicenseRecord.from_dict(doc) if doc else None
-
-async def add_activation(key_hash: str, activation: ActivationRecord) -> bool:
-    """Add an activation to a license."""
-    db = get_db()
-    result = await db.licenses.update_one(
-        {'license_key_hash': key_hash},
-        {'$push': {'activations': activation.to_dict()}},
-    )
-    logger.info(f'Added activation: key_hash={key_hash[:8]}...')
-    return result.modified_count > 0
-```
-
-## Database Operations
-
-### Motor Async Driver (No ORM)
-
-All database operations use Motor directly with manual document conversion:
-
-```python
-from db.mongo_setup import get_db
-
-async def get_all_docs() -> list[MyRecord]:
-    db = get_db()
-    cursor = db.my_collection.find({})
-    docs = await cursor.to_list(length=100)
-    return [MyRecord.from_dict(doc) for doc in docs]
-
-async def insert_doc(record: MyRecord) -> str:
-    db = get_db()
-    result = await db.my_collection.insert_one(record.to_dict())
-    return str(result.inserted_id)
-
-async def update_doc(record_id: str, updates: dict) -> bool:
-    db = get_db()
-    result = await db.my_collection.update_one(
-        {'_id': ObjectId(record_id)},
-        {'$set': updates}
-    )
-    return result.modified_count > 0
-```
-
-### Input Validation (Defense-in-Depth)
-
-Always validate inputs at service boundaries to prevent MongoDB injection:
-
-```python
-def _ensure_str(value: Any, field_name: str) -> str:
-    """Defense-in-depth: ensure value is actually a string"""
-    if not isinstance(value, str):
-        raise ValueError(f'{field_name} must be a string, got {type(value).__name__}')
-    return value
-```
-
-## Security Considerations
-
-### Input & API Security
-- Validate all inputs with regex patterns or Pydantic
-- Sanitize user inputs before database operations
-- Use `_ensure_str()` checks to prevent injection
-- Rate limit API endpoints
-
-### License System Security
-- Hash license keys before storage (never store plaintext)
-- Validate machine IDs format
-- Limit activations per license
-- Log all activation attempts
-
-## Template Development (`/templates/`)
-
-### Layout Template Pattern
-Base layout with slots for content:
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${page_title} - Command Book</title>
-    <link rel="stylesheet" href="/static/external/bulma/bulma.min.css">
-    <link rel="stylesheet" href="/static/css/site.css">
-</head>
-<body>
-    <nav class="navbar" role="navigation">
-        <!-- Navigation content -->
-    </nav>
-
-    <section class="section">
-        <div class="container">
-            <div metal:define-slot="content">
-                <!-- Page content goes here -->
-            </div>
-        </div>
-    </section>
-</body>
-</html>
-```
-
-### Chameleon Template Expressions
-- `${variable}` - Output variable (auto-escaped)
-- `tal:condition="expression"` - Conditional rendering
-- `tal:repeat="item items"` - Loop over collection
-- `tal:attributes="href item.url"` - Dynamic attributes
-- `metal:use-macro` - Include layout
-- `metal:fill-slot` - Fill layout slot
-
-## URL Structure
-
-```
-GET  /                          -> Landing page
-GET  /faq                       -> FAQ page
-GET  /docs                      -> Documentation index
-GET  /docs/<slug>               -> Documentation page
-GET  /buy                       -> Purchase page
-GET  /download                  -> Download page
-
-POST /licenses/verify           -> Verify license (JSON API)
-POST /licenses/activate         -> Activate license (JSON API)
-POST /licenses/deactivate       -> Deactivate license (JSON API)
-
-GET  /sitemap.xml               -> Sitemap
-GET  /robots.txt                -> Robots.txt
-GET  /status/health             -> Health check
-```
-
 ## Development Workflow
 
-### Local Development
-- Run with: `source venv/bin/activate && python commandbookapp_com/commandbookapp.py`
-- Or with uv: `uv run python commandbookapp_com/commandbookapp.py`
-- Connect to local MongoDB instance
-- Hot reload is enabled in development mode
+### Adding a New Language
 
-### Dependency Management
-Dependencies are managed using `uv` and pip-tools:
+Add a `Language(...)` instance to `languages.py` and include it in the `LANGUAGES` tuple. The `EXTENSION_MAP` is built automatically. Add tests in `test_languages.py`.
 
-1. **Add dependencies** to `requirements.piptools`
-2. **Compile and update** by running from the workspace root:
-   ```bash
-   pip-compile-update-prod
-   ```
-   This runs: `uv pip compile requirements.piptools --upgrade --output-file requirements.txt --exclude-newer "1 week"`
-3. **Install packages** (activate venv first):
-   ```bash
-   source venv/bin/activate && uv pip sync requirements.txt
-   ```
+### Adding a New Category
 
-**Important:** Always run these commands from the workspace root (`/commandbookapp/`), not from `commandbookapp_com/`.
-
-## Best Practices
-
-### Server-Side Rendering
-1. **MVVM Pattern**: Strictly follow Model-View-ViewModel separation
-2. **ViewModels**: Prepare all data for templates
-3. **Services**: Contain business logic and database operations
-4. **Templates**: Presentation only, no business logic
-5. **Progressive Enhancement**: Pages work without JavaScript
-
-### Database Operations
-1. **Async/Await**: Always use async for database operations
-2. **Service Layer**: ViewModels call services, not database directly
-3. **Input Validation**: Validate at API boundary AND service layer
-4. **Error Handling**: Handle database errors gracefully
-5. **Logging**: Log important operations with timing
+Update `aggregator.py` category ordering, `display.py` rendering, and ensure walker handles it correctly. The Specs category addition in `plans/002-specs-category/` is a reference implementation.
 
 ### Adding New Features
-1. **Model**: Create dataclass in `db/` if needed
-2. **Service**: Add business logic functions in `services/`
-3. **ViewModel**: Create ViewModel for page logic
-4. **Template**: Create Chameleon template
-5. **Routes**: Add routes in `views/`
-6. **Navigation**: Update layout template with links
 
-Remember: This is a server-side rendered application. The server does the heavy lifting, and the client displays HTML. JavaScript is only for enhancement, not core functionality.
-
-When changing JavaScript files (excluding the external folder) please run `npx eslint . --fix` to keep it consistent.
+1. Plan in `/plans` if it's a large feature
+2. Implement in the appropriate module(s)
+3. Add tests in `tests/`
+4. Run `pytest` and `ruff check src/ tests/` before considering it done

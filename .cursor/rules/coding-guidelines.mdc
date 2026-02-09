@@ -1,227 +1,91 @@
 ---
-description: Architecture, tech stack, and code style standards for Command Book Web App
-globs: commandbookapp_com/**
+description: Code style, patterns, and conventions for the Tallyman CLI tool
+globs: src/tallyman/**,tests/**
 alwaysApply: true
 ---
 
 ## Tech Stack
 
-- **Web Framework**: Quart (async Flask-like)
-- **Database**: MongoDB with Motor async driver (raw queries, no ORM)
-- **Data Models**: Python dataclasses with `to_dict()` / `from_dict()` conversion
-- **Template Engine**: Chameleon with PageTemplates (.pt files)
-- **CSS Framework**: Bulma CSS
-- **Python Version**: 3.14+
-- **JavaScript**: Vanilla JavaScript (minimal, for progressive enhancement)
+- **Python 3.14+** (uses match statements, dataclass slots, `tomllib`)
+- **textual** - TUI framework for first-run setup wizard
+- **rich** - colored terminal output
+- **pathspec** - gitignore pattern matching
+- **pytest** + **ruff** for dev tooling
+- **Build backend**: hatchling
 
-This is a server-side rendered application. The server does the heavy lifting, and the client displays HTML. JavaScript is only for enhancement, not core functionality.
+This is a CLI tool with no web server, no database, and no async code. It runs synchronously as a pipeline.
 
 ## Project Structure
 
 ```
-commandbookapp_com/
-├── commandbookapp.py        # App entry point, blueprint registration
-├── db/                      # Database layer
-│   ├── mongo_setup.py       # MongoDB connection (Motor)
-│   ├── app_database.py      # Typed database wrapper
-│   └── *_record.py          # Dataclass models
-├── services/                # Business logic
-├── views/                   # Route handlers (blueprints)
-├── viewmodels/              # Data preparation for templates
-│   └── shared/base_viewmodel.py
-├── infrastructure/          # Cross-cutting concerns
-├── templates/               # Chameleon .pt templates
-├── static/                  # CSS, JS, images
-└── cms/docs/                # Markdown documentation
-```
-
-## Web Template Pattern
-
-Use the Chameleon Partials package with the `@template` decorator:
-
-```python
-@home_blueprint.get('/')
-@template('home/index.pt')
-async def index():
-    vm = HomeViewModel()
-    await vm.load_async()
-    # ... work of the function
-    return vm.to_dict()
-```
-
-**Never use Quart's render_template** - it assumes Jinja templates and will not render correctly:
-
-```python
-# WRONG - do not use this pattern for HTML templates
-await quart.render_template('home/index.pt', **vm.to_dict())
-```
-
-## Database Patterns
-
-### Motor Async Driver (No ORM)
-
-All database operations use Motor directly with manual document conversion:
-
-```python
-from db.mongo_setup import get_db
-
-async def find_record_by_id(record_id: str) -> Optional[MyRecord]:
-    db = get_db()
-    doc = await db.my_collection.find_one({'_id': ObjectId(record_id)})
-    return MyRecord.from_dict(doc) if doc else None
-
-async def save_record(record: MyRecord) -> None:
-    db = get_db()
-    await db.my_collection.insert_one(record.to_dict())
-```
-
-### Dataclass Models
-
-Use Python dataclasses with serialization methods:
-
-```python
-@dataclass
-class MyRecord:
-    id: Optional[str] = None
-    name: str = ''
-    created_date: Optional[datetime] = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            'name': self.name,
-            'created_date': self.created_date,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> 'MyRecord':
-        return cls(
-            id=str(data.get('_id')) if data.get('_id') else None,
-            name=data.get('name', ''),
-            created_date=data.get('created_date'),
-        )
-```
-
-### Input Validation (Defense-in-Depth)
-
-Always validate inputs at service boundaries to prevent MongoDB injection:
-
-```python
-def _ensure_str(value: Any, field_name: str) -> str:
-    """Defense-in-depth: ensure value is actually a string"""
-    if not isinstance(value, str):
-        raise ValueError(f'{field_name} must be a string, got {type(value).__name__}')
-    return value
-
-async def find_by_key(key: str) -> Optional[MyRecord]:
-    key = _ensure_str(key, 'key')  # Prevent injection
-    db = get_db()
-    doc = await db.collection.find_one({'key': key})
-    return MyRecord.from_dict(doc) if doc else None
+src/tallyman/
+├── cli.py             # Entry point, arg parsing, orchestrates the pipeline
+├── languages.py       # Language registry (40+ languages), frozen dataclasses
+├── walker.py          # Directory traversal, gitignore + config exclusions
+├── counter.py         # Reads files, classifies lines as code/comment/blank
+├── aggregator.py      # Accumulates stats, groups by category
+├── display.py         # Rich-based terminal rendering
+├── config.py          # .tally-config.toml read/write
+├── tui/setup_app.py   # Textual App for interactive directory selection
+├── __main__.py        # Enables `python -m tallyman`
+└── __init__.py        # Package init, __version__
 ```
 
 ## Python Standards
 
 - **Line Length**: 120 characters max (per ruff.toml)
 - **Quotes**: Single quotes for strings (per ruff.toml)
-- **Linting**: Follow ruff configuration in ruff.toml
-- **Type Hints**: Use modern Python type hints (`Optional[str]`, `list[T]`, `dict[str, Any]`)
-- **Async/Await**: ALL database and I/O operations must be async
-- **Route Handlers**: Use `async def` when interacting with database
+- **Linting**: `ruff check src/ tests/` and `ruff format src/ tests/`
+- **Target Python**: 3.14+ features are allowed
+- **Type Hints**: Use modern Python type hints on all function signatures
+- **Imports**: `from __future__ import annotations` in every module
+- **Private Functions**: `_prefixed` for module-private functions
+- **Dataclasses**: Frozen for immutable values (Language), mutable for accumulators (LanguageStats)
+- **All dataclasses use `slots=True`** for efficiency
 
-## View Model Pattern
-
-View models prepare data for templates:
-
-```python
-class MyViewModel(BaseViewModel):
-    def __init__(self):
-        super().__init__()
-        self.items: list[dict] = []
-        self.page_title = 'My Page'
-
-    async def load_async(self):
-        await super().load_async()
-        # Load data from services/database
-        self.items = await my_service.get_items()
-```
-
-**Always call `load_async()` before `to_dict()`** - the base class enforces this.
-
-## HTML/Template Standards
-
-- **Template Engine**: Chameleon PageTemplates (.pt files)
-- **Layout Pattern**: Use `metal:use-macro` for layout inheritance
-- **Variable Interpolation**: `${variable_name}`
-- **Conditionals**: `tal:condition="show_item"`
-- **Forms**: Traditional HTML forms with POST methods
-- **Bulma CSS**: Use Bulma classes for styling
-
-## JavaScript Standards
-
-- **Progressive Enhancement**: Pages must work without JavaScript
-- **ES6+ Syntax**: Use modern JavaScript features
-- **Async/Await**: Use async/await for any AJAX calls
-- **Vanilla JS**: No frameworks required
-- **Linting**: Run `npx eslint . --fix` after editing JS files (excluding `external/` folder)
-
-## diskcache.Cache Boolean Evaluation
-
-**CRITICAL**: `diskcache.Cache` objects behave like dictionaries and evaluate to `False` when empty (no items cached yet). This causes `if cache:` checks to fail unexpectedly.
-
-**RULE**: Always use `is None` / `is not None` when checking cache object existence. Never use truthy/falsy evaluation.
-
-**Correct Pattern:**
-```python
-cache = cache_service.create_cache(cache_service.GENERAL_CACHE_NAME)
-if cache is not None:
-    value = cache.get(key)
-    if value is not None:
-        return value
-    cache.set(key, data, expire=ttl)
-```
-
-**WRONG Pattern (DO NOT USE):**
-```python
-cache = cache_service.create_cache(cache_service.GENERAL_CACHE_NAME)
-if cache:  # ❌ FAILS when cache is empty!
-    value = cache.get(key)
-    cache.set(key, data)
-```
-
-**Why this matters**: An empty cache evaluates to `False`, so the first time caching code runs, `if cache:` fails and `cache.set()` is never called. The cache remains permanently empty, defeating the entire caching mechanism.
-
-## Service Layer Pattern
-
-Business logic lives in service modules with async functions:
+## Core Data Structures
 
 ```python
-# services/my_service.py
-from db.mongo_setup import get_db
-from loguru import logger
-
-async def get_items() -> list[MyRecord]:
-    """Fetch all items from database"""
-    db = get_db()
-    cursor = db.items.find({})
-    docs = await cursor.to_list(length=100)
-    return [MyRecord.from_dict(doc) for doc in docs]
-
-async def create_item(item: MyRecord) -> str:
-    """Create a new item, return its ID"""
-    db = get_db()
-    result = await db.items.insert_one(item.to_dict())
-    logger.info(f'Created item: {result.inserted_id}')
-    return str(result.inserted_id)
+Language(frozen=True)    # name, category, color, single_line_comment, extensions
+FileCount                # total_lines, code_lines, comment_lines, blank_lines
+LanguageStats            # language, file_count, total_lines, code_lines, comment_lines, blank_lines
+CategoryStats            # name, total_lines, effective_lines, languages
+TallyResult              # by_language, by_category, grand_total_lines
+TallyConfig              # excluded_dirs: set[str], spec_dirs: set[str]
 ```
 
-## Logging
+## Key Design Patterns
 
-Use loguru for structured logging:
+### Language Objects Are Frozen and Identity Matters
 
-```python
-from loguru import logger
+`Markdown(docs)` and `Markdown(specs)` are distinct objects. Aggregation groups by Language object, not name alone.
 
-logger.info(f'Operation completed: elapsed={elapsed_ms:.0f}ms')
-logger.warning('Suspicious activity detected')
-logger.error(f'Database operation failed: {e}')
-```
+### Spec Variants via `as_spec()`
+
+When a docs-category file is found in a spec directory, `as_spec()` creates a new Language with `category='specs'`. Results are cached with `@cache`.
+
+### Comment Detection Is Single-Line Only
+
+Strips the line, checks `startswith(marker)`. Multi-line comments (`/* */`, `""" """`) are NOT detected.
+
+### Binary Detection
+
+Checks first 8KB for `\x00` byte.
+
+### Config Search Walks Up
+
+`find_config()` walks up from target dir to filesystem root looking for `.tally-config.toml`.
+
+## Test Conventions
+
+- Tests use `tmp_path` fixtures extensively
+- Helper functions like `_lang()` create test Language instances
+- Test files map to source modules: `test_walker.py` tests `walker.py`, etc.
+
+## When Adding a New Language
+
+Add a `Language(...)` instance to `languages.py` and include it in the `LANGUAGES` tuple. The `EXTENSION_MAP` is built automatically. Add tests in `test_languages.py`.
+
+## When Adding a New Category
+
+Update `aggregator.py` category ordering, `display.py` rendering, and ensure walker handles it correctly. The Specs category addition in `plans/002-specs-category/` is a reference implementation.
