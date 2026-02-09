@@ -183,4 +183,4 @@ Contributions are welcome! Whether it's adding support for a new language, impro
 
 ## License
 
-MIT License - Created by [Michael Kennedy](https://mastodon.social/@mkennedy)
+MIT License - Created by [Michael Kennedy](https://mkennedy.codes)
