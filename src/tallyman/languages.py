@@ -26,7 +26,7 @@ LANGUAGES: tuple[Language, ...] = (
     Language('TypeScript',   'code',   'dodger_blue',     '//', ('.ts', '.tsx')),
     Language('Java',         'code',   'orange3',         '//', ('.java',)),
     Language('C',            'code',   'steel_blue',      '//', ('.c',)),
-    Language('C Header',     'code',   'steel_blue',      '//', ('.h',)),
+    Language('C/C++ Header', 'code',   'steel_blue',      '//', ('.h',)),
     Language('C++',          'code',   'bright_blue',     '//', ('.cpp', '.hpp', '.cc', '.cxx')),
     Language('C#',           'code',   'green3',          '//', ('.cs',)),
     Language('Swift',        'code',   'orange_red1',     '//', ('.swift',)),
