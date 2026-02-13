@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## UNRELEASED
 
-## 2026.02.13
+## 0.3.0 - 2026-02-13
 
 ### Added
 - `--image` flag generates a PNG summary card saved to the Desktop (dark theme by default)
