@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/walker.py`, `tests/test_config.py`, `tests/test_walker.py`
 - Plan: `plans/004-nested-config-discovery/`
 
+### Fixed
+- Fixed `ColorParseError` crash when generating image for projects containing TypeScript files — `dodger_blue` is not a valid Rich color name; changed to `dodger_blue1`
+- Added defensive fallback in `_rich_color_to_rgb` so unrecognised color names degrade to grey instead of crashing the image export
+- Files: `src/tallyman/languages.py`, `src/tallyman/image.py`
+
 ## 0.3.1 - 2026-02-13
 
 ### Fixed

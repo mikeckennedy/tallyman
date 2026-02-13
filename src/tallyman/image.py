@@ -58,10 +58,17 @@ LIGHT_THEME = ImageTheme(
 
 
 def _rich_color_to_rgb(name: str) -> tuple[int, int, int]:
-    """Convert Rich color name to (r, g, b) for Pillow."""
-    from rich.color import Color
+    """Convert Rich color name to (r, g, b) for Pillow.
 
-    color = Color.parse(name)
+    Falls back to medium grey if the color name is not recognised by Rich,
+    so an invalid colour in the language registry never crashes the whole run.
+    """
+    from rich.color import Color, ColorParseError
+
+    try:
+        color = Color.parse(name)
+    except ColorParseError:
+        return (128, 128, 128)
     triplet = color.get_truecolor(None, True)
     return (triplet.red, triplet.green, triplet.blue)
 
@@ -225,12 +232,17 @@ def generate_image(
             draw.text((PADDING, y), legend, font=font_legend, fill=dim_rgb)
             y += LEGEND_LINE_HEIGHT
 
-    y += 8
-    # Attribution
-    attr_text = f'tallyman v{__version__}'
-    bbox = font_attr.getbbox(attr_text)
-    attr_x = IMAGE_WIDTH - PADDING - (bbox[2] - bbox[0])
-    draw.text((attr_x, y), attr_text, font=font_attr, fill=attr_rgb)
+    y += 28
+    # Attribution -- each line right-aligned to the bar's right edge
+    right_edge = IMAGE_WIDTH - PADDING
+    attr_line1 = f'tallyman v{__version__}'
+    attr_line2 = 'github.com/mikeckennedy/tallyman'
+
+    bbox1 = font_attr.getbbox(attr_line1)
+    draw.text((right_edge - (bbox1[2] - bbox1[0]), y), attr_line1, font=font_attr, fill=attr_rgb)
+    y += 18
+    bbox2 = font_attr.getbbox(attr_line2)
+    draw.text((right_edge - (bbox2[2] - bbox2[0]), y), attr_line2, font=font_attr, fill=attr_rgb)
 
     img.save(output_path, 'PNG')
 

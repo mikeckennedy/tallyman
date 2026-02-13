@@ -23,7 +23,7 @@ LANGUAGES: tuple[Language, ...] = (
     Language('Rust',         'code',   'dark_orange',     '//', ('.rs',)),
     Language('Go',           'code',   'cyan',            '//', ('.go',)),
     Language('JavaScript',   'code',   'bright_yellow',   '//', ('.js', '.jsx', '.mjs')),
-    Language('TypeScript',   'code',   'dodger_blue',     '//', ('.ts', '.tsx')),
+    Language('TypeScript',   'code',   'dodger_blue1',    '//', ('.ts', '.tsx')),
     Language('Java',         'code',   'orange3',         '//', ('.java',)),
     Language('C',            'code',   'steel_blue',      '//', ('.c',)),
     Language('C/C++ Header', 'code',   'steel_blue',      '//', ('.h',)),
