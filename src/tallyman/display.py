@@ -2,12 +2,33 @@
 
 from __future__ import annotations
 
+import sys
+
 from rich.console import Console
 from rich.text import Text
 
 from tallyman import __version__
 from tallyman.aggregator import CATEGORY_DISPLAY_NAMES, TallyResult, language_percentages
 from tallyman.languages import Language
+
+
+def _can_encode_unicode() -> bool:
+    """Check whether stdout can handle Unicode box-drawing characters.
+
+    On Windows with Git Bash (cp1252 encoding), the box-drawing and block
+    characters cause UnicodeEncodeError.  Fall back to ASCII in that case.
+    """
+    encoding = getattr(sys.stdout, 'encoding', None) or 'ascii'
+    try:
+        '─█'.encode(encoding)
+        return True
+    except UnicodeEncodeError, LookupError:
+        return False
+
+
+_USE_UNICODE = _can_encode_unicode()
+HORIZONTAL_RULE = '─' if _USE_UNICODE else '-'
+BLOCK_CHAR = '█' if _USE_UNICODE else '#'
 
 BAR_WIDTH = 60
 SMALL_LANGUAGE_THRESHOLD = 2.0  # Percentage below which languages are grouped as "Other"
@@ -35,7 +56,7 @@ SECTION_WIDTH = 58
 
 
 def _display_report_header(console: Console, directory: str) -> None:
-    console.print(f'[dim]{"─" * SECTION_WIDTH}[/dim]')
+    console.print(f'[dim]{HORIZONTAL_RULE * SECTION_WIDTH}[/dim]')
     console.print(f'[bold]Tallyman [dim]v{__version__} created by Michael Kennedy[/dim][/bold]')
     console.print(f'{directory}')
     console.print('')
@@ -47,7 +68,7 @@ def _language_header(name: str, color: str) -> str:
     remaining = SECTION_WIDTH - len(label)
     left = remaining // 2
     right = remaining - left
-    return f'[{color}]{"─" * left}{label}{"─" * right}[/{color}]'
+    return f'[{color}]{HORIZONTAL_RULE * left}{label}{HORIZONTAL_RULE * right}[/{color}]'
 
 
 def _language_display_names(result: TallyResult) -> dict[Language, str]:
@@ -86,7 +107,7 @@ def _display_languages(console: Console, result: TallyResult, display_names: dic
 
 
 def _display_separator(console: Console) -> None:
-    console.print(f'[dim]{"─" * SECTION_WIDTH}[/dim]')
+    console.print(f'[dim]{HORIZONTAL_RULE * SECTION_WIDTH}[/dim]')
 
 
 def _display_category_totals(console: Console, result: TallyResult) -> None:
@@ -143,7 +164,7 @@ def _display_percentage_bar(console: Console, result: TallyResult, display_names
             segment_width = max(1, round(pct / 100 * BAR_WIDTH))
             segment_width = min(segment_width, BAR_WIDTH - chars_used)
         if segment_width > 0:
-            bar.append('█' * segment_width, style=color)
+            bar.append(BLOCK_CHAR * segment_width, style=color)
             chars_used += segment_width
 
     console.print('  ', end='')
