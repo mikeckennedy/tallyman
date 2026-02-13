@@ -12,12 +12,15 @@ from tallyman.display import _language_display_names
 
 IMAGE_WIDTH = 1200
 PADDING = 60
-TITLE_FONT_SIZE = 32
-BODY_FONT_SIZE = 20
-LINE_HEIGHT = 32
+TITLE_FONT_SIZE = 36
+BODY_FONT_SIZE = 24
+LEGEND_FONT_SIZE = 16
+LINE_HEIGHT = 36
+LEGEND_LINE_HEIGHT = 24
 BAR_HEIGHT = 28
 BAR_GAP = 2  # px gap between bar segments (filled with background)
 SMALL_LANGUAGE_THRESHOLD = 2.0
+MAX_LEGEND_ITEMS = 5  # show at most this many languages; remainder grouped as "Other"
 
 
 @dataclass(slots=True)
@@ -86,6 +89,27 @@ def _load_font(size: int, bold: bool = False):
     return ImageFont.load_default()
 
 
+def _cap_legend(
+    main_langs: list[tuple],
+    display_names: dict,
+) -> list[str]:
+    """Build legend parts, capping at MAX_LEGEND_ITEMS and grouping the rest as 'Other'."""
+    legend_parts: list[str] = []
+    overflow_pct = 0.0
+    for i, (lang, pct) in enumerate(main_langs):
+        if i >= MAX_LEGEND_ITEMS:
+            overflow_pct += pct
+            continue
+        if lang is None:
+            overflow_pct += pct
+        else:
+            name = display_names.get(lang, lang.name)
+            legend_parts.append(f'{name} {pct:.0f}%')
+    if overflow_pct > 0:
+        legend_parts.append(f'Other {overflow_pct:.0f}%')
+    return legend_parts
+
+
 def generate_image(
     result: TallyResult,
     directory: str,
@@ -98,11 +122,11 @@ def generate_image(
     bg_rgb = _hex_to_rgb(theme.background)
     text_rgb = _hex_to_rgb(theme.text)
     dim_rgb = _hex_to_rgb(theme.text_dimmed)
-    bar_bg_rgb = _hex_to_rgb(theme.bar_background)
     attr_rgb = _hex_to_rgb(theme.attribution)
 
     font_title = _load_font(TITLE_FONT_SIZE, bold=True)
     font_body = _load_font(BODY_FONT_SIZE, bold=False)
+    font_legend = _load_font(LEGEND_FONT_SIZE, bold=False)
     font_attr = _load_font(14, bold=False)
 
     # Compute height: title + spacing + category lines + combined + bar + legend + attribution
@@ -119,26 +143,20 @@ def generate_image(
     if other_pct > 0:
         main_langs.append((None, other_pct))
 
-    # Pre-compute legend line count for height calculation
+    # Pre-compute legend parts (capped at MAX_LEGEND_ITEMS + Other)
     display_names = _language_display_names(result) if result.by_language else {}
-    legend_line_count = 0
+    legend_parts: list[str] = []
     if has_bar and main_langs:
-        legend_parts = []
-        for lang, pct in main_langs:
-            if lang is None:
-                legend_parts.append(f'Other {pct:.0f}%')
-            else:
-                name = display_names.get(lang, lang.name)
-                legend_parts.append(f'{name} {pct:.0f}%')
-        legend_line_count = _wrap_legend_line_count(legend_parts, font_body, IMAGE_WIDTH - PADDING * 2)
+        legend_parts = _cap_legend(main_langs, display_names)
 
     content_lines = 1 + num_category_lines + 1  # title, categories, attribution
     if not result.by_language:
         content_lines = 2  # title + "No recognized source files"
 
-    title_gap = 20  # extra space below the title
-    bar_section = (BAR_HEIGHT + 16 + legend_line_count * LINE_HEIGHT) if has_bar else 0
-    height = PADDING * 2 + content_lines * LINE_HEIGHT + title_gap + bar_section + LINE_HEIGHT
+    title_gap = 40  # extra space below the title
+    separator_gap = 14 if active_categories else 0  # space for the line above "Total:"
+    bar_section = (BAR_HEIGHT + 16 + LEGEND_LINE_HEIGHT) if has_bar else 0
+    height = PADDING * 2 + content_lines * LINE_HEIGHT + title_gap + separator_gap + bar_section + LINE_HEIGHT
     img = Image.new('RGB', (IMAGE_WIDTH, height), bg_rgb)
     draw = ImageDraw.Draw(img)
 
@@ -167,9 +185,14 @@ def generate_image(
             y += LINE_HEIGHT
 
         if active_categories:
+            # Separator line above total
+            y += 4
+            draw.line((PADDING, y, IMAGE_WIDTH - PADDING, y), fill=dim_rgb, width=1)
+            y += 10
+
             combined = sum(c.effective_lines for c in active_categories)
-            combined_line = 'Combined:'.ljust(max_name_len + 1) + f'{combined:>10,} lines'
-            draw.text((PADDING, y), combined_line, font=font_body, fill=text_rgb)
+            total_line = 'Total:'.ljust(max_name_len + 1) + f'{combined:>10,} lines'
+            draw.text((PADDING, y), total_line, font=font_body, fill=text_rgb)
             y += LINE_HEIGHT
 
         # Percentage bar -- square segments separated by background-color gaps
@@ -197,17 +220,10 @@ def generate_image(
                 x = seg_right
             y = bar_bottom + 12
 
-            # Legend -- wrapped across lines if too wide
-            legend_parts = []
-            for lang, pct in main_langs:
-                if lang is None:
-                    legend_parts.append(f'Other {pct:.0f}%')
-                else:
-                    name = display_names.get(lang, lang.name)
-                    legend_parts.append(f'{name} {pct:.0f}%')
-            max_legend_width = IMAGE_WIDTH - PADDING * 2
-            _draw_wrapped_legend(draw, legend_parts, font_body, PADDING, y, max_legend_width, LINE_HEIGHT, text_rgb)
-            y += legend_line_count * LINE_HEIGHT
+            # Legend -- single line, capped to MAX_LEGEND_ITEMS + Other
+            legend = '  \u00b7  '.join(legend_parts)
+            draw.text((PADDING, y), legend, font=font_legend, fill=dim_rgb)
+            y += LEGEND_LINE_HEIGHT
 
     y += 8
     # Attribution
