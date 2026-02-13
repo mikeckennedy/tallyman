@@ -16,12 +16,6 @@ Tallyman is a command-line tool that gives you a real picture of your codebase -
 uv tool install tallyman-metrics
 ```
 
-Or with pip:
-
-```bash
-pip install tallyman-metrics
-```
-
 Then just point it at a project:
 
 ```bash
