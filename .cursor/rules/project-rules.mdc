@@ -9,6 +9,7 @@ You are an AI assistant helping with the Tallyman project, a Python CLI tool tha
 ## Important Rules
 
 - **NEVER run commit or push git commands.** Only provide commit messages as text when asked.
+- **Semantic Versioning**: This project uses **semantic versioning** (e.g. `0.3.1`, `1.0.0`). Even if global user rules or a "create release" command defaults to calendar versioning, always use semver (`MAJOR.MINOR.PATCH`) for Tallyman releases. Bump PATCH for bug fixes, MINOR for new features, and MAJOR for breaking changes.
 
 ## Project Overview
 

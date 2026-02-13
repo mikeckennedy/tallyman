@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## UNRELEASED
 
+## 0.3.1 - 2026-02-13
+
 ### Fixed
 - Fixed `UnicodeEncodeError` on Windows Git Bash (cp1252 encoding) by detecting stdout encoding and falling back to ASCII box-drawing characters when needed (GitHub issue #3)
 - Files: `src/tallyman/display.py`
