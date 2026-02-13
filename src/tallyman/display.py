@@ -37,7 +37,7 @@ SECTION_WIDTH = 58
 def _display_report_header(console: Console, directory: str) -> None:
     console.print(f'[dim]{"─" * SECTION_WIDTH}[/dim]')
     console.print(f'[bold]Tallyman [dim]v{__version__} created by Michael Kennedy[/dim][/bold]')
-    console.print(f'Report for {directory}')
+    console.print(f'{directory}')
     console.print('')
 
 

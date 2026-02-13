@@ -38,6 +38,16 @@ def build_parser() -> argparse.ArgumentParser:
         help='Disable colored output',
     )
     parser.add_argument(
+        '--image',
+        action='store_true',
+        help='Generate a summary image on the Desktop',
+    )
+    parser.add_argument(
+        '--image-light',
+        action='store_true',
+        help='Generate a light-themed summary image on the Desktop',
+    )
+    parser.add_argument(
         '--version',
         action='version',
         version=f'%(prog)s {__version__}',
@@ -87,3 +97,19 @@ def main() -> None:
     # Display
     no_color = args.no_color or os.environ.get('NO_COLOR') is not None
     display_results(tally, directory=root.name, no_color=no_color)
+
+    # Image export (lazy import so Pillow only loaded when requested)
+    if args.image or args.image_light:
+        from tallyman.image import DARK_THEME, LIGHT_THEME, generate_image, resolve_image_path
+
+        theme = LIGHT_THEME if args.image_light else DARK_THEME
+        desktop = (Path.home() / 'Desktop').is_dir()
+        output_path = resolve_image_path(root.name, desktop_preferred=True)
+        if not desktop:
+            print('Desktop not found; saving to current directory.', file=sys.stderr)
+        generate_image(tally, root.name, output_path, theme)
+        if output_path.is_relative_to(Path.home()):
+            display_path = '~/' + str(output_path.relative_to(Path.home())).replace('\\', '/')
+        else:
+            display_path = str(output_path)
+        print(f'Image saved to {display_path}')
