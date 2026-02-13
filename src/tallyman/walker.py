@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pathspec
 
+from tallyman.config import CONFIG_FILENAME, load_config
 from tallyman.languages import Language, as_spec, identify_language
 
 SPEC_DIR_NAMES: frozenset[str] = frozenset({'specs', 'specifications', 'plans', 'agents'})
@@ -116,12 +117,26 @@ def walk_project(
     if gitignore_spec is None:
         gitignore_spec = load_gitignore(root)
 
+    working_excluded = set(excluded_dirs)
     active_spec_roots: set[str] = set(spec_dirs) if spec_dirs else set()
 
     for dirpath_str, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
         dirpath = Path(dirpath_str)
         rel_dir = dirpath.relative_to(root)
         rel_dir_str = str(rel_dir) if rel_dir.parts else ''
+
+        # Discover nested config files in subdirectories
+        if rel_dir_str:
+            config_file = dirpath / CONFIG_FILENAME
+            if config_file.is_file():
+                try:
+                    nested_config = load_config(config_file)
+                    for excl in nested_config.excluded_dirs:
+                        working_excluded.add(f'{rel_dir_str}/{excl}')
+                    for spec in nested_config.spec_dirs:
+                        active_spec_roots.add(f'{rel_dir_str}/{spec}')
+                except Exception:
+                    pass  # Skip malformed configs in subdirectories
 
         # Prune excluded and gitignored subdirectories in-place
         filtered_dirs: list[str] = []
@@ -131,7 +146,7 @@ def walk_project(
                 continue
             child_rel = f'{rel_dir_str}/{d}' if rel_dir_str else d
             # Check config exclusions
-            if child_rel in excluded_dirs:
+            if child_rel in working_excluded:
                 continue
             # Check gitignore (append / to match directory patterns)
             if gitignore_spec.match_file(child_rel + '/'):

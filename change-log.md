@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## UNRELEASED
 
+### Added
+- Nested config discovery: when running setup on a parent directory, `.tally-config.toml` files found in subprojects are discovered and their exclusions/spec designations are pre-applied in the TUI (union merge). The walker also respects nested configs during analysis.
+- Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/walker.py`, `tests/test_config.py`, `tests/test_walker.py`
+- Plan: `plans/004-nested-config-discovery/`
+
 ## 0.3.1 - 2026-02-13
 
 ### Fixed

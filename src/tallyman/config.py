@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,6 +41,41 @@ def load_config(config_path: Path) -> TallyConfig:
     excluded = set(data.get('exclude', {}).get('directories', []))
     specs = set(data.get('specs', {}).get('directories', []))
     return TallyConfig(excluded_dirs=excluded, spec_dirs=specs)
+
+
+def discover_nested_configs(root: Path) -> TallyConfig:
+    """Scan subdirectories for .tally-config.toml and merge their settings.
+
+    Paths from nested configs are translated to be relative to *root*.
+    Only non-root configs are considered (the root config is loaded separately).
+    Hidden directories are skipped for performance.
+    """
+    merged_excluded: set[str] = set()
+    merged_specs: set[str] = set()
+
+    for dirpath_str, dirnames, _filenames in os.walk(root, topdown=True, followlinks=False):
+        # Skip hidden directories (e.g. .git, .venv)
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith('.'))
+
+        dirpath = Path(dirpath_str)
+        rel_dir = dirpath.relative_to(root)
+        rel_dir_str = str(rel_dir) if rel_dir.parts else ''
+
+        if not rel_dir_str:
+            continue
+
+        config_file = dirpath / CONFIG_FILENAME
+        if config_file.is_file():
+            try:
+                nested = load_config(config_file)
+                for excl in nested.excluded_dirs:
+                    merged_excluded.add(f'{rel_dir_str}/{excl}')
+                for spec in nested.spec_dirs:
+                    merged_specs.add(f'{rel_dir_str}/{spec}')
+            except Exception:
+                pass  # Skip malformed configs
+
+    return TallyConfig(excluded_dirs=merged_excluded, spec_dirs=merged_specs)
 
 
 def save_config(config_path: Path, excluded_dirs: set[str], spec_dirs: set[str]) -> None:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from tallyman import __version__
 from tallyman.aggregator import aggregate
-from tallyman.config import CONFIG_FILENAME, TallyConfig, find_config, load_config, save_config
+from tallyman.config import CONFIG_FILENAME, TallyConfig, discover_nested_configs, find_config, load_config, save_config
 from tallyman.counter import count_lines
 from tallyman.display import display_results
 from tallyman.tui.setup_app import run_setup
@@ -78,7 +78,11 @@ def main() -> None:
     else:
         # First run or --setup: launch TUI
         existing = load_config(existing_config) if existing_config else TallyConfig()
-        result = run_setup(root, gitignore_spec, existing.excluded_dirs, existing.spec_dirs)
+        # Discover nested configs and pre-apply their exclusions/specs
+        nested = discover_nested_configs(root)
+        merged_excluded = existing.excluded_dirs | nested.excluded_dirs
+        merged_specs = existing.spec_dirs | nested.spec_dirs
+        result = run_setup(root, gitignore_spec, merged_excluded, merged_specs)
         if result is None:
             print('Setup cancelled.')
             sys.exit(0)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tallyman.config import save_config
 from tallyman.walker import _is_binary, find_git_root, load_gitignore, walk_project
 
 
@@ -240,3 +241,116 @@ class TestWalkProjectSpecs:
 
         results = list(walk_project(tmp_path, {'specs'}))
         assert len(results) == 0
+
+
+class TestWalkProjectNestedConfigs:
+    """Tests for discovering .tally-config.toml in subdirectories."""
+
+    def test_nested_config_exclusions_applied(self, tmp_path: Path):
+        """A nested config's excluded_dirs are applied within its subtree."""
+        project = tmp_path / 'project1'
+        project.mkdir()
+        (project / 'app.py').write_text('x = 1\n')
+        vendor = project / 'vendor'
+        vendor.mkdir()
+        (vendor / 'lib.py').write_text('y = 2\n')
+
+        # project1/.tally-config.toml excludes vendor
+        save_config(project / '.tally-config.toml', {'vendor'}, set())
+
+        results = list(walk_project(tmp_path, set()))
+        paths = {r[0].name for r in results}
+        assert 'app.py' in paths
+        assert 'lib.py' not in paths
+
+    def test_nested_config_spec_dirs_applied(self, tmp_path: Path):
+        """A nested config's spec_dirs mark docs files as specs."""
+        project = tmp_path / 'project1'
+        project.mkdir()
+        docs = project / 'docs'
+        docs.mkdir()
+        (docs / 'design.md').write_text('# Design\n')
+        (project / 'README.md').write_text('# Readme\n')
+
+        # project1/.tally-config.toml designates docs as spec dir
+        save_config(project / '.tally-config.toml', set(), {'docs'})
+
+        results = list(walk_project(tmp_path, set()))
+        design_lang = next(lang for path, lang in results if path.name == 'design.md')
+        readme_lang = next(lang for path, lang in results if path.name == 'README.md')
+
+        assert design_lang.category == 'specs'
+        assert readme_lang.category == 'docs'
+
+    def test_root_config_not_reloaded(self, tmp_path: Path):
+        """A config at the walk root is not re-read (already loaded by cli)."""
+        (tmp_path / 'app.py').write_text('x = 1\n')
+        vendor = tmp_path / 'vendor'
+        vendor.mkdir()
+        (vendor / 'lib.py').write_text('y = 2\n')
+
+        # Root config excludes vendor, but we pass empty excluded_dirs
+        # to simulate cli having already loaded the config separately.
+        # The walker should NOT re-read the root config.
+        save_config(tmp_path / '.tally-config.toml', {'vendor'}, set())
+
+        results = list(walk_project(tmp_path, set()))
+        paths = {r[0].name for r in results}
+        # vendor/lib.py should appear because root config is not re-loaded
+        assert 'lib.py' in paths
+
+    def test_top_level_exclusion_preserved(self, tmp_path: Path):
+        """Top-level exclusions persist even when nested config does not exclude."""
+        project = tmp_path / 'project1'
+        project.mkdir()
+        (project / 'app.py').write_text('x = 1\n')
+        vendor = project / 'vendor'
+        vendor.mkdir()
+        (vendor / 'lib.py').write_text('y = 2\n')
+
+        # Nested config does NOT exclude vendor
+        save_config(project / '.tally-config.toml', set(), set())
+
+        # But top-level passes project1/vendor as excluded
+        results = list(walk_project(tmp_path, {'project1/vendor'}))
+        paths = {r[0].name for r in results}
+        assert 'app.py' in paths
+        assert 'lib.py' not in paths
+
+    def test_deeply_nested_config(self, tmp_path: Path):
+        """Config inside folder/subfolder/project3/ is discovered and applied."""
+        project = tmp_path / 'folder' / 'subfolder' / 'project3'
+        project.mkdir(parents=True)
+        (project / 'main.py').write_text('x = 1\n')
+        generated = project / 'generated'
+        generated.mkdir()
+        (generated / 'output.py').write_text('y = 2\n')
+
+        save_config(project / '.tally-config.toml', {'generated'}, set())
+
+        results = list(walk_project(tmp_path, set()))
+        paths = {r[0].name for r in results}
+        assert 'main.py' in paths
+        assert 'output.py' not in paths
+
+    def test_union_of_exclusions(self, tmp_path: Path):
+        """Both top-level and nested exclusions apply simultaneously."""
+        project = tmp_path / 'project1'
+        project.mkdir()
+        (project / 'app.py').write_text('x = 1\n')
+        vendor = project / 'vendor'
+        vendor.mkdir()
+        (vendor / 'v.py').write_text('v = 1\n')
+        cache = project / 'cache'
+        cache.mkdir()
+        (cache / 'c.py').write_text('c = 1\n')
+
+        # Nested config excludes vendor
+        save_config(project / '.tally-config.toml', {'vendor'}, set())
+
+        # Top-level excludes cache
+        results = list(walk_project(tmp_path, {'project1/cache'}))
+        paths = {r[0].name for r in results}
+        assert 'app.py' in paths
+        assert 'v.py' not in paths  # excluded by nested config
+        assert 'c.py' not in paths  # excluded by top-level
