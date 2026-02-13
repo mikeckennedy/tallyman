@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## UNRELEASED
 
+### Added
+- `--image` flag generates a PNG summary card saved to the Desktop (dark theme by default)
+- `--image-light` flag generates the same card with a light theme
+- Image includes category totals, a colored percentage bar, and a language legend
+- Output filename is the URL-slugified project name; numeric suffix added if file already exists
+- Bundled JetBrains Mono font for consistent cross-platform rendering
+- New dependency: Pillow >= 10.0.0
+- Files: `src/tallyman/image.py`, `src/tallyman/fonts/`, `tests/test_image.py`
+- Plan: `plans/003-image-export/`
+
 ## 0.2.1 - 2026-02-08
 
 Initial release.
