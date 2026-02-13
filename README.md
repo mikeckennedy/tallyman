@@ -29,6 +29,8 @@ tallyman                    # analyze current directory
 tallyman /path/to/project   # analyze a specific path
 tallyman --setup            # re-run the interactive setup
 tallyman --no-color         # disable colored output
+tallyman --image            # save a PNG summary card to Desktop
+tallyman --image-light      # light-themed PNG variant
 ```
 
 ## Why Tallyman?
@@ -56,9 +58,25 @@ A few things that set it apart:
 - **Beautiful output** - Colored, formatted results with a language composition bar, powered by [Rich](https://github.com/Textualize/rich)
 - **Realistic metrics** - Only counts files *you* wrote, not third-party dependencies or generated code
 - **Persistent config** - Your setup choices are saved to `.tally-config.toml` and reused on every run
+- **Image export** - Generate a shareable PNG summary card with `--image` (dark) or `--image-light` (light theme)
 - **Interactive TUI setup** - Visual directory tree for configuring exclusions and spec directories, powered by [Textual](https://github.com/Textualize/textual)
 
 ![Tallyman interactive TUI setup showing directory tree with include/exclude toggles and spec directory markers](https://mkennedy-shared.nyc3.digitaloceanspaces.com/github/tallyman-setup.webp)
+
+## Image Export
+
+Want to share your project's code stats in a README, a slide deck, or a social post? Use `--image` to generate a clean PNG summary card:
+
+```bash
+tallyman --image              # dark theme (default)
+tallyman --image-light        # light theme
+```
+
+The image is saved to your Desktop (or the current directory if no Desktop is found) with a filename based on the project name. Here's an example from the [CommandBook macOS app](https://commandbookapp.com):
+
+![Tallyman image export showing code stats for the CommandBook app - category breakdown with colored language composition bar](https://mkennedy-shared.nyc3.digitaloceanspaces.com/github/commandbookapp-code-stats-example.png)
+
+The card includes category totals with effective line counts, a colored language composition bar, and a compact legend - everything you need to show the shape of your project at a glance.
 
 ## Supported Languages
 

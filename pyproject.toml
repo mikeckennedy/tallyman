@@ -46,14 +46,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/tallyman"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/tallyman/fonts/JetBrainsMono-Regular.ttf" = "tallyman/fonts/JetBrainsMono-Regular.ttf"
-"src/tallyman/fonts/JetBrainsMono-Bold.ttf" = "tallyman/fonts/JetBrainsMono-Bold.ttf"
-
-[tool.hatch.build.targets.sdist.force-include]
-"src/tallyman/fonts/JetBrainsMono-Regular.ttf" = "tallyman/fonts/JetBrainsMono-Regular.ttf"
-"src/tallyman/fonts/JetBrainsMono-Bold.ttf" = "tallyman/fonts/JetBrainsMono-Bold.ttf"
-
 [tool.ruff]
 line-length = 120
 target-version = "py314"
