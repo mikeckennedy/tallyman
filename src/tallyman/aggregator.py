@@ -111,11 +111,30 @@ def aggregate(file_results: Iterable[tuple[Language, FileCount]]) -> TallyResult
     )
 
 
-def language_percentages(result: TallyResult) -> list[tuple[Language, float]]:
+def language_percentages(result: TallyResult, *, with_spaces: bool = False) -> list[tuple[Language, float]]:
     """Return [(Language, percentage), ...] sorted by percentage descending.
 
-    Percentage is of total lines across all languages.
+    By default uses effective lines (excluding comments and blanks).
+    When *with_spaces* is True, uses total lines instead.
     """
-    if result.grand_total_lines == 0:
+    if not result.by_language:
         return []
-    return [(s.language, s.total_lines / result.grand_total_lines * 100) for s in result.by_language]
+
+    def _effective(s: LanguageStats) -> int:
+        if s.language.single_line_comment is not None:
+            return s.non_blank_non_comment
+        return s.non_blank
+
+    if with_spaces:
+        total = result.grand_total_lines
+        if total == 0:
+            return []
+        pairs = [(s.language, s.total_lines / total * 100) for s in result.by_language]
+    else:
+        grand_effective = sum(_effective(s) for s in result.by_language)
+        if grand_effective == 0:
+            return []
+        pairs = [(s.language, _effective(s) / grand_effective * 100) for s in result.by_language]
+
+    pairs.sort(key=lambda p: p[1], reverse=True)
+    return pairs

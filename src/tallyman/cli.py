@@ -48,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
         help='Generate a light-themed summary image on the Desktop',
     )
     parser.add_argument(
+        '--with-spaces',
+        action='store_true',
+        help='Use total lines (including comments and blanks) for summary totals',
+    )
+    parser.add_argument(
         '--version',
         action='version',
         version=f'%(prog)s {__version__}',
@@ -100,7 +105,7 @@ def main() -> None:
 
     # Display
     no_color = args.no_color or os.environ.get('NO_COLOR') is not None
-    display_results(tally, directory=root.name, no_color=no_color)
+    display_results(tally, directory=root.name, no_color=no_color, with_spaces=args.with_spaces)
 
     # Image export (lazy import so Pillow only loaded when requested)
     if args.image or args.image_light:
@@ -111,7 +116,7 @@ def main() -> None:
         output_path = resolve_image_path(root.name, desktop_preferred=True)
         if not desktop:
             print('Desktop not found; saving to current directory.', file=sys.stderr)
-        generate_image(tally, root.name, output_path, theme)
+        generate_image(tally, root.name, output_path, theme, with_spaces=args.with_spaces)
         if output_path.is_relative_to(Path.home()):
             display_path = '~/' + str(output_path.relative_to(Path.home())).replace('\\', '/')
         else:

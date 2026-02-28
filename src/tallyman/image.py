@@ -122,6 +122,8 @@ def generate_image(
     directory: str,
     output_path: Path,
     theme: ImageTheme,
+    *,
+    with_spaces: bool = False,
 ) -> None:
     """Render tallyman summary to a PNG file. Pillow imported lazily on first use."""
     from PIL import Image, ImageDraw
@@ -139,12 +141,12 @@ def generate_image(
     # Compute height: title + spacing + category lines + combined + bar + legend + attribution
     active_categories = sorted(
         (c for c in result.by_category if c.total_lines > 0),
-        key=lambda c: c.effective_lines,
+        key=lambda c: c.total_lines if with_spaces else c.effective_lines,
         reverse=True,
     )
     num_category_lines = len(active_categories) + 1 if active_categories else 0  # +1 for Combined
     has_bar = result.grand_total_lines > 0
-    percentages = language_percentages(result) if has_bar else []
+    percentages = language_percentages(result, with_spaces=with_spaces) if has_bar else []
     main_langs = [(lang, pct) for lang, pct in percentages if pct >= SMALL_LANGUAGE_THRESHOLD]
     other_pct = sum(pct for _, pct in percentages if pct < SMALL_LANGUAGE_THRESHOLD)
     if other_pct > 0:
@@ -187,7 +189,8 @@ def generate_image(
                 lang_list = ' + '.join(cat.languages)
             else:
                 lang_list = ' + '.join(cat.languages[:3]) + ', etc'
-            line = f'{cat.name}:'.ljust(max_name_len + 1) + f'{cat.effective_lines:>10,} lines ({lang_list})'
+            lines = cat.total_lines if with_spaces else cat.effective_lines
+            line = f'{cat.name}:'.ljust(max_name_len + 1) + f'{lines:>10,} lines ({lang_list})'
             draw.text((PADDING, y), line, font=font_body, fill=text_rgb)
             y += LINE_HEIGHT
 
@@ -197,7 +200,7 @@ def generate_image(
             draw.line((PADDING, y, IMAGE_WIDTH - PADDING, y), fill=dim_rgb, width=1)
             y += 10
 
-            combined = sum(c.effective_lines for c in active_categories)
+            combined = sum(c.total_lines if with_spaces else c.effective_lines for c in active_categories)
             total_line = 'Total:'.ljust(max_name_len + 1) + f'{combined:>10,} lines'
             draw.text((PADDING, y), total_line, font=font_body, fill=text_rgb)
             y += LINE_HEIGHT

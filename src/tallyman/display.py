@@ -34,7 +34,9 @@ BAR_WIDTH = 60
 SMALL_LANGUAGE_THRESHOLD = 2.0  # Percentage below which languages are grouped as "Other"
 
 
-def display_results(result: TallyResult, directory: str, no_color: bool = False) -> None:
+def display_results(
+    result: TallyResult, directory: str, no_color: bool = False, with_spaces: bool = False
+) -> None:
     """Render the full tallyman output to the terminal."""
     console = Console(no_color=no_color, highlight=False)
 
@@ -48,8 +50,8 @@ def display_results(result: TallyResult, directory: str, no_color: bool = False)
 
     _display_languages(console, result, display_names)
     _display_separator(console)
-    _display_category_totals(console, result)
-    _display_percentage_bar(console, result, display_names)
+    _display_category_totals(console, result, with_spaces=with_spaces)
+    _display_percentage_bar(console, result, display_names, with_spaces=with_spaces)
 
 
 SECTION_WIDTH = 58
@@ -110,10 +112,10 @@ def _display_separator(console: Console) -> None:
     console.print(f'[dim]{HORIZONTAL_RULE * SECTION_WIDTH}[/dim]')
 
 
-def _display_category_totals(console: Console, result: TallyResult) -> None:
+def _display_category_totals(console: Console, result: TallyResult, *, with_spaces: bool = False) -> None:
     active_categories = sorted(
         (c for c in result.by_category if c.total_lines > 0),
-        key=lambda c: c.effective_lines,
+        key=lambda c: c.total_lines if with_spaces else c.effective_lines,
         reverse=True,
     )
     if not active_categories:
@@ -130,20 +132,23 @@ def _display_category_totals(console: Console, result: TallyResult) -> None:
         else:
             lang_list = ' + '.join(cat.languages[:3]) + ', etc'
 
+        lines = cat.total_lines if with_spaces else cat.effective_lines
         padded_name = f'{cat.name}:'
-        console.print(f'  {padded_name:<{max_name_len + 1}} {cat.effective_lines:>10,} lines ({lang_list})')
+        console.print(f'  {padded_name:<{max_name_len + 1}} {lines:>10,} lines ({lang_list})')
 
-    combined = sum(c.effective_lines for c in active_categories)
+    combined = sum(c.total_lines if with_spaces else c.effective_lines for c in active_categories)
     console.print(f'  [bold]{"Combined:":<{max_name_len + 1}} {combined:>10,} lines[/bold]')
 
 
-def _display_percentage_bar(console: Console, result: TallyResult, display_names: dict[Language, str]) -> None:
+def _display_percentage_bar(
+    console: Console, result: TallyResult, display_names: dict[Language, str], *, with_spaces: bool = False
+) -> None:
     if result.grand_total_lines == 0:
         return
 
     console.print()
 
-    percentages = language_percentages(result)
+    percentages = language_percentages(result, with_spaces=with_spaces)
 
     # Group small languages into "Other"
     main_langs: list[tuple[Language | None, float]] = [

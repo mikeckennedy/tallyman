@@ -131,7 +131,7 @@ class TestLanguagePercentages:
     def test_single_language_is_100_percent(self):
         py = _lang('Python')
         tally = TallyResult(
-            by_language=[LanguageStats(language=py, total_lines=100)],
+            by_language=[LanguageStats(language=py, total_lines=100, code_lines=80, blank_lines=10)],
             by_category=[],
             grand_total_lines=100,
         )
@@ -145,8 +145,8 @@ class TestLanguagePercentages:
         rs = _lang('Rust')
         tally = TallyResult(
             by_language=[
-                LanguageStats(language=py, total_lines=75),
-                LanguageStats(language=rs, total_lines=25),
+                LanguageStats(language=py, total_lines=75, code_lines=60, blank_lines=5),
+                LanguageStats(language=rs, total_lines=25, code_lines=20, blank_lines=2),
             ],
             by_category=[],
             grand_total_lines=100,
@@ -154,6 +154,23 @@ class TestLanguagePercentages:
         pcts = language_percentages(tally)
         total = sum(p[1] for p in pcts)
         assert abs(total - 100.0) < 0.01
+
+    def test_with_spaces_uses_total_lines(self):
+        py = _lang('Python')
+        rs = _lang('Rust')
+        tally = TallyResult(
+            by_language=[
+                LanguageStats(language=py, total_lines=75, code_lines=30, blank_lines=20),
+                LanguageStats(language=rs, total_lines=25, code_lines=20, blank_lines=2),
+            ],
+            by_category=[],
+            grand_total_lines=100,
+        )
+        pcts = language_percentages(tally, with_spaces=True)
+        assert pcts[0][0] is py
+        assert pcts[0][1] == 75.0
+        assert pcts[1][0] is rs
+        assert pcts[1][1] == 25.0
 
     def test_empty_returns_empty(self):
         tally = TallyResult(by_language=[], by_category=[], grand_total_lines=0)
