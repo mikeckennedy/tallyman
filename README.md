@@ -25,6 +25,7 @@ tallyman --setup            # re-run the interactive setup
 tallyman --no-color         # disable colored output
 tallyman --image            # save a PNG summary card to Desktop
 tallyman --image-light      # light-themed PNG variant
+tallyman --with-spaces      # use total lines (incl. comments/blanks) for totals
 ```
 
 ## Why Tallyman?
@@ -46,7 +47,7 @@ A few things that set it apart:
 
 ## Features
 
-- **Dual line counts** - Total lines and effective lines (excluding comments and blanks) per language
+- **Dual line counts** - Total lines and effective lines (excluding comments and blanks) per language. Use `--with-spaces` to base summaries and percentages on total lines instead
 - **Six categories** - Code, DevOps, Design, Docs, Specs, and Data, each with aggregated totals
 - **40 languages** - From Python and Rust to Terraform and Docker, with full template support for HTML (Jinja, Nunjucks, Handlebars, and more)
 - **Beautiful output** - Colored, formatted results with a language composition bar, powered by [Rich](https://github.com/Textualize/rich)
