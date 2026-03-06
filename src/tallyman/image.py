@@ -239,7 +239,7 @@ def generate_image(
     # Attribution -- each line right-aligned to the bar's right edge
     right_edge = IMAGE_WIDTH - PADDING
     attr_line1 = f'tallyman v{__version__}'
-    attr_line2 = 'github.com/mikeckennedy/tallyman'
+    attr_line2 = 'mkennedy.codes/tools/tallyman'
 
     bbox1 = font_attr.getbbox(attr_line1)
     draw.text((right_edge - (bbox1[2] - bbox1[0]), y), attr_line1, font=font_attr, fill=attr_rgb)
