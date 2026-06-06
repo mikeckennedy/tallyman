@@ -46,6 +46,7 @@ LANGUAGES: tuple[Language, ...] = (
     Language('OCaml',        'code',   'sandy_brown',     None, ('.ml', '.mli')),
     Language('Nim',          'code',   'gold3',           '#',  ('.nim', '.nims')),
     Language('V',            'code',   'sky_blue1',       '//', ('.v', '.vv')),
+    Language('Solidity',     'code',   'bright_cyan',     '//', ('.sol',)),
     # --- DevOps ---
     Language('Terraform',    'devops', 'purple4',         '#',  ('.tf', '.tfvars')),
     Language('Makefile',     'devops', 'bright_white',    '#',  ('.mk',)),
