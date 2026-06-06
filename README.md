@@ -49,7 +49,7 @@ A few things that set it apart:
 
 - **Dual line counts** - Total lines and effective lines (excluding comments and blanks) per language. Use `--with-spaces` to base summaries and percentages on total lines instead
 - **Six categories** - Code, DevOps, Design, Docs, Specs, and Data, each with aggregated totals
-- **40 languages** - From Python and Rust to Terraform and Docker, with full template support for HTML (Jinja, Nunjucks, Handlebars, and more)
+- **41 languages** - From Python and Rust to Solidity, Terraform, and Docker, with full template support for HTML (Jinja, Nunjucks, Handlebars, and more)
 - **Beautiful output** - Colored, formatted results with a language composition bar, powered by [Rich](https://github.com/Textualize/rich)
 - **Realistic metrics** - Only counts files *you* wrote, not third-party dependencies or generated code
 - **Persistent config** - Your setup choices are saved to `.tally-config.toml` and reused on every run
@@ -75,11 +75,11 @@ The card includes category totals with effective line counts, a colored language
 
 ## Supported Languages
 
-Tallyman recognizes **40 languages** across six categories:
+Tallyman recognizes **41 languages** across six categories:
 
 | Category | Languages |
 |----------|-----------|
-| **Code** | Python, Rust, Go, JavaScript, TypeScript, Java, C, C++, C#, Swift, Kotlin, Ruby, Shell, Lua, PHP, Perl, R, Dart, Scala, Elixir, Zig, Haskell, Erlang, OCaml, Nim, V |
+| **Code** | Python, Rust, Go, JavaScript, TypeScript, Java, C, C++, C#, Swift, Kotlin, Ruby, Shell, Lua, PHP, Perl, R, Dart, Scala, Elixir, Zig, Haskell, Erlang, OCaml, Nim, V, Solidity |
 | **DevOps** | Terraform, Makefile, Docker |
 | **Design** | CSS, SCSS, LESS, HTML (+ 12 template formats), SVG |
 | **Docs** | Markdown, reStructuredText |
@@ -120,6 +120,7 @@ Tallyman recognizes **40 languages** across six categories:
 | OCaml | `.ml`, `.mli` |
 | Nim | `.nim`, `.nims` |
 | V | `.v`, `.vv` |
+| Solidity | `.sol` |
 
 ### DevOps
 

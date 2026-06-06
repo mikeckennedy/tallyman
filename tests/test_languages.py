@@ -26,6 +26,13 @@ class TestIdentifyLanguage:
         assert lang is not None
         assert lang.name == 'TypeScript'
 
+    def test_solidity_file(self):
+        lang = identify_language(Path('Token.sol'))
+        assert lang is not None
+        assert lang.name == 'Solidity'
+        assert lang.category == 'code'
+        assert lang.single_line_comment == '//'
+
     def test_markdown(self):
         lang = identify_language(Path('README.md'))
         assert lang is not None
