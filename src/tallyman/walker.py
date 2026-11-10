@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from tallyman.config import CONFIG_FILENAME, SELF, load_nested_config
 from tallyman.gitignore import GitIgnoreSpec, find_git_root, load_gitignore
@@ -13,6 +13,47 @@ from tallyman.languages import Language, as_spec, identify_language
 from tallyman.paths import relative_posix
 
 SPEC_DIR_NAMES: frozenset[str] = frozenset({'specs', 'specifications', 'plans', 'agents'})
+
+
+class SpecState(NamedTuple):
+    """Spec status of one directory."""
+
+    is_spec: bool
+    detection_suppressed: bool  # under a [specs] ignore entry: names like plans/ are not auto-detected
+
+
+def root_spec_state(spec_dirs: set[str], non_spec_dirs: set[str], auto: bool = False) -> SpecState:
+    """Spec status of the scan root itself, from '.' entries.
+
+    The root's own name is never auto-detected. *auto* is True when the root
+    sits inside an auto-detected spec directory (see :func:`inside_auto_spec_dir`);
+    it then counts as specs unless an ignore entry says otherwise.
+    """
+    if SELF in spec_dirs:
+        return SpecState(True, False)
+    if SELF in non_spec_dirs:
+        return SpecState(False, True)
+    return SpecState(auto, False)
+
+
+def spec_state(rel: str, name: str, parent: SpecState, spec_dirs: set[str], non_spec_dirs: set[str]) -> SpecState:
+    """Spec status of the directory at *rel*, given its parent's.
+
+    The deepest explicit setting wins: a ``spec_dirs`` entry makes the subtree
+    specs; a ``non_spec_dirs`` entry makes it not specs and stops
+    auto-detection by name beneath it. Otherwise spec status is inherited, and
+    a directory named like ``plans`` is detected unless an ancestor is ignored.
+    Shared by walk_project() and the setup TUI so they always agree.
+    """
+    if rel in spec_dirs:
+        return SpecState(True, False)
+    if rel in non_spec_dirs:
+        return SpecState(False, True)
+    if parent.is_spec:
+        return SpecState(True, False)
+    if parent.detection_suppressed:
+        return SpecState(False, True)
+    return SpecState(name.lower() in SPEC_DIR_NAMES, False)
 
 
 def inside_auto_spec_dir(root: Path) -> bool:
@@ -43,6 +84,7 @@ def walk_project(
     excluded_dirs: set[str],
     gitignore_spec: GitIgnoreSpec | None = None,
     spec_dirs: Optional[set[str]] = None,
+    non_spec_dirs: Optional[set[str]] = None,
 ) -> Iterator[tuple[Path, Language]]:
     """Yield (file_path, language) for every countable source file under root.
 
@@ -53,13 +95,15 @@ def walk_project(
             files found while walking are registered on it as each directory is entered.
         spec_dirs: Relative directory paths designated as spec directories. ``'.'`` marks *root*
             itself, so docs files at every level count as specs.
+        non_spec_dirs: Relative directory paths that are never specs (``[specs] ignore``).
     """
     if gitignore_spec is None:
         gitignore_spec = load_gitignore(root)
 
     working_excluded = set(excluded_dirs)
     active_spec_roots: set[str] = set(spec_dirs) if spec_dirs else set()
-    root_is_spec = SELF in active_spec_roots
+    active_non_spec: set[str] = set(non_spec_dirs) if non_spec_dirs else set()
+    states: dict[str, SpecState] = {}
 
     for dirpath_str, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
         dirpath = Path(dirpath_str)
@@ -74,6 +118,7 @@ def walk_project(
             if config_file.is_file() and (nested := load_nested_config(config_file, rel_dir_str)) is not None:
                 working_excluded |= nested.excluded_dirs
                 active_spec_roots |= nested.spec_dirs
+                active_non_spec |= nested.non_spec_dirs
 
         # Prune excluded and gitignored subdirectories in-place
         filtered_dirs: list[str] = []
@@ -93,21 +138,13 @@ def walk_project(
         dirnames[:] = filtered_dirs
 
         # Determine if this directory is inside a spec directory
-        dir_is_spec = root_is_spec
-        if rel_dir_str and not dir_is_spec:
-            # Check auto-detection by directory name
-            if dirpath.name.lower() in SPEC_DIR_NAMES:
-                dir_is_spec = True
-                active_spec_roots.add(rel_dir_str)
-            # Check user-designated spec dirs
-            elif rel_dir_str in active_spec_roots:
-                dir_is_spec = True
-            # Check if parent is a spec dir (cascading)
-            else:
-                for sr in active_spec_roots:
-                    if rel_dir_str.startswith(sr + '/'):
-                        dir_is_spec = True
-                        break
+        if rel_dir_str:
+            parent_state = states[rel_dir_str.rpartition('/')[0]]
+            state = spec_state(rel_dir_str, dirpath.name, parent_state, active_spec_roots, active_non_spec)
+        else:
+            state = root_spec_state(active_spec_roots, active_non_spec)
+        states[rel_dir_str] = state
+        dir_is_spec = state.is_spec
 
         # Yield recognized, non-binary files
         for filename in sorted(filenames):

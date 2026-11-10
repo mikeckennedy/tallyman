@@ -29,25 +29,28 @@ def _run(
     *argv: str,
     interactive: bool = False,
     setup_result: object = None,
-    setup_calls: Optional[list[tuple[set[str], set[str]]]] = None,
+    setup_calls: Optional[list[tuple[set[str], set[str], set[str]]]] = None,
 ) -> Optional[TallyResult]:
     """Run tallyman's main() with *argv*; return the result it would have displayed (None if it exited first).
 
-    The setup TUI is replaced. It records the exclusions and specs it was pre-filled with in *setup_calls*,
-    then returns *setup_result*: a (excluded, specs) tuple, ECHO to save the pre-fill unchanged, or None to
-    fail the test because setup should not have launched.
+    The setup TUI is replaced. It records the (excluded, specs, non-specs) it was pre-filled with in
+    *setup_calls*, then returns *setup_result*: such a tuple, ECHO to save the pre-fill unchanged, or None
+    to fail the test because setup should not have launched.
     """
     captured: list[TallyResult] = []
     monkeypatch.setattr(sys, 'argv', ['tallyman', *argv])
     monkeypatch.setattr(cli, '_is_interactive', lambda: interactive)
     monkeypatch.setattr(cli, 'display_results', lambda tally, **_: captured.append(tally))
 
-    def fake_setup(_root: Path, _spec: object, excluded: set[str], specs: set[str]) -> object:
+    def fake_setup(
+        _root: Path, _spec: object, excluded: set[str], specs: set[str], non_specs: set[str], **_kwargs: object
+    ) -> object:
+        prefill = (set(excluded), set(specs), set(non_specs))
         if setup_calls is not None:
-            setup_calls.append((set(excluded), set(specs)))
+            setup_calls.append(prefill)
         if setup_result is None:
             raise AssertionError('the setup TUI must not launch here')
-        return (set(excluded), set(specs)) if setup_result == ECHO else setup_result
+        return prefill if setup_result == ECHO else setup_result
 
     monkeypatch.setattr(cli, 'run_setup', fake_setup)
     cli.main()
@@ -167,7 +170,7 @@ class TestSetupRecovery:
     ):
         """The error message says to re-run --setup, so --setup must work on a broken config."""
         _make(tmp_path, {CONFIG_FILENAME: 'not toml [\n', 'a.py': 'x = 1\n', 'vendor/v.py': 'x = 1\n'})
-        tally = _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup_result=({'vendor'}, set()))
+        tally = _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup_result=({'vendor'}, set(), set()))
         assert tally is not None
         assert 'Warning: ignoring' in capsys.readouterr().err
         assert load_config(tmp_path / CONFIG_FILENAME).excluded_dirs == {'vendor'}
@@ -186,11 +189,11 @@ class TestSetupWithParentConfig:
                 'src/app.py': 'x = 1\n',
             },
         )
-        calls: list[tuple[set[str], set[str]]] = []
+        calls: list[tuple[set[str], set[str], set[str]]] = []
         _run(monkeypatch, '--setup', str(tmp_path / 'src'), interactive=True, setup_result=ECHO, setup_calls=calls)
-        assert calls == [({'vendor', 'pkg/gen'}, {'design'})]
+        assert calls == [({'vendor'}, {'design'}, set())]  # src/pkg's own config stays in its own file
         saved = load_config(tmp_path / 'src' / CONFIG_FILENAME)
-        assert saved.excluded_dirs == {'vendor', 'pkg/gen'}
+        assert saved.excluded_dirs == {'vendor'}
         assert saved.spec_dirs == {'design'}
 
     def test_setup_keeps_a_spec_dir_that_covers_the_scan_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -211,7 +214,7 @@ class TestSetupWithParentConfig:
     ):
         (tmp_path / CONFIG_FILENAME).mkdir()  # a directory where the file should go
         (tmp_path / 'a.py').write_text('x = 1\n')
-        tally = _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup_result=(set(), set()))
+        tally = _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup_result=(set(), set(), set()))
         assert tally is not None
         assert 'could not save' in capsys.readouterr().err
 
@@ -268,3 +271,25 @@ class TestRealProcess:
         result = _run_process(tmp_path, preexec_fn=lambda: os.close(0))
         assert result.returncode == 0, result.stderr
         assert 'Traceback' not in result.stderr
+
+
+class TestSpecIgnoreEndToEnd:
+    def test_ignored_spec_dir_stays_docs_when_scanned_from_inside(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """[specs] ignore = ["plans"] must beat the scan-inside-plans rule."""
+        (tmp_path / '.git').mkdir()
+        _make(tmp_path, {CONFIG_FILENAME: '[specs]\nignore = ["plans"]\n', 'plans/sub/q.md': '# q\n'})
+        for scan in ('', 'plans', 'plans/sub'):
+            tally = _run(monkeypatch, str(tmp_path / scan))
+            assert tally is not None
+            assert _files_by_category(tally).get('Markdown/docs') == 1, scan
+            assert 'Markdown/specs' not in _files_by_category(tally), scan
+
+    def test_setup_prefill_and_save_carry_the_ignore_list(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        (tmp_path / '.git').mkdir()
+        _make(tmp_path, {CONFIG_FILENAME: '[specs]\nignore = ["src/agents"]\n', 'src/agents/a.md': '# a\n'})
+        calls: list[tuple[set[str], set[str], set[str]]] = []
+        _run(monkeypatch, '--setup', str(tmp_path / 'src'), interactive=True, setup_result=ECHO, setup_calls=calls)
+        assert calls == [(set(), set(), {'agents'})]
+        assert load_config(tmp_path / 'src' / CONFIG_FILENAME).non_spec_dirs == {'agents'}

@@ -18,12 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Plan: `plans/004-nested-config-discovery/`
 
 ### Changed
+- New `[specs] ignore = [...]` config key: directories that are never specs, even when named `specs`, `plans`, `specifications` or `agents`. It covers the whole subtree, including auto-detection; a deeper `[specs] directories` entry still wins. Pressing `s` in setup on an auto-detected spec directory now writes it here, so un-marking one finally sticks.
+- Files: `src/tallyman/config.py`, `src/tallyman/walker.py`, `src/tallyman/cli.py`, `src/tallyman/tui/setup_app.py`, `tests/test_setup_app.py`, `tests/test_walker.py`, `tests/test_config.py`, `tests/test_cli.py`
+- Plan: `plans/005-hardening/phase-03-spec-overrides-and-tui.plan.md`
 - The `.tally-config.toml` search now stops at the git repo root, and outside a repo only the scanned directory is checked, so a stray config in a home directory no longer applies to every project or suppresses first-run setup.
 - With no config and no terminal (CI, pipes), tallyman now counts with default settings and prints a one-line note on stderr instead of launching the setup TUI and hanging. No config is written. `--setup` without a terminal exits with status 2.
 - Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `tests/test_config.py`, `tests/test_cli.py`
 - Plan: `plans/005-hardening/phase-02-config-handling.plan.md`
 
 ### Fixed
+- Setup TUI: the root directory can no longer be toggled; `x` on it used to write `""` into the config and exclude every subdirectory. Children of an excluded directory now show as excluded, and toggling them does nothing, because they are never walked. Excluding then re-including a directory restores its spec status, and a child's own exclusion survives toggling its parent. Pressing `s` twice always restores what was there, and `s` on the root marks or unmarks the whole tree, including when setup is run from inside `plans/`. Settings from nested `.tally-config.toml` files are shown as locked instead of being copied into the root config, where they couldn't be changed anyway. Directory names containing `[...]` are shown literally. The TUI and the walker now share one rule for spec status (`walker.spec_state()`), with a test that checks they agree.
+- Files: `src/tallyman/tui/setup_app.py`, `src/tallyman/walker.py`, `tests/test_setup_app.py`
 - A config found in a parent directory is now rebased onto the scanned directory. Running `tallyman proj/src` with `proj/.tally-config.toml` excluding `src/vendor` and `docs` used to count `src/vendor` and drop `src/docs`. A parent spec directory that covers the scanned directory now classifies its docs as specs.
 - A malformed or wrongly shaped root config is reported on stderr with exit status 1 instead of a traceback. `tallyman --setup` replaces a broken config instead of failing on it.
 - Directory names containing `"`, `\` or control characters are escaped when the config is saved, so the next run can read it.

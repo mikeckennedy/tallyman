@@ -82,3 +82,22 @@ Add to `tests/test_config.py`: load, save and round-trip of `specs.ignore`.
 - The five TUI cases pass.
 - Old configs without `specs.ignore` load unchanged.
 - `pytest`, `ruff check` and `ruff format --check` are clean.
+
+## Outcome
+
+Implemented as planned, with a few changes along the way.
+
+**One rule for spec status.** Instead of three hand-kept copies, `walker.spec_state()` and `walker.root_spec_state()` hold the rule in one place, and both the walker and the TUI call it. The rule: the deepest explicit setting wins, an ignore stops auto-detection beneath it, and otherwise status is inherited or detected by name. Rebasing a parent config compares spec and ignore entries by depth in the same way.
+
+**The TUI derives its labels.** It no longer cascades flags down the tree. `_populate` builds the tree, and `_refresh` derives every node's state from the three settings sets, so a toggle changes only the toggled directory's own entry. This removes H11 and the bug where excluding and then re-including a directory lost its spec label.
+
+**Architect review fixes:**
+
+- Setup run from inside `plans/` showed "not specs" while the run counted specs. The TUI is now told about the implicit state, and `s` works on the root; only `x` is blocked there.
+- Pressing `s` twice deleted an `ignore` entry that existed for the directory's children. A toggle now prefers the directory's original entry, then no entry, then an explicit one. A round-trip test presses `s` twice on every directory under four configurations.
+- Settings from nested configs couldn't be changed from the TUI, because the walker re-reads those files, and an unchanged save copied them into the root config. They are now passed separately, shown as locked, and never saved at the root.
+- The `(not specs)` label showed only on auto-detected names; it now shows on any ignored directory.
+- `x` on an explicitly excluded child of an excluded parent silently dropped the child's entry; that toggle is now blocked.
+- `SpecState` is a `NamedTuple`, and node data is a slots dataclass, which removed the TUI's `# type: ignore` comments.
+
+**Deferred, with the phase 2 item.** Only the nearest config is consulted, so an intermediate config hides a root config's entries for the scan root. With a root `ignore = ["plans"]` and any config at `plans/sub/`, `tallyman plans/sub` reports Specs. This has the same root cause as phase 2's deferred "nearest config wins" item; fixing that one, by folding configs from the git root down, fixes this too.

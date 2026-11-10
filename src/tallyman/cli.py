@@ -114,8 +114,7 @@ def main() -> None:
 
     if existing_config and not args.setup:
         config = _load_config_or_exit(existing_config, root)
-        excluded_dirs = config.excluded_dirs
-        spec_dirs = config.spec_dirs
+        excluded_dirs, spec_dirs, non_spec_dirs = config.excluded_dirs, config.spec_dirs, config.non_spec_dirs
     elif not interactive:
         # First run with no terminal (CI, pipes): count with defaults rather than hang in the TUI
         print(
@@ -123,7 +122,7 @@ def main() -> None:
             'Run `tallyman --setup` in a terminal to configure.',
             file=sys.stderr,
         )
-        excluded_dirs, spec_dirs = set(), set()
+        excluded_dirs, spec_dirs, non_spec_dirs = set(), set(), set()
     else:
         # First run or --setup: launch TUI
         existing = TallyConfig()
@@ -133,28 +132,36 @@ def main() -> None:
             except ConfigError as e:
                 # --setup is how a broken config gets repaired, so start fresh rather than refuse
                 print(f'Warning: ignoring {existing_config} ({e}); setup will write a new config.', file=sys.stderr)
-        # Discover nested configs and pre-apply their exclusions/specs
-        nested = discover_nested_configs(root)
-        merged_excluded = existing.excluded_dirs | nested.excluded_dirs
-        merged_specs = existing.spec_dirs | nested.spec_dirs
-        result = run_setup(root, gitignore_spec, merged_excluded, merged_specs)
+        # Nested configs are shown in the TUI but stay in their own files, which the walker reads itself
+        result = run_setup(
+            root,
+            gitignore_spec,
+            existing.excluded_dirs,
+            existing.spec_dirs,
+            existing.non_spec_dirs,
+            nested=discover_nested_configs(root),
+            root_auto_spec=inside_auto_spec_dir(root),
+        )
         if result is None:
             print('Setup cancelled.')
             sys.exit(0)
-        excluded_dirs, spec_dirs = result
+        excluded_dirs, spec_dirs, non_spec_dirs = result
         try:
-            save_config(config_path, excluded_dirs, spec_dirs)
+            save_config(config_path, excluded_dirs, spec_dirs, non_spec_dirs)
         except (OSError, UnicodeEncodeError) as e:
             # Don't throw away the user's selections: warn, then count with them anyway
             print(f'Warning: could not save {config_path} ({e}); using this run only.', file=sys.stderr)
 
-    # A scan root inside plans/, specs/, ... counts as specs, as it does when scanned from above
-    if inside_auto_spec_dir(root):
+    # A scan root inside plans/, specs/, ... counts as specs, as it does when scanned from above,
+    # unless a config already decided for the scan root ('.' in either set)
+    if SELF not in spec_dirs and SELF not in non_spec_dirs and inside_auto_spec_dir(root):
         spec_dirs = spec_dirs | {SELF}
 
     # Walk and count
     file_results = []
-    for file_path, language in walk_project(root, excluded_dirs, gitignore_spec, spec_dirs=spec_dirs):
+    for file_path, language in walk_project(
+        root, excluded_dirs, gitignore_spec, spec_dirs=spec_dirs, non_spec_dirs=non_spec_dirs
+    ):
         counts = count_lines(file_path, language)
         file_results.append((language, counts))
 

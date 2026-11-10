@@ -234,7 +234,7 @@ class TestSetupTuiAgrees:
 
                 def collect(node) -> None:
                     if node.data:
-                        found[str(node.data['path'])] = node.label.plain
+                        found[node.data.path] = str(node.label)
                     for child in node.children:
                         collect(child)
 

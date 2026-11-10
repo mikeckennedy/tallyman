@@ -155,6 +155,24 @@ class TestLoadConfig:
         with pytest.raises(ConfigError):
             load_config(config)
 
+    def test_loads_spec_ignore(self, tmp_path: Path):
+        config = tmp_path / CONFIG_FILENAME
+        config.write_text('[specs]\ndirectories = ["design"]\nignore = ["src/agents/", "."]\n')
+        result = load_config(config)
+        assert result.spec_dirs == {'design'}
+        assert result.non_spec_dirs == {'src/agents', '.'}
+
+    def test_config_without_ignore_has_no_non_spec_dirs(self, tmp_path: Path):
+        config = tmp_path / CONFIG_FILENAME
+        config.write_text('[exclude]\ndirectories = ["vendor"]\n\n[specs]\ndirectories = ["plans"]\n')
+        assert load_config(config) == TallyConfig({'vendor'}, {'plans'}, set())
+
+    def test_spec_ignore_must_be_a_list_of_strings(self, tmp_path: Path):
+        config = tmp_path / CONFIG_FILENAME
+        config.write_text('[specs]\nignore = "plans"\n')
+        with pytest.raises(ConfigError, match='specs.ignore'):
+            load_config(config)
+
 
 class TestRebaseConfig:
     def _rebase(self, tmp_path: Path, config: TallyConfig, scan: str) -> TallyConfig:
@@ -187,6 +205,18 @@ class TestRebaseConfig:
         }
         assert self._rebase(tmp_path, TallyConfig(set(), {'.'}), 'src').spec_dirs == {'.'}
         assert self._rebase(tmp_path, TallyConfig(set(), {'design'}), 'src').spec_dirs == set()
+
+    def test_ignore_entries_are_rebased(self, tmp_path: Path):
+        result = self._rebase(tmp_path, TallyConfig(set(), set(), {'src/agents', 'lib'}), 'src')
+        assert result.non_spec_dirs == {'agents'}
+
+    def test_deeper_ignore_covering_the_root_wins(self, tmp_path: Path):
+        result = self._rebase(tmp_path, TallyConfig(set(), {'design'}, {'design/v2'}), 'design/v2/x')
+        assert (result.spec_dirs, result.non_spec_dirs) == (set(), {'.'})
+
+    def test_deeper_spec_covering_the_root_wins(self, tmp_path: Path):
+        result = self._rebase(tmp_path, TallyConfig(set(), {'a/b'}, {'a'}), 'a/b/c')
+        assert (result.spec_dirs, result.non_spec_dirs) == ({'.'}, set())
 
 
 class TestSaveConfig:
@@ -224,6 +254,11 @@ class TestSaveConfig:
         loaded = load_config(config)
         assert loaded.excluded_dirs == {name, f'{name}/sub'}
         assert loaded.spec_dirs == {name}
+
+    def test_round_trip_with_spec_ignore(self, tmp_path: Path):
+        config = tmp_path / CONFIG_FILENAME
+        save_config(config, {'vendor'}, set(), {'plans', 'src/agents'})
+        assert load_config(config) == TallyConfig({'vendor'}, set(), {'plans', 'src/agents'})
 
     def test_no_specs_omits_section(self, tmp_path: Path):
         config = tmp_path / CONFIG_FILENAME

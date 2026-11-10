@@ -80,7 +80,8 @@ FileCount                     # total_lines, code_lines, comment_lines, blank_li
 LanguageStats                 # language, file_count, total_lines, code_lines, comment_lines, blank_lines
 CategoryStats                 # name, total_lines, effective_lines, languages
 TallyResult                   # by_language, by_category, grand_total_lines
-TallyConfig                   # excluded_dirs: set[str], spec_dirs: set[str]
+TallyConfig                   # excluded_dirs, spec_dirs, non_spec_dirs ([specs] ignore): set[str]; '.' = this dir
+SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's spec status (walker.spec_state)
 ```
 
 ## Key Design Decisions
@@ -93,9 +94,9 @@ TallyConfig                   # excluded_dirs: set[str], spec_dirs: set[str]
 
 4. **Binary detection** checks first 8KB for `\x00` byte.
 
-5. **Config search stops at the git root, and parent configs are rebased.** `find_config()` returns the nearest `.tally-config.toml` from the scan root up to the git repo root (outside a repo, only the scan root itself). `rebase_config()` translates its entries to be relative to the scan root. Entries are normalised on load. In `[specs] directories`, `"."` means the config's own directory. With no config and no terminal, tallyman runs with defaults and writes nothing.
+5. **Config search stops at the git root, and parent configs are rebased.** `find_config()` returns the nearest `.tally-config.toml` from the scan root up to the git repo root (outside a repo, only the scan root itself). `rebase_config()` translates its entries to be relative to the scan root. Entries are normalised on load. In `[specs] directories` and `[specs] ignore`, `"."` means the config's own directory. With no config and no terminal, tallyman runs with defaults and writes nothing.
 
-6. **Auto-detected spec dirs:** `specs/`, `plans/`, `specifications/`, `agents/`  -  detected even without config, at any depth. Scanning from inside one (`tallyman plans/sub`) still counts specs, but a repo that is itself named `agents` does not.
+6. **Auto-detected spec dirs:** `specs/`, `plans/`, `specifications/`, `agents/`  -  detected even without config, at any depth, unless listed (or beneath a directory listed) in `[specs] ignore`. The deepest explicit setting wins. `walker.spec_state()` is the one rule; the walker and the setup TUI both call it. Scanning from inside one (`tallyman plans/sub`) still counts specs, but a repo that is itself named `agents` does not.
 
 7. **Gitignore follows git, entry by entry.** `.git/info/exclude`, then every `.gitignore` from the repo root down, each scoped to its own directory; the deepest opinion wins. Nested files load lazily as the walker and TUI descend, and nothing inside an ignored directory is ever looked at. Callers pass directory paths with a trailing `/`. `tests/test_gitignore.py` checks parity with real `git`; its pattern-compiler table runs without git.
 
@@ -105,12 +106,13 @@ TallyConfig                   # excluded_dirs: set[str], spec_dirs: set[str]
 |---|---|---|
 | `tests/test_counter.py` | 10 | Line counting, encoding errors |
 | `tests/test_languages.py` | 14 | Language registry, extension map, `as_spec` |
-| `tests/test_walker.py` | 33 | Walking, exclusions, spec detection, nested configs |
+| `tests/test_walker.py` | 38 | Walking, exclusions, spec detection, nested configs |
 | `tests/test_gitignore.py` | 93 | Git root, gitignore loading and scoping, negation, TUI agreement, parity with `git` |
 | `tests/test_paths.py` | 6 | POSIX relative paths, canonical case |
 | `tests/test_aggregator.py` | 11 | Stats aggregation, categories, percentages |
-| `tests/test_config.py` | 51 | Config find/load/save, normalisation, rebasing, escaping, directory cleanup |
-| `tests/test_cli.py` | 17 | End-to-end CLI: parent configs, errors, no-terminal runs, setup pre-fill |
+| `tests/test_config.py` | 58 | Config find/load/save, `[specs] ignore`, normalisation, rebasing, escaping, directory cleanup |
+| `tests/test_setup_app.py` | 39 | Setup TUI via Textual pilot: toggles, labels, agreement with the walker |
+| `tests/test_cli.py` | 19 | End-to-end CLI: parent configs, errors, no-terminal runs, setup pre-fill |
 
 Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` create test Language instances.
 

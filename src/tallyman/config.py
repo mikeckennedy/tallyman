@@ -30,11 +30,15 @@ class TallyConfig:
     """Parsed contents of .tally-config.toml.
 
     Entries are POSIX paths relative to the directory the config applies to.
-    ``spec_dirs`` may contain ``'.'`` (:data:`SELF`), meaning that directory itself.
+    ``spec_dirs`` and ``non_spec_dirs`` may contain ``'.'`` (:data:`SELF`),
+    meaning that directory itself. ``non_spec_dirs`` (``[specs] ignore``) turns
+    off spec classification for a directory and its descendants, including
+    auto-detection by name; a deeper ``spec_dirs`` entry still wins.
     """
 
     excluded_dirs: set[str] = field(default_factory=set)
     spec_dirs: set[str] = field(default_factory=set)
+    non_spec_dirs: set[str] = field(default_factory=set)
 
 
 def find_config(root: Path) -> Optional[Path]:
@@ -74,14 +78,14 @@ def _normalize_dir(entry: str, allow_self: bool) -> str:
     return entry
 
 
-def _directories(data: dict[str, Any], section: str, allow_self: bool) -> set[str]:
-    """Read ``[section] directories`` as a set of normalised entries, validating its shape."""
+def _directories(data: dict[str, Any], section: str, key: str, allow_self: bool) -> set[str]:
+    """Read ``[section] key`` as a set of normalised directory entries, validating its shape."""
     table = data.get(section, {})
     if not isinstance(table, dict):
         raise ConfigError(f'[{section}] must be a table')
-    entries = table.get('directories', [])
+    entries = table.get(key, [])
     if not isinstance(entries, list) or not all(isinstance(e, str) for e in entries):
-        raise ConfigError(f'{section}.directories must be a list of strings')
+        raise ConfigError(f'{section}.{key} must be a list of strings')
     return {normalized for e in entries if (normalized := _normalize_dir(e, allow_self))}
 
 
@@ -98,8 +102,9 @@ def load_config(config_path: Path) -> TallyConfig:
     except (ValueError, RecursionError) as e:  # TOMLDecodeError and UnicodeDecodeError are both ValueErrors
         raise ConfigError(str(e) or type(e).__name__) from e
     return TallyConfig(
-        excluded_dirs=_directories(data, 'exclude', allow_self=False),
-        spec_dirs=_directories(data, 'specs', allow_self=True),
+        excluded_dirs=_directories(data, 'exclude', 'directories', allow_self=False),
+        spec_dirs=_directories(data, 'specs', 'directories', allow_self=True),
+        non_spec_dirs=_directories(data, 'specs', 'ignore', allow_self=True),
     )
 
 
@@ -109,29 +114,37 @@ def rebase_config(config: TallyConfig, config_dir: Path, root: Path) -> TallyCon
     *root* must be *config_dir* or a directory beneath it. Entries beneath
     *root* keep their path below it. An excluded entry that is *root* or one of
     its ancestors is dropped, because the user asked to scan this directory
-    explicitly. A spec entry that is *root* or an ancestor becomes ``'.'``, so
-    the whole scan counts as specs. Entries elsewhere point outside the scan and
+    explicitly. Spec and ignore entries that are *root* or an ancestor become
+    ``'.'`` in the matching set; when both kinds cover *root*, the deeper one
+    wins, as it does in the walker. Entries elsewhere point outside the scan and
     are dropped.
     """
     rel = relative_posix(root.resolve(), config_dir.resolve())
     if not rel:
-        return TallyConfig(set(config.excluded_dirs), set(config.spec_dirs))
+        return TallyConfig(set(config.excluded_dirs), set(config.spec_dirs), set(config.non_spec_dirs))
 
-    def rebase(entries: set[str]) -> tuple[set[str], bool]:
+    def depth(entry: str) -> int:
+        return 0 if entry == SELF else entry.count('/') + 1
+
+    def rebase(entries: set[str]) -> tuple[set[str], Optional[int]]:
+        """Entries below *root*, re-rooted; plus the depth of the deepest entry covering *root*, if any."""
         inside: set[str] = set()
-        covers_root = False
+        cover: Optional[int] = None
         for entry in entries:
             if entry == SELF or entry == rel or rel.startswith(entry + '/'):
-                covers_root = True
+                cover = depth(entry) if cover is None else max(cover, depth(entry))
             elif entry.startswith(rel + '/'):
                 inside.add(entry[len(rel) + 1 :])
-        return inside, covers_root
+        return inside, cover
 
     excluded, _ = rebase(config.excluded_dirs)
-    specs, root_is_spec = rebase(config.spec_dirs)
-    if root_is_spec:
+    specs, spec_cover = rebase(config.spec_dirs)
+    non_specs, non_spec_cover = rebase(config.non_spec_dirs)
+    if spec_cover is not None and (non_spec_cover is None or spec_cover >= non_spec_cover):
         specs.add(SELF)
-    return TallyConfig(excluded, specs)
+    elif non_spec_cover is not None:
+        non_specs.add(SELF)
+    return TallyConfig(excluded, specs, non_specs)
 
 
 def load_nested_config(config_file: Path, rel_dir: str) -> Optional[TallyConfig]:
@@ -148,7 +161,11 @@ def load_nested_config(config_file: Path, rel_dir: str) -> Optional[TallyConfig]
     def prefix(entry: str) -> str:
         return rel_dir if entry == SELF else f'{rel_dir}/{entry}'
 
-    return TallyConfig({prefix(e) for e in nested.excluded_dirs}, {prefix(e) for e in nested.spec_dirs})
+    return TallyConfig(
+        {prefix(e) for e in nested.excluded_dirs},
+        {prefix(e) for e in nested.spec_dirs},
+        {prefix(e) for e in nested.non_spec_dirs},
+    )
 
 
 def discover_nested_configs(root: Path) -> TallyConfig:
@@ -173,6 +190,7 @@ def discover_nested_configs(root: Path) -> TallyConfig:
         if config_file.is_file() and (nested := load_nested_config(config_file, rel_dir_str)) is not None:
             merged.excluded_dirs |= nested.excluded_dirs
             merged.spec_dirs |= nested.spec_dirs
+            merged.non_spec_dirs |= nested.non_spec_dirs
 
     return merged
 
@@ -192,7 +210,9 @@ def _toml_string(value: str) -> str:
     return '"' + ''.join(out) + '"'
 
 
-def save_config(config_path: Path, excluded_dirs: set[str], spec_dirs: set[str]) -> None:
+def save_config(
+    config_path: Path, excluded_dirs: set[str], spec_dirs: set[str], non_spec_dirs: Optional[set[str]] = None
+) -> None:
     """Write a .tally-config.toml file. Sorts directories for deterministic output.
 
     Raises OSError if the file can't be written, and UnicodeEncodeError if a
@@ -208,13 +228,19 @@ def save_config(config_path: Path, excluded_dirs: set[str], spec_dirs: set[str])
         lines.append(f'    {_toml_string(d)},')
     lines.append(']')
 
-    if spec_dirs:
+    if spec_dirs or non_spec_dirs:
         lines.append('')
         lines.append('[specs]')
         lines.append('directories = [')
         for d in sorted(spec_dirs):
             lines.append(f'    {_toml_string(d)},')
         lines.append(']')
+        if non_spec_dirs:
+            lines.append('# Not specs, even if named specs/plans/specifications/agents')
+            lines.append('ignore = [')
+            for d in sorted(non_spec_dirs):
+                lines.append(f'    {_toml_string(d)},')
+            lines.append(']')
 
     lines.append('')
     config_path.write_text('\n'.join(lines), encoding='utf-8')

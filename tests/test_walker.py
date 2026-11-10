@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -356,3 +357,45 @@ class TestInsideAutoSpecDir:
     def test_outside_a_repo(self, tmp_path: Path):
         (tmp_path / 'plans').mkdir()
         assert not inside_auto_spec_dir(tmp_path / 'plans')
+
+
+def _categories(
+    root: Path, spec_dirs: Optional[set[str]] = None, non_spec_dirs: Optional[set[str]] = None
+) -> dict[str, str]:
+    found = walk_project(root, set(), spec_dirs=spec_dirs, non_spec_dirs=non_spec_dirs)
+    return {p.relative_to(root).as_posix(): lang.category for p, lang in found}
+
+
+class TestSpecIgnore:
+    """[specs] ignore: non_spec_dirs switch spec classification off for a subtree."""
+
+    @pytest.fixture
+    def tree(self, tmp_path: Path) -> Path:
+        for rel in ['plans/a.md', 'plans/sub/b.md', 'plans/agents/c.md', 'agents/plans/d.md', 'agents/e.md', 'f.md']:
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel).write_text('# x\n')
+        return tmp_path
+
+    def test_ignore_suppresses_auto_detection_for_the_whole_subtree(self, tree: Path):
+        cats = _categories(tree, non_spec_dirs={'plans'})
+        assert cats['plans/a.md'] == cats['plans/sub/b.md'] == cats['plans/agents/c.md'] == 'docs'
+        assert cats['agents/e.md'] == cats['agents/plans/d.md'] == 'specs'  # untouched elsewhere
+
+    def test_a_deeper_explicit_spec_still_wins(self, tree: Path):
+        cats = _categories(tree, spec_dirs={'agents/plans'}, non_spec_dirs={'agents'})
+        assert cats['agents/e.md'] == 'docs'
+        assert cats['agents/plans/d.md'] == 'specs'
+
+    def test_a_deeper_ignore_wins_over_an_explicit_spec(self, tree: Path):
+        cats = _categories(tree, spec_dirs={'.'}, non_spec_dirs={'agents'})
+        assert cats['f.md'] == cats['plans/a.md'] == 'specs'
+        assert cats['agents/e.md'] == cats['agents/plans/d.md'] == 'docs'
+
+    def test_dot_turns_off_auto_detection_everywhere(self, tree: Path):
+        assert set(_categories(tree, non_spec_dirs={'.'}).values()) == {'docs'}
+
+    def test_nested_config_ignore_is_translated(self, tree: Path):
+        (tree / 'agents' / '.tally-config.toml').write_text('[specs]\nignore = ["plans"]\n')
+        cats = _categories(tree)
+        assert cats['agents/plans/d.md'] == 'docs'
+        assert cats['agents/e.md'] == 'specs'
