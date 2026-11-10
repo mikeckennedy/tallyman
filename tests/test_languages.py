@@ -158,7 +158,7 @@ class TestLanguageRegistry:
     def test_language_is_frozen(self):
         lang = LANGUAGES[0]
         try:
-            lang.name = 'Nope'  # type: ignore[misc]
+            lang.name = 'Nope'  # type: ignore
             assert False, 'Should have raised FrozenInstanceError'
         except AttributeError:
             pass

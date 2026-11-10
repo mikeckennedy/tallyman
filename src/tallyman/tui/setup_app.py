@@ -210,22 +210,22 @@ class SetupApp(App[tuple[set[str], set[str]] | None]):
 
     def _set_excluded(self, node: TreeNode[dict[str, object]], excluded: bool) -> None:
         """Set excluded state on a node and cascade to all children."""
-        node.data['excluded'] = excluded  # type: ignore[index]
-        rel_path = str(node.data['path'])  # type: ignore[index]
+        node.data['excluded'] = excluded  # type: ignore
+        rel_path = str(node.data['path'])  # type: ignore
 
         if excluded:
             self.user_excluded.add(rel_path)
             # Clear spec status when excluding
-            node.data['spec'] = False  # type: ignore[index]
+            node.data['spec'] = False  # type: ignore
             self.user_spec_dirs.discard(rel_path)
         else:
             self.user_excluded.discard(rel_path)
 
         # Update label
         name = Path(rel_path).name if rel_path else self.root.name
-        gitignored = bool(node.data['gitignored'])  # type: ignore[index]
-        auto_spec = bool(node.data['auto_spec'])  # type: ignore[index]
-        spec = bool(node.data['spec'])  # type: ignore[index]
+        gitignored = bool(node.data['gitignored'])  # type: ignore
+        auto_spec = bool(node.data['auto_spec'])  # type: ignore
+        spec = bool(node.data['spec'])  # type: ignore
         node.set_label(self._make_label(name, gitignored, excluded, spec, auto_spec))
 
         # Cascade to children
@@ -235,10 +235,10 @@ class SetupApp(App[tuple[set[str], set[str]] | None]):
 
     def _set_spec(self, node: TreeNode[dict[str, object]], spec: bool) -> None:
         """Set spec state on a node and cascade to all children."""
-        node.data['spec'] = spec  # type: ignore[index]
+        node.data['spec'] = spec  # type: ignore
         if not spec:
-            node.data['auto_spec'] = False  # type: ignore[index]
-        rel_path = str(node.data['path'])  # type: ignore[index]
+            node.data['auto_spec'] = False  # type: ignore
+        rel_path = str(node.data['path'])  # type: ignore
 
         if spec:
             self.user_spec_dirs.add(rel_path)
@@ -247,9 +247,9 @@ class SetupApp(App[tuple[set[str], set[str]] | None]):
 
         # Update label
         name = Path(rel_path).name if rel_path else self.root.name
-        gitignored = bool(node.data['gitignored'])  # type: ignore[index]
-        excluded = bool(node.data['excluded'])  # type: ignore[index]
-        auto_spec = bool(node.data['auto_spec'])  # type: ignore[index]
+        gitignored = bool(node.data['gitignored'])  # type: ignore
+        excluded = bool(node.data['excluded'])  # type: ignore
+        auto_spec = bool(node.data['auto_spec'])  # type: ignore
         node.set_label(self._make_label(name, gitignored, excluded, spec, auto_spec))
 
         # Cascade to children
