@@ -34,9 +34,7 @@ BAR_WIDTH = 60
 SMALL_LANGUAGE_THRESHOLD = 2.0  # Percentage below which languages are grouped as "Other"
 
 
-def display_results(
-    result: TallyResult, directory: str, no_color: bool = False, with_spaces: bool = False
-) -> None:
+def display_results(result: TallyResult, directory: str, no_color: bool = False, with_spaces: bool = False) -> None:
     """Render the full tallyman output to the terminal."""
     console = Console(no_color=no_color, highlight=False)
 

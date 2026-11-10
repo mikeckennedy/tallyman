@@ -55,7 +55,10 @@ LANGUAGES: tuple[Language, ...] = (
     Language('CSS',          'design', 'magenta',         None, ('.css',)),
     Language('SCSS',         'design', 'hot_pink',        '//', ('.scss',)),
     Language('LESS',         'design', 'magenta3',        '//', ('.less',)),
-    Language('HTML',         'design', 'dark_orange',     None, ('.html', '.htm', '.xhtml', '.shtml', '.pt', '.jinja', '.jinja2', '.j2', '.njk', '.hbs', '.ejs', '.mustache')),
+    Language('HTML',         'design', 'dark_orange',     None, (
+        '.html', '.htm', '.xhtml', '.shtml',                                   # plain HTML
+        '.pt', '.jinja', '.jinja2', '.j2', '.njk', '.hbs', '.ejs', '.mustache',  # template formats
+    )),
     Language('SVG',          'design', 'gold1',           None, ('.svg',)),
     # --- Docs ---
     Language('Markdown',     'docs',   'white',           None, ('.md', '.mdx')),
