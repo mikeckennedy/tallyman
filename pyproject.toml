@@ -20,7 +20,6 @@ classifiers = [
 dependencies = [
     "textual>=1.0.0",
     "rich>=13.0.0",
-    "pathspec>=0.12.0",
     "Pillow>=10.0.0",
 ]
 

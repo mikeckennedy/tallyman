@@ -12,8 +12,9 @@ from tallyman.aggregator import aggregate
 from tallyman.config import CONFIG_FILENAME, TallyConfig, discover_nested_configs, find_config, load_config, save_config
 from tallyman.counter import count_lines
 from tallyman.display import display_results
+from tallyman.gitignore import load_gitignore
 from tallyman.tui.setup_app import run_setup
-from tallyman.walker import load_gitignore, walk_project
+from tallyman.walker import walk_project
 
 
 def build_parser() -> argparse.ArgumentParser:

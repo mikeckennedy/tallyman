@@ -3,65 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tallyman.config import save_config
-from tallyman.walker import _is_binary, find_git_root, load_gitignore, walk_project
-
-
-class TestFindGitRoot:
-    def test_finds_git_root(self, tmp_path: Path):
-        (tmp_path / '.git').mkdir()
-        assert find_git_root(tmp_path) == tmp_path
-
-    def test_finds_git_root_from_subdirectory(self, tmp_path: Path):
-        (tmp_path / '.git').mkdir()
-        sub = tmp_path / 'src' / 'app'
-        sub.mkdir(parents=True)
-        assert find_git_root(sub) == tmp_path
-
-    def test_returns_none_when_no_git(self, tmp_path: Path):
-        assert find_git_root(tmp_path) is None
-
-
-class TestLoadGitignore:
-    def test_loads_gitignore(self, tmp_path: Path):
-        (tmp_path / '.gitignore').write_text('node_modules/\n*.log\n')
-        spec = load_gitignore(tmp_path)
-        assert spec.match_file('node_modules/')
-        assert spec.match_file('error.log')
-        assert not spec.match_file('main.py')
-
-    def test_no_gitignore(self, tmp_path: Path):
-        spec = load_gitignore(tmp_path)
-        assert not spec.match_file('anything.py')
-
-    def test_loads_git_info_exclude(self, tmp_path: Path):
-        git_info = tmp_path / '.git' / 'info'
-        git_info.mkdir(parents=True)
-        (git_info / 'exclude').write_text('secret/\n')
-        spec = load_gitignore(tmp_path)
-        assert spec.match_file('secret/')
-
-    def test_loads_gitignore_from_parent_repo(self, tmp_path: Path):
-        """Running from a subdirectory should find the repo root .gitignore."""
-        (tmp_path / '.git').mkdir()
-        (tmp_path / '.gitignore').write_text('node_modules/\n*.log\n')
-        sub = tmp_path / 'src' / 'app'
-        sub.mkdir(parents=True)
-        spec = load_gitignore(sub)
-        assert spec.match_file('node_modules/')
-        assert spec.match_file('error.log')
-
-    def test_loads_intermediate_gitignore(self, tmp_path: Path):
-        """Collects .gitignore files between git root and analysis dir."""
-        (tmp_path / '.git').mkdir()
-        (tmp_path / '.gitignore').write_text('*.log\n')
-        src = tmp_path / 'src'
-        src.mkdir()
-        (src / '.gitignore').write_text('vendor/\n')
-        app = src / 'app'
-        app.mkdir()
-        spec = load_gitignore(app)
-        assert spec.match_file('error.log')
-        assert spec.match_file('vendor/')
+from tallyman.walker import _is_binary, walk_project
 
 
 class TestIsBinary:

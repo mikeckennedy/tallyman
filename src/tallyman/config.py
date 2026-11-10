@@ -7,6 +7,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tallyman.paths import relative_posix
+
 CONFIG_FILENAME = '.tally-config.toml'
 
 
@@ -58,8 +60,7 @@ def discover_nested_configs(root: Path) -> TallyConfig:
         dirnames[:] = sorted(d for d in dirnames if not d.startswith('.'))
 
         dirpath = Path(dirpath_str)
-        rel_dir = dirpath.relative_to(root)
-        rel_dir_str = str(rel_dir) if rel_dir.parts else ''
+        rel_dir_str = relative_posix(dirpath, root)
 
         if not rel_dir_str:
             continue

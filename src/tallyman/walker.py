@@ -6,89 +6,12 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
-import pathspec
-
 from tallyman.config import CONFIG_FILENAME, load_config
+from tallyman.gitignore import GitIgnoreSpec, load_gitignore
 from tallyman.languages import Language, as_spec, identify_language
+from tallyman.paths import relative_posix
 
 SPEC_DIR_NAMES: frozenset[str] = frozenset({'specs', 'specifications', 'plans', 'agents'})
-
-
-def find_git_root(start: Path) -> Path | None:
-    """Walk up from *start* looking for a directory containing ``.git``.
-
-    Returns the git repo root, or None if not inside a git repository.
-    """
-    current = start.resolve()
-    while True:
-        if (current / '.git').exists():
-            return current
-        parent = current.parent
-        if parent == current:
-            return None
-        current = parent
-
-
-class GitIgnoreSpec:
-    """Wraps a pathspec with an optional path prefix for subdirectory matching.
-
-    When tallyman runs from a subdirectory of a git repo, gitignore patterns
-    are relative to the repo root.  This wrapper transparently prepends the
-    prefix so callers can keep using paths relative to the analysis directory.
-    """
-
-    def __init__(self, spec: pathspec.PathSpec, prefix: str = '') -> None:
-        self._spec = spec
-        self._prefix = prefix
-
-    def match_file(self, path: str) -> bool:
-        if self._prefix:
-            full = f'{self._prefix}/{path}'
-        else:
-            full = path
-        return self._spec.match_file(full)
-
-
-def load_gitignore(root: Path) -> GitIgnoreSpec:
-    """Load gitignore patterns, traversing up to find the git repo root.
-
-    Collects patterns from:
-    - ``<git-root>/.gitignore``
-    - ``<git-root>/.git/info/exclude``
-    - Any ``.gitignore`` in directories between the git root and *root*
-    """
-    git_root = find_git_root(root)
-    lines: list[str] = []
-
-    if git_root is None:
-        # Not in a git repo  -  just check for a local .gitignore
-        local_ignore = root / '.gitignore'
-        if local_ignore.is_file():
-            lines.extend(local_ignore.read_text(encoding='utf-8', errors='replace').splitlines())
-        return GitIgnoreSpec(pathspec.PathSpec.from_lines('gitignore', lines))  # type: ignore[arg-type]
-
-    # Load repo-root files
-    for ignore_file in [git_root / '.gitignore', git_root / '.git' / 'info' / 'exclude']:
-        if ignore_file.is_file():
-            lines.extend(ignore_file.read_text(encoding='utf-8', errors='replace').splitlines())
-
-    # Load intermediate .gitignore files between git root and analysis root
-    resolved_root = root.resolve()
-    if resolved_root != git_root:
-        rel = resolved_root.relative_to(git_root)
-        current = git_root
-        for part in rel.parts:
-            current = current / part
-            ignore_file = current / '.gitignore'
-            if ignore_file.is_file():
-                lines.extend(ignore_file.read_text(encoding='utf-8', errors='replace').splitlines())
-
-    spec = pathspec.PathSpec.from_lines('gitignore', lines)  # type: ignore[arg-type]
-
-    # Compute the prefix: path from git root to analysis root
-    prefix = str(resolved_root.relative_to(git_root)) if resolved_root != git_root else ''
-
-    return GitIgnoreSpec(spec, prefix)
 
 
 def _is_binary(path: Path) -> bool:
@@ -111,7 +34,8 @@ def walk_project(
     Args:
         root: Project root directory.
         excluded_dirs: Relative directory paths to skip (e.g. {'static/external'}).
-        gitignore_spec: Pre-loaded gitignore patterns. Loaded from root if None.
+        gitignore_spec: Pre-loaded gitignore patterns. Loaded from root if None. ``.gitignore``
+            files found while walking are registered on it as each directory is entered.
         spec_dirs: Relative directory paths designated as spec directories.
     """
     if gitignore_spec is None:
@@ -122,8 +46,10 @@ def walk_project(
 
     for dirpath_str, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
         dirpath = Path(dirpath_str)
-        rel_dir = dirpath.relative_to(root)
-        rel_dir_str = str(rel_dir) if rel_dir.parts else ''
+        rel_dir_str = relative_posix(dirpath, root)
+
+        # This directory's own .gitignore governs its children, so load it before filtering them
+        gitignore_spec.add_directory(rel_dir_str, dirpath)
 
         # Discover nested config files in subdirectories
         if rel_dir_str:

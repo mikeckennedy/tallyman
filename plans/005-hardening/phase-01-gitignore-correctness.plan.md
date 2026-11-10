@@ -67,3 +67,32 @@ This cannot be run on Windows here. Cover it with a unit test on whichever small
 - All reproduction cases pass.
 - Running `tallyman` on this repo still reports the same totals as before the change.
 - `pytest`, `ruff check` and `ruff format --check` are clean.
+
+## Outcome
+
+The per-directory design above shipped, but its matching layer changed during review. The first version used `pathspec.GitIgnoreSpec.check_file()` with "the last spec with an opinion wins". The architect review proved, against real git, that this breaks whenever negations are involved:
+
+- A whitelist file (`*`, `!*/`, `!*.py`) dropped every `.py` file below the root.
+- A deeper `!dist/` re-included every file under `dist/` that a parent had ignored.
+
+The cause is that pathspec judges whole paths: `dist/` matches `dist/notes.md`. Git judges one entry at a time and never looks inside an ignored directory. No pathspec setting reproduces that reliably, so `src/tallyman/gitignore.py` now compiles patterns itself following gitignore(5), and the `pathspec` dependency is gone.
+
+The scan root's own ancestors are also checked now: if any directory between the git root and the scan root is ignored, everything is ignored, as in git.
+
+A second review attacked the new compiler with adversarial patterns. It found one crash (a reversed bracket range such as `[z-a]` raised `re.PatternError`), a `FutureWarning` on doubled `-`, and rare bracket differences: POSIX classes, an unterminated `[`, `[/]`, and `d//`. It also found that `splitlines()` splits on form feeds. Bracket expressions are now parsed item by item, as git's wildmatch does. Checking the review's own claims against `git ls-files` corrected one of them: git matches a reversed range's first character, not nothing.
+
+**Verification:** a differential harness compares `walk_project()` with `git ls-files -o --exclude-standard`.
+
+| Code | Random repos differing from git |
+|---|---|
+| `main` | 194 of 400 |
+| First version of this phase | 40 of 400 |
+| Final | 0 of 1,900 (two pattern alphabets) |
+
+The final code also passes about 75 hand-written edge cases. The suite keeps 14 harness cases as `test_matches_git`, skipped where git isn't installed and isolated from the developer's global git config. A 51-row pattern-compiler table checks individual patterns and needs no git.
+
+**Known differences**, listed in the `gitignore.py` docstring:
+
+- Matching is case-sensitive. Git on a case-insensitive filesystem (`core.ignorecase`, the macOS default) is not.
+- `?` and bracket expressions match one character where git matches one byte.
+- Files git already tracks are still skipped when a pattern matches them.

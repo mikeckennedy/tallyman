@@ -10,7 +10,8 @@ from textual.containers import Horizontal
 from textual.widgets import Button, Footer, Header, Static, Tree
 from textual.widgets.tree import TreeNode
 
-from tallyman.walker import SPEC_DIR_NAMES, GitIgnoreSpec
+from tallyman.gitignore import GitIgnoreSpec
+from tallyman.walker import SPEC_DIR_NAMES
 
 
 class SetupTree(Tree[dict[str, object]]):
@@ -96,6 +97,8 @@ class SetupApp(App[tuple[set[str], set[str]] | None]):
         parent_is_spec: bool = False,
     ) -> None:
         """Recursively add subdirectories to the tree."""
+        # This directory's own .gitignore governs its children, matching walk_project()
+        self.gitignore_spec.add_directory(rel_path, dir_path)
         try:
             entries = sorted(dir_path.iterdir(), key=lambda p: p.name.lower())
         except PermissionError:

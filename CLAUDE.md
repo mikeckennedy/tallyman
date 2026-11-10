@@ -37,7 +37,6 @@ ruff format src/ tests/
 - **Python 3.14+** (uses match statements, dataclass slots, `tomllib`)
 - **textual**  -  TUI framework for first-run setup wizard
 - **rich**  -  colored terminal output
-- **pathspec**  -  gitignore pattern matching
 - **pytest** + **ruff** for dev tooling
 - Build backend: **hatchling**
 
@@ -61,6 +60,8 @@ cli.main()
 | `src/tallyman/cli.py` | Entry point. Arg parsing, orchestrates the pipeline |
 | `src/tallyman/languages.py` | Language registry (40+ languages). Frozen dataclasses with name, category, color, comment marker, extensions. `EXTENSION_MAP` for O(1) lookup |
 | `src/tallyman/walker.py` | Directory traversal. Respects gitignore + config exclusions. Detects spec dirs. Yields `(Path, Language)` |
+| `src/tallyman/gitignore.py` | Gitignore rules (`GitIgnoreSpec`, `load_gitignore`, `find_git_root`). Own pattern compiler that follows gitignore(5) |
+| `src/tallyman/paths.py` | `relative_posix()`: `/`-separated relative paths, safe on Windows |
 | `src/tallyman/counter.py` | Reads files, classifies lines as code/comment/blank. Returns `FileCount` |
 | `src/tallyman/aggregator.py` | Accumulates FileCount into LanguageStats, groups by category. Produces `TallyResult` |
 | `src/tallyman/display.py` | Rich-based rendering. Per-language stats, category totals, percentage bar |
@@ -96,7 +97,7 @@ TallyConfig                   # excluded_dirs: set[str], spec_dirs: set[str]
 
 6. **Auto-detected spec dirs:** `specs/`, `plans/`, `specifications/`, `agents/`  -  detected even without config.
 
-7. **Gitignore integration** loads patterns from repo root `.gitignore`, `.git/info/exclude`, and intermediate `.gitignore` files. Directory names get `/` appended for pattern matching.
+7. **Gitignore follows git, entry by entry.** `.git/info/exclude`, then every `.gitignore` from the repo root down, each scoped to its own directory; the deepest opinion wins. Nested files load lazily as the walker and TUI descend, and nothing inside an ignored directory is ever looked at. Callers pass directory paths with a trailing `/`. `tests/test_gitignore.py` checks parity with real `git`; its pattern-compiler table runs without git.
 
 ## Test Structure
 
@@ -104,7 +105,9 @@ TallyConfig                   # excluded_dirs: set[str], spec_dirs: set[str]
 |---|---|---|
 | `tests/test_counter.py` | 10 | Line counting, encoding errors |
 | `tests/test_languages.py` | 14 | Language registry, extension map, `as_spec` |
-| `tests/test_walker.py` | 24 | Git root, gitignore, walking, spec detection |
+| `tests/test_walker.py` | 26 | Walking, exclusions, spec detection, nested configs |
+| `tests/test_gitignore.py` | 92 | Git root, gitignore loading and scoping, negation, TUI agreement, parity with `git` |
+| `tests/test_paths.py` | 3 | POSIX relative paths |
 | `tests/test_aggregator.py` | 11 | Stats aggregation, categories, percentages |
 | `tests/test_config.py` | 25 | Config find/load/save, directory cleanup |
 

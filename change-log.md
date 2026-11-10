@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Plan: `plans/004-nested-config-discovery/`
 
 ### Fixed
+- Gitignore handling rewritten to follow git's rules, in the walker and the setup TUI alike:
+  - `.gitignore` files below the scanned directory are honoured, including the `*` file uv and virtualenv write inside a venv.
+  - Each file's patterns are anchored to the directory it lives in, and a deeper file wins, so `!pattern` can re-include.
+  - Patterns judge one entry at a time, as git does: `!dist/` re-includes the `dist` directory without re-including what a parent ignored inside it, and whitelist files (`*`, `!*/`, `!*.py`) keep the files they name.
+  - `.git/info/exclude` ranks below `.gitignore`; nothing inside an ignored directory is counted, even when the scan starts inside it.
+  - Odd lines behave as in git instead of breaking the scan: a BOM, an unreadable `.gitignore`, a malformed bracket expression such as `[z-a]` or an unterminated `[`, POSIX classes such as `[[:digit:]]`, and form feeds inside a pattern.
+  - Verified against `git ls-files --exclude-standard` on 1,900 generated repositories and about 75 hand-written edge cases, with no differences.
+  - Known differences, all documented in `gitignore.py`: matching is case-sensitive (git on macOS is not, by default); `?` matches one character where git matches one byte; and files git already tracks are still skipped if a pattern matches them.
+- Relative paths are always built with `/`, so config exclusions and spec directories nested two or more levels deep match on Windows.
+- Removed the `pathspec` dependency; tallyman now compiles gitignore patterns itself (`src/tallyman/gitignore.py`).
+- Files: `src/tallyman/gitignore.py`, `src/tallyman/walker.py`, `src/tallyman/paths.py`, `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/tui/setup_app.py`, `pyproject.toml`, `uv.lock`, `tests/test_gitignore.py`, `tests/test_walker.py`, `tests/test_paths.py`
+- Plan: `plans/005-hardening/phase-01-gitignore-correctness.plan.md`
+
 - Fixed `ColorParseError` crash when generating image for projects containing TypeScript files — `dodger_blue` is not a valid Rich color name; changed to `dodger_blue1`
 - Added defensive fallback in `_rich_color_to_rgb` so unrecognised color names degrade to grey instead of crashing the image export
 - Files: `src/tallyman/languages.py`, `src/tallyman/image.py`
