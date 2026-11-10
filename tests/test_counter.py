@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tallyman.counter import FileCount, count_lines
 from tallyman.languages import Language
 
@@ -88,3 +90,45 @@ class TestCountLines:
         result = count_lines(f, _lang('#'))
         assert result.total_lines == 2
         assert result.code_lines == 2
+
+
+class TestLineEndingsAndEncodings:
+    @pytest.mark.parametrize(
+        ('data', 'total', 'blank'),
+        [
+            (b'', 0, 0),
+            (b'\n', 1, 1),
+            (b'a = 1', 1, 0),  # a last line without a newline still counts
+            (b'a = 1\nb = 2\n', 2, 0),
+            (b'a = 1\r\nb = 2\r\n', 2, 0),
+            (b'a = 1\rb = 2\r', 2, 0),  # old Mac line endings
+            (b'a = 1\n\x0c\nb = 2\n', 3, 1),  # a form feed is not a line break (wc -l says 3)
+            (b'a = 1\x0bb = 2\x1cc\n', 1, 0),  # nor are vertical tab and file separator
+            (b'a = 1\n\xe2\x80\xa8b\n', 2, 0),  # nor U+2028 LINE SEPARATOR
+            (b'a\r\nb\rc\nd', 4, 0),  # mixed endings, last line unterminated
+            (b'a\r\r\nb\n', 3, 1),  # CR then CRLF: an empty line between, as editors show it
+            (b'\xef\xbb\xbf', 0, 0),  # a BOM and nothing else
+            (b'caf\xe9 = 1\n', 1, 0),  # Latin-1 bytes are replaced, not fatal
+            (b'\xff\xfea\x00\n\x00b', 2, 0),  # UTF-16 with an odd byte count
+        ],
+    )
+    def test_only_real_line_breaks_split_lines(self, tmp_path: Path, data: bytes, total: int, blank: int):
+        f = tmp_path / 'x.py'
+        f.write_bytes(data)
+        result = count_lines(f, _lang('#'))
+        assert (result.total_lines, result.blank_lines) == (total, blank)
+
+    def test_utf8_bom_does_not_hide_a_first_line_comment(self, tmp_path: Path):
+        f = tmp_path / 'bom.py'
+        f.write_bytes(b'\xef\xbb\xbf# comment\nx = 1\n')
+        assert count_lines(f, _lang('#')) == FileCount(total_lines=2, code_lines=1, comment_lines=1)
+
+    @pytest.mark.parametrize('encoding', ['utf-16', 'utf-16-be', 'utf-32', 'utf-32-be'])
+    def test_wide_encodings_with_a_bom(self, tmp_path: Path, encoding: str):
+        f = tmp_path / 'wide.sql'
+        text = '-- comment\nselect 1;\n\n'
+        data = text.encode(encoding)
+        if encoding.endswith('-be'):
+            data = (b'\xfe\xff' if encoding == 'utf-16-be' else b'\x00\x00\xfe\xff') + data  # -be codecs write no BOM
+        f.write_bytes(data)
+        assert count_lines(f, _lang('--')) == FileCount(total_lines=3, code_lines=1, comment_lines=1, blank_lines=1)

@@ -5,11 +5,15 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Union
 
 from tallyman import __version__
 from tallyman.aggregator import TallyResult, language_percentages
 from tallyman.display import _language_display_names
 from tallyman.languages import Language
+
+if TYPE_CHECKING:  # Pillow is imported lazily at runtime
+    from PIL.ImageFont import FreeTypeFont, ImageFont
 
 IMAGE_WIDTH = 1200
 PADDING = 60
@@ -97,6 +101,15 @@ def _load_font(size: int, bold: bool = False):
     return ImageFont.load_default()
 
 
+def _fit_text(text: str, font: Union[FreeTypeFont, ImageFont], max_width: int) -> str:
+    """Shorten *text* with an ellipsis until it fits in *max_width* pixels."""
+    if font.getlength(text) <= max_width:
+        return text
+    while len(text) > 1 and font.getlength(text + '…') > max_width:
+        text = text[:-1]
+    return text.rstrip() + '…'
+
+
 def _cap_legend(
     main_langs: list[tuple[Language | None, float]],
     display_names: dict[Language, str],
@@ -176,7 +189,7 @@ def generate_image(
     y = PADDING
 
     # Title
-    title = f'Code stats for {directory}'
+    title = _fit_text(f'Code stats for {directory}', font_title, IMAGE_WIDTH - 2 * PADDING)
     draw.text((PADDING, y), title, font=font_title, fill=text_rgb)
     y += LINE_HEIGHT + title_gap
 
@@ -254,10 +267,13 @@ def generate_image(
     img.save(output_path, 'PNG')
 
 
+MAX_SLUG_LENGTH = 100  # well under the 255-byte filename limit, leaving room for '-N.png'
+
+
 def slugify_directory_name(name: str) -> str:
-    """Convert directory name to URL-slug style for filename."""
+    """Convert directory name to URL-slug style for filename (ASCII only, at most MAX_SLUG_LENGTH chars)."""
     slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
-    return slug or 'tallyman-report'
+    return slug[:MAX_SLUG_LENGTH].rstrip('-') or 'tallyman-report'
 
 
 def resolve_image_path(directory_name: str, desktop_preferred: bool = True) -> Path:

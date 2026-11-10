@@ -9,7 +9,10 @@ from tallyman.counter import FileCount
 from tallyman.image import (
     DARK_THEME,
     LIGHT_THEME,
+    MAX_SLUG_LENGTH,
+    _fit_text,
     _hex_to_rgb,
+    _load_font,
     _rich_color_to_rgb,
     generate_image,
     resolve_image_path,
@@ -39,6 +42,12 @@ class TestSlugifyDirectoryName:
 
     def test_single_word_lowercase(self):
         assert slugify_directory_name('Tallyman') == 'tallyman'
+
+    def test_long_names_are_capped(self):
+        assert len(slugify_directory_name('a' * 253)) == MAX_SLUG_LENGTH
+
+    def test_cap_does_not_leave_a_trailing_hyphen(self):
+        assert not slugify_directory_name('ab ' * 60).endswith('-')
 
 
 class TestResolveImagePath:
@@ -128,6 +137,20 @@ class TestGenerateImage:
         assert out.exists()
         with open(out, 'rb') as f:
             assert f.read(8) == b'\x89PNG\r\n\x1a\n'
+
+    def test_long_directory_name_saves_and_fits(self, tmp_path):
+        """A 253-character name used to crash the save with 'File name too long'."""
+        name = 'x' * 253
+        out = resolve_image_path(name, desktop_preferred=False).name
+        generate_image(self._make_tally(), name, tmp_path / out, DARK_THEME)
+        assert (tmp_path / out).exists()
+
+    def test_fit_text_adds_an_ellipsis_only_when_needed(self):
+        font = _load_font(36, bold=True)
+        assert _fit_text('short', font, 1080) == 'short'
+        fitted = _fit_text('Code stats for ' + 'x' * 200, font, 1080)
+        assert fitted.endswith('…')
+        assert font.getlength(fitted) <= 1080
 
     def test_dark_and_light_differ(self, tmp_path):
         tally = self._make_tally()

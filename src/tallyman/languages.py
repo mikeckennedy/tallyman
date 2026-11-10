@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import functools
+import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 
 @dataclass(frozen=True, slots=True)
 class Language:
     name: str
-    category: str  # 'code', 'devops', 'design', 'docs', 'data'
+    category: str  # 'code', 'devops', 'design', 'docs', 'specs' (via as_spec), 'data'
     color: str  # Rich color name
     single_line_comment: str | None  # e.g. '#', '//', '--'; None if no simple detection
     extensions: tuple[str, ...]
@@ -36,7 +38,7 @@ LANGUAGES: tuple[Language, ...] = (
     Language('Lua',          'code',   'blue',            '--', ('.lua',)),
     Language('PHP',          'code',   'medium_purple3',  '//', ('.php',)),
     Language('Perl',         'code',   'grey62',          '#',  ('.pl', '.pm')),
-    Language('R',            'code',   'bright_blue',     '#',  ('.r', '.R')),
+    Language('R',            'code',   'dodger_blue3',    '#',  ('.r', '.R')),
     Language('Dart',         'code',   'cyan3',           '//', ('.dart',)),
     Language('Scala',        'code',   'red3',            '//', ('.scala',)),
     Language('Elixir',       'code',   'dark_violet',     '#',  ('.ex', '.exs')),
@@ -46,7 +48,7 @@ LANGUAGES: tuple[Language, ...] = (
     Language('OCaml',        'code',   'sandy_brown',     None, ('.ml', '.mli')),
     Language('Nim',          'code',   'gold3',           '#',  ('.nim', '.nims')),
     Language('V',            'code',   'sky_blue1',       '//', ('.v', '.vv')),
-    Language('Solidity',     'code',   'bright_cyan',     '//', ('.sol',)),
+    Language('Solidity',     'code',   'slate_blue1',     '//', ('.sol',)),
     # --- DevOps ---
     Language('Terraform',    'devops', 'purple4',         '#',  ('.tf', '.tfvars')),
     Language('Makefile',     'devops', 'bright_white',    '#',  ('.mk',)),
@@ -55,7 +57,7 @@ LANGUAGES: tuple[Language, ...] = (
     Language('CSS',          'design', 'magenta',         None, ('.css',)),
     Language('SCSS',         'design', 'hot_pink',        '//', ('.scss',)),
     Language('LESS',         'design', 'magenta3',        '//', ('.less',)),
-    Language('HTML',         'design', 'dark_orange',     None, (
+    Language('HTML',         'design', 'indian_red',      None, (
         '.html', '.htm', '.xhtml', '.shtml',                                   # plain HTML
         '.pt', '.jinja', '.jinja2', '.j2', '.njk', '.hbs', '.ejs', '.mustache',  # template formats
     )),
@@ -104,19 +106,37 @@ def _build_filename_map() -> dict[str, Language]:
 FILENAME_MAP: dict[str, Language] = _build_filename_map()
 
 
-def identify_language(path: Path) -> Language | None:
+# Compose file variants: docker-compose.override.yml, compose.prod.yaml, ...
+_COMPOSE_VARIANT = re.compile(r'(?:docker-)?compose\.[^/]+\.ya?ml')
+
+# Dockerfile variants: Dockerfile.dev, Dockerfile.go (per-language images), Dockerfile.j2, Dockerfile-prod, ...
+_DOCKERFILE_VARIANT = re.compile(r'Dockerfile[._-].+')
+# ...except a docs or data extension (Dockerfile.md, Dockerfile.json, ...), .txt and .dockerignore,
+# which mark a file *about* a Dockerfile rather than one
+_NOT_A_DOCKERFILE = frozenset(
+    {ext for lang in LANGUAGES if lang.category in ('docs', 'data') for ext in lang.extensions}
+    | {'.txt', '.dockerignore'}
+)
+
+
+def identify_language(path: Path) -> Optional[Language]:
     """Return the Language for a file path, or None if unrecognized.
 
     Checks exact filename matches first (e.g. Makefile, docker-compose.yml),
-    then Dockerfile prefix variants (Dockerfile.dev, Dockerfile.prod),
-    then falls back to extension matching.
+    then Dockerfile and Compose variants (Dockerfile.dev, Dockerfile.go,
+    Dockerfile-prod, compose.prod.yaml), then falls back to extension
+    matching. A Dockerfile variant with a docs or data suffix (Dockerfile.md,
+    Dockerfile.dockerignore) is not a Dockerfile.
     """
     name = path.name
     if name in FILENAME_MAP:
         return FILENAME_MAP[name]
-    if name.startswith('Dockerfile'):
+    suffix = path.suffix.lower()
+    if _DOCKERFILE_VARIANT.fullmatch(name) and suffix not in _NOT_A_DOCKERFILE:
         return FILENAME_MAP['Dockerfile']
-    return EXTENSION_MAP.get(path.suffix.lower())
+    if _COMPOSE_VARIANT.fullmatch(name):
+        return FILENAME_MAP['docker-compose.yml']
+    return EXTENSION_MAP.get(suffix)
 
 
 @functools.cache

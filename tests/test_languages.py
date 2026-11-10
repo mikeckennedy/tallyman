@@ -191,3 +191,55 @@ class TestAsSpec:
         spec_rst = as_spec(rst)
         assert spec_rst.category == 'specs'
         assert spec_rst.name == 'reStructuredText'
+
+
+@pytest.mark.parametrize(
+    ('name', 'expected'),
+    [
+        ('Dockerfile', 'Docker'),
+        ('Dockerfile.dev', 'Docker'),
+        ('Dockerfile.prod', 'Docker'),
+        ('Dockerfile.md', 'Markdown'),  # a known extension wins
+        ('Dockerfiles.py', 'Python'),
+        ('docker-compose.yml', 'Docker'),
+        ('docker-compose.override.yml', 'Docker'),
+        ('compose.prod.yaml', 'Docker'),
+        ('mycompose.prod.yml', 'YAML'),
+        ('compose.yml.bak', None),
+        ('Dockerfile.go', 'Docker'),  # per-language images: a Dockerfile, not Go
+        ('Dockerfile.j2', 'Docker'),
+        ('Dockerfile-dev', 'Docker'),
+        ('Dockerfile_prod', 'Docker'),
+        ('Dockerfile.json', 'JSON'),
+        ('Dockerfile.toml', 'TOML'),  # any docs or data extension
+        ('Dockerfile.mdx', 'Markdown'),
+        ('Dockerfile.txt', None),
+        ('Dockerfile.dockerignore', None),  # BuildKit's per-Dockerfile ignore file
+        ('api.Dockerfile', 'Docker'),
+        ('dockerfile', None),
+        ('docker-compose.yml.example', None),
+    ],
+)
+def test_docker_and_compose_variants(name: str, expected: str):
+    lang = identify_language(Path(name))
+    assert (lang.name if lang else None) == expected
+
+
+# C and its header share a colour on purpose. No other language may share one.
+_SHARED_COLOURS = {frozenset({'C', 'C/C++ Header'})}
+
+
+def test_every_colour_is_a_valid_rich_colour():
+    """An invalid name (like 'dodger_blue' once) crashes image export."""
+    from rich.color import Color
+
+    for lang in LANGUAGES:
+        Color.parse(lang.color)
+
+
+def test_no_new_shared_colours():
+    by_colour: dict[str, set[str]] = {}
+    for lang in LANGUAGES:
+        by_colour.setdefault(lang.color, set()).add(lang.name)
+    shared = {frozenset(names) for names in by_colour.values() if len(names) > 1}
+    assert shared <= _SHARED_COLOURS, shared - _SHARED_COLOURS

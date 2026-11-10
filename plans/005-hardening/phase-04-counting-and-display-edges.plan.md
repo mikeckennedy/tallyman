@@ -56,3 +56,26 @@ Tests in `tests/test_counter.py`: form feed, lone `\r`, `\r\n`, no trailing newl
 - Each item has a passing test.
 - Totals for this repo are unchanged, apart from any difference explained by a decision-5 default.
 - `pytest`, `ruff check` and `ruff format --check` are clean.
+
+## Outcome
+
+Implemented as planned. On this repo the branch counts the same files as `main`, and every per-file count is identical except this plan file. It contains literal U+2028 and U+2029 characters, so `main` counted 60 lines where `wc -l` and the branch count 58.
+
+**Architect review fixes:**
+
+- **Dockerfile naming.** The H13 rule as written above ("a known suffix goes by its extension") broke per-language images such as `Dockerfile.go` and `Dockerfile.php`, plus `Dockerfile.j2` and `Dockerfile-dev`. Those were Docker on `main`. The rule is now: `Dockerfile[._-]<anything>` is Docker, unless the suffix marks a file about a Dockerfile (`.md`, `.txt`, `.rst`, `.json`, `.yml`, `.yaml`, `.dockerignore`).
+- **Display.** `markup=False` still turned `:rocket:` into an emoji. The header now prints a plain `Text` with control characters replaced.
+- **Case.** Generated-file names are matched case-insensitively, and `pnpm-lock.yaml` joins the list. It fits decision 5's rationale but goes beyond its explicit list, so it is flagged for Michael.
+- **Encoding module.** BOM handling moved to `encoding.py`, so the walker no longer imports the counter. A stray literal BOM character in the source was removed.
+- **Image.** The slug is capped at 100 characters (a 253-character name crashed the save), and a long title is shortened with an ellipsis.
+
+**Deliberate differences from `wc -l`.** A final line without a newline counts, and a lone `\r` ends a line. `wc -l` reports 1 line for `a\nb` and 0 for an all-`\r` file.
+
+**Known limitations, not fixed:**
+
+- A UTF-16 file without a BOM is skipped as binary.
+- Hard links are counted twice.
+- The image's JetBrains Mono font has no CJK or emoji glyphs.
+- All-non-ASCII directory names produce the slug `tallyman-report`; the ASCII-only slug is a tested contract.
+
+**For phase 5's README.** Document that `.github/` and other hidden directories aren't counted, and that symlinked files are skipped.

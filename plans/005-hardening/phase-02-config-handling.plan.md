@@ -77,3 +77,29 @@ Add `tests/test_cli.py` (new), calling `cli.main()` with `sys.argv` patched and 
 - The H3 reproduction gives the correct file list.
 - `tallyman some/dir < /dev/null` on a directory with no config returns promptly.
 - `pytest`, `ruff check` and `ruff format --check` are clean.
+
+## Outcome
+
+Implemented as planned, plus fixes from the architect review.
+
+**Review fixes:**
+
+- A non-UTF-8 config raised `UnicodeDecodeError`, which is not a `TOMLDecodeError`. That gave a traceback, and in a nested config it aborted the whole scan. This was a regression from narrowing `except Exception`.
+- `--setup` run inside a parent-config spec directory saved an empty config, so specs became docs. The `root_is_spec` field could not be saved. It is gone: `"."` in `[specs] directories` now means "this directory", and it round-trips through setup.
+- Scanning from inside an auto-detected spec directory counted Docs.
+- The error hint pointed at the scan root instead of the broken config's directory.
+- A failed config save lost the user's setup choices. A closed stdin crashed. A mistyped path case on macOS (`proj/SRC`) defeated rebasing; `paths.canonical_case()` now fixes the spelling.
+- The `--setup` path had no test of its pre-fill or saved file.
+
+**Deferred, needs Michael's decision.** Nearest config wins, so a parent's exclusions vanish when a closer config exists. For example:
+
+- `n/.tally-config.toml` excludes `src/vendor`.
+- `n/src/.tally-config.toml` excludes `gen`.
+- Scanning `n/src` counts `vendor`.
+
+The fix would be to union every config from the git root down to the scan root, matching how nested configs below the root already merge. But setup saves only at the scan root, so a user could no longer remove a parent's exclusion from the TUI. This is the same "top-level takes precedence" rule plan 004 chose for nested configs. It interacts with issue #6's pattern excludes, so decide it there.
+
+**README, for phase 5:**
+
+- The config search boundary and the no-terminal behaviour are not documented.
+- A dotfiles repo (`~/.git`) makes `~` the git root, so `~/.tally-config.toml` is then found from any directory below it that isn't its own repo. Rebasing keeps the counts right, but it suppresses first-run setup.

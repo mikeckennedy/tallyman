@@ -1,67 +1,13 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from typing import Optional
+
+import pytest
 
 from tallyman.config import save_config
-from tallyman.walker import _is_binary, find_git_root, load_gitignore, walk_project
-
-
-class TestFindGitRoot:
-    def test_finds_git_root(self, tmp_path: Path):
-        (tmp_path / '.git').mkdir()
-        assert find_git_root(tmp_path) == tmp_path
-
-    def test_finds_git_root_from_subdirectory(self, tmp_path: Path):
-        (tmp_path / '.git').mkdir()
-        sub = tmp_path / 'src' / 'app'
-        sub.mkdir(parents=True)
-        assert find_git_root(sub) == tmp_path
-
-    def test_returns_none_when_no_git(self, tmp_path: Path):
-        assert find_git_root(tmp_path) is None
-
-
-class TestLoadGitignore:
-    def test_loads_gitignore(self, tmp_path: Path):
-        (tmp_path / '.gitignore').write_text('node_modules/\n*.log\n')
-        spec = load_gitignore(tmp_path)
-        assert spec.match_file('node_modules/')
-        assert spec.match_file('error.log')
-        assert not spec.match_file('main.py')
-
-    def test_no_gitignore(self, tmp_path: Path):
-        spec = load_gitignore(tmp_path)
-        assert not spec.match_file('anything.py')
-
-    def test_loads_git_info_exclude(self, tmp_path: Path):
-        git_info = tmp_path / '.git' / 'info'
-        git_info.mkdir(parents=True)
-        (git_info / 'exclude').write_text('secret/\n')
-        spec = load_gitignore(tmp_path)
-        assert spec.match_file('secret/')
-
-    def test_loads_gitignore_from_parent_repo(self, tmp_path: Path):
-        """Running from a subdirectory should find the repo root .gitignore."""
-        (tmp_path / '.git').mkdir()
-        (tmp_path / '.gitignore').write_text('node_modules/\n*.log\n')
-        sub = tmp_path / 'src' / 'app'
-        sub.mkdir(parents=True)
-        spec = load_gitignore(sub)
-        assert spec.match_file('node_modules/')
-        assert spec.match_file('error.log')
-
-    def test_loads_intermediate_gitignore(self, tmp_path: Path):
-        """Collects .gitignore files between git root and analysis dir."""
-        (tmp_path / '.git').mkdir()
-        (tmp_path / '.gitignore').write_text('*.log\n')
-        src = tmp_path / 'src'
-        src.mkdir()
-        (src / '.gitignore').write_text('vendor/\n')
-        app = src / 'app'
-        app.mkdir()
-        spec = load_gitignore(app)
-        assert spec.match_file('error.log')
-        assert spec.match_file('vendor/')
+from tallyman.walker import _is_binary, inside_auto_spec_dir, walk_project
 
 
 class TestIsBinary:
@@ -365,3 +311,123 @@ class TestWalkProjectNestedConfigs:
         assert 'app.py' in paths
         assert 'v.py' not in paths  # excluded by nested config
         assert 'c.py' not in paths  # excluded by top-level
+
+
+class TestSpecRootAndNestedConfigs:
+    def test_dot_in_spec_dirs_makes_every_level_a_spec(self, tmp_path: Path):
+        (tmp_path / 'top.md').write_text('# t\n')
+        (tmp_path / 'sub').mkdir()
+        (tmp_path / 'sub' / 'deep.md').write_text('# d\n')
+        (tmp_path / 'code.py').write_text('x = 1\n')
+        cats = {p.name: lang.category for p, lang in walk_project(tmp_path, set(), spec_dirs={'.'})}
+        assert cats == {'top.md': 'specs', 'deep.md': 'specs', 'code.py': 'code'}
+
+    def test_nested_config_marking_its_own_directory_as_specs(self, tmp_path: Path):
+        sub = tmp_path / 'design'
+        sub.mkdir()
+        (sub / '.tally-config.toml').write_text('[specs]\ndirectories = ["."]\n')
+        (sub / 'a.md').write_text('# a\n')
+        (tmp_path / 'b.md').write_text('# b\n')
+        cats = {p.name: lang.category for p, lang in walk_project(tmp_path, set())}
+        assert cats['a.md'] == 'specs'
+        assert cats['b.md'] == 'docs'
+
+    @pytest.mark.parametrize('payload', [b'not toml [\n', b'[exclude]\ndirectories = ["caf\xe9"]\n'])
+    def test_malformed_nested_config_is_skipped(self, tmp_path: Path, payload: bytes):
+        """A broken config inside the scanned tree (often third-party) must not stop the scan."""
+        sub = tmp_path / 'vendor'
+        sub.mkdir()
+        (sub / '.tally-config.toml').write_bytes(payload)
+        (sub / 'v.py').write_text('x = 1\n')
+        assert {p.name for p, _ in walk_project(tmp_path, set())} == {'v.py'}
+
+
+class TestInsideAutoSpecDir:
+    def test_subdirectory_of_plans(self, tmp_path: Path):
+        (tmp_path / '.git').mkdir()
+        (tmp_path / 'plans' / 'sub').mkdir(parents=True)
+        assert inside_auto_spec_dir(tmp_path / 'plans')
+        assert inside_auto_spec_dir(tmp_path / 'plans' / 'sub')
+        assert not inside_auto_spec_dir(tmp_path)
+
+    def test_repo_named_like_a_spec_dir_is_not_specs(self, tmp_path: Path):
+        repo = tmp_path / 'agents'
+        (repo / '.git').mkdir(parents=True)
+        assert not inside_auto_spec_dir(repo)
+
+    def test_outside_a_repo(self, tmp_path: Path):
+        (tmp_path / 'plans').mkdir()
+        assert not inside_auto_spec_dir(tmp_path / 'plans')
+
+
+def _categories(
+    root: Path, spec_dirs: Optional[set[str]] = None, non_spec_dirs: Optional[set[str]] = None
+) -> dict[str, str]:
+    found = walk_project(root, set(), spec_dirs=spec_dirs, non_spec_dirs=non_spec_dirs)
+    return {p.relative_to(root).as_posix(): lang.category for p, lang in found}
+
+
+class TestSpecIgnore:
+    """[specs] ignore: non_spec_dirs switch spec classification off for a subtree."""
+
+    @pytest.fixture
+    def tree(self, tmp_path: Path) -> Path:
+        for rel in ['plans/a.md', 'plans/sub/b.md', 'plans/agents/c.md', 'agents/plans/d.md', 'agents/e.md', 'f.md']:
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel).write_text('# x\n')
+        return tmp_path
+
+    def test_ignore_suppresses_auto_detection_for_the_whole_subtree(self, tree: Path):
+        cats = _categories(tree, non_spec_dirs={'plans'})
+        assert cats['plans/a.md'] == cats['plans/sub/b.md'] == cats['plans/agents/c.md'] == 'docs'
+        assert cats['agents/e.md'] == cats['agents/plans/d.md'] == 'specs'  # untouched elsewhere
+
+    def test_a_deeper_explicit_spec_still_wins(self, tree: Path):
+        cats = _categories(tree, spec_dirs={'agents/plans'}, non_spec_dirs={'agents'})
+        assert cats['agents/e.md'] == 'docs'
+        assert cats['agents/plans/d.md'] == 'specs'
+
+    def test_a_deeper_ignore_wins_over_an_explicit_spec(self, tree: Path):
+        cats = _categories(tree, spec_dirs={'.'}, non_spec_dirs={'agents'})
+        assert cats['f.md'] == cats['plans/a.md'] == 'specs'
+        assert cats['agents/e.md'] == cats['agents/plans/d.md'] == 'docs'
+
+    def test_dot_turns_off_auto_detection_everywhere(self, tree: Path):
+        assert set(_categories(tree, non_spec_dirs={'.'}).values()) == {'docs'}
+
+    def test_nested_config_ignore_is_translated(self, tree: Path):
+        (tree / 'agents' / '.tally-config.toml').write_text('[specs]\nignore = ["plans"]\n')
+        cats = _categories(tree)
+        assert cats['agents/plans/d.md'] == 'docs'
+        assert cats['agents/e.md'] == 'specs'
+
+
+class TestFileSelection:
+    def test_skips_generated_files(self, tmp_path: Path):
+        names = ['.tally-config.toml', 'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'app.min.js']
+        for name in [*names, 'site.MIN.css', 'Package-Lock.json', 'sub/deep/package-lock.json', 'sub/x.min.js']:
+            (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / name).write_text('{}\n')
+        (tmp_path / 'package.json').write_text('{}\n')
+        (tmp_path / 'app.js').write_text('x\n')
+        (tmp_path / 'pyproject.toml').write_text('[x]\n')
+        assert {p.name for p, _ in walk_project(tmp_path, set())} == {'package.json', 'app.js', 'pyproject.toml'}
+
+    @pytest.mark.skipif(sys.platform == 'win32', reason='creating symlinks needs privileges on Windows')
+    def test_symlinked_file_is_not_counted_twice(self, tmp_path: Path):
+        (tmp_path / 'real.py').write_text('x = 1\n')
+        (tmp_path / 'link.py').symlink_to(tmp_path / 'real.py')
+        (tmp_path / 'broken.py').symlink_to(tmp_path / 'missing.py')
+        outside = tmp_path.parent / f'{tmp_path.name}-outside.md'
+        outside.write_text('# o\n')
+        (tmp_path / 'outside.md').symlink_to(outside)  # content lives elsewhere: not counted here
+        assert {p.name for p, _ in walk_project(tmp_path, set())} == {'real.py'}
+
+    def test_utf16_file_is_text_not_binary(self, tmp_path: Path):
+        (tmp_path / 'wide.sql').write_bytes('select 1;\n'.encode('utf-16'))
+        assert {p.name for p, _ in walk_project(tmp_path, set())} == {'wide.sql'}
+
+    def test_nul_after_the_first_8kb_is_not_binary(self, tmp_path: Path):
+        f = tmp_path / 'late_nul.py'
+        f.write_bytes(b'x = 1\n' * 2000 + b'\x00')  # NUL beyond the first 8 KB
+        assert not _is_binary(f)

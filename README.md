@@ -30,7 +30,7 @@ tallyman --with-spaces      # use total lines (incl. comments/blanks) for totals
 
 ## Why Tallyman?
 
-Tools like [cloc](https://github.com/AlDanial/cloc), [tokei](https://github.com/XACode/tokei), and [scc](https://github.com/boyter/scc) are excellent at counting lines of code. If all you need is raw numbers, they're great choices.
+Tools like [cloc](https://github.com/AlDanial/cloc), [tokei](https://github.com/XAMPPRocky/tokei), and [scc](https://github.com/boyter/scc) are excellent at counting lines of code. If all you need is raw numbers, they're great choices.
 
 But line counts alone don't tell you much about a project's *shape*. Is your codebase mostly application logic, or has the CSS layer quietly grown to rival your backend? Are those Markdown files general docs, or are they specifications driving your development? How much of your project is configuration and data files versus actual code?
 
@@ -41,7 +41,7 @@ A few things that set it apart:
 - **Category-aware analysis** - Results grouped by intent, not just by file extension. You see *what kind* of work your project contains, not just how many lines of each language.
 - **Automatic spec detection** - Markdown and reStructuredText files in directories like `specs/`, `plans/`, or `agents/` are automatically reclassified from Docs to Specs. If you're using planning documents to drive development (especially with AI-assisted workflows), Tallyman tracks that separately.
 - **Interactive first-run setup** - On first run, Tallyman launches a TUI where you can walk your project's directory tree and mark directories to exclude or flag as spec directories. Your choices are saved to `.tally-config.toml` so subsequent runs are instant.
-- **Gitignore-aware** - Tallyman reads your `.gitignore` and `.git/info/exclude` patterns automatically. It skips virtual environments, `node_modules`, build artifacts, and anything else you've already told Git to ignore.
+- **Gitignore-aware** - Tallyman follows the same rules as Git: every `.gitignore` in your tree, plus `.git/info/exclude`, scoped and prioritised the way Git does it. (Differences: matching is case-sensitive, the global excludes file isn't read, and a tracked file under an ignored pattern is skipped.) It skips virtual environments, `node_modules`, build artifacts, and anything else you've already told Git to ignore.
 - **Visual composition bar** - A colored percentage bar at the bottom shows you the language distribution of your project in a single glance.
 
 
@@ -49,7 +49,7 @@ A few things that set it apart:
 
 - **Dual line counts** - Total lines and effective lines (excluding comments and blanks) per language. Use `--with-spaces` to base summaries and percentages on total lines instead
 - **Six categories** - Code, DevOps, Design, Docs, Specs, and Data, each with aggregated totals
-- **41 languages** - From Python and Rust to Solidity, Terraform, and Docker, with full template support for HTML (Jinja, Nunjucks, Handlebars, and more)
+- **43 languages** - From Python and Rust to Solidity, Terraform, and Docker, with full template support for HTML (Jinja, Nunjucks, Handlebars, and more)
 - **Beautiful output** - Colored, formatted results with a language composition bar, powered by [Rich](https://github.com/Textualize/rich)
 - **Realistic metrics** - Only counts files *you* wrote, not third-party dependencies or generated code
 - **Persistent config** - Your setup choices are saved to `.tally-config.toml` and reused on every run
@@ -75,13 +75,13 @@ The card includes category totals with effective line counts, a colored language
 
 ## Supported Languages
 
-Tallyman recognizes **41 languages** across six categories:
+Tallyman recognizes **43 languages** across six categories:
 
 | Category | Languages |
 |----------|-----------|
-| **Code** | Python, Rust, Go, JavaScript, TypeScript, Java, C, C++, C#, Swift, Kotlin, Ruby, Shell, Lua, PHP, Perl, R, Dart, Scala, Elixir, Zig, Haskell, Erlang, OCaml, Nim, V, Solidity |
+| **Code** | Python, Rust, Go, JavaScript, TypeScript, Java, C, C/C++ Header, C++, C#, Swift, Kotlin, Ruby, Shell, Lua, PHP, Perl, R, Dart, Scala, Elixir, Zig, Haskell, Erlang, OCaml, Nim, V, Solidity |
 | **DevOps** | Terraform, Makefile, Docker |
-| **Design** | CSS, SCSS, LESS, HTML (+ 12 template formats), SVG |
+| **Design** | CSS, SCSS, LESS, HTML (+ 8 template formats), SVG |
 | **Docs** | Markdown, reStructuredText |
 | **Specs** | Markdown and reStructuredText files auto-detected in spec directories |
 | **Data** | TOML, YAML, JSON, XML, SQL |
@@ -100,7 +100,7 @@ Tallyman recognizes **41 languages** across six categories:
 | TypeScript | `.ts`, `.tsx` |
 | Java | `.java` |
 | C | `.c` |
-| C Header | `.h` |
+| C/C++ Header | `.h` |
 | C++ | `.cpp`, `.hpp`, `.cc`, `.cxx` |
 | C# | `.cs` |
 | Swift | `.swift` |
@@ -128,7 +128,7 @@ Tallyman recognizes **41 languages** across six categories:
 |----------|----------------------|
 | Terraform | `.tf`, `.tfvars` |
 | Makefile | `.mk`, `Makefile`, `makefile`, `GNUmakefile` |
-| Docker | `.dockerfile`, `Dockerfile*`, `docker-compose.yml/yaml`, `compose.yml/yaml` |
+| Docker | `.dockerfile`, `Dockerfile`, `Dockerfile.*` / `Dockerfile-*` / `Dockerfile_*` (except a docs or data extension such as `Dockerfile.md` or `Dockerfile.json`, and `.txt` or `.dockerignore`), `docker-compose.yml/yaml`, `compose.yml/yaml` and variants such as `docker-compose.override.yml` |
 
 ### Design
 
@@ -164,24 +164,58 @@ Tallyman recognizes **41 languages** across six categories:
 Tallyman runs a simple pipeline:
 
 1. **Walk** your project directory, respecting gitignore patterns and your config exclusions
-2. **Identify** each file's language by extension (O(1) lookup)
+2. **Identify** each file's language by extension or filename
 3. **Count** lines, classifying each as code, comment, or blank
 4. **Aggregate** results by language and category
 5. **Display** a colored report with per-language stats, category totals, and a composition bar
 
-Spec directories (`specs/`, `plans/`, `specifications/`, `agents/`) are auto-detected. Any Markdown or reStructuredText files inside them are reclassified from Docs to Specs, giving you a clear picture of how much of your project is specification-driven.
+Spec directories (`specs/`, `plans/`, `specifications/`, `agents/`) are auto-detected at any depth. Any Markdown or reStructuredText files inside them are reclassified from Docs to Specs, giving you a clear picture of how much of your project is specification-driven.
 
-Comment detection covers single-line comment styles (`#`, `//`, `--`, `%`, `;`). Multi-line comment blocks (`/* */`, `""" """`) are not currently detected - lines inside them are counted as code.
+Lines end at `\n`, `\r\n` or a lone `\r`, and a last line without a newline still counts. Files with a UTF-8, UTF-16 or UTF-32 byte-order mark are decoded accordingly; anything else is read as UTF-8.
+
+Some files are never counted, whatever your `.gitignore` says:
+
+- Hidden directories such as `.git/`, `.venv/` and `.github/`
+- Binary files (a NUL byte in the first 8 KB)
+- Symlinks, so a linked file is never counted twice
+- Generated files: `.tally-config.toml`, `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `*.min.js` and `*.min.css`
+
+Comment detection covers single-line comment styles (`#`, `//`, `--`, `%`). Multi-line comment blocks (`/* */`, `""" """`) are not currently detected - lines inside them are counted as code.
 
 ## Configuration
 
-On first run, Tallyman launches an interactive TUI where you can browse your project tree and configure which directories to exclude or mark as spec directories. Your choices are saved to `.tally-config.toml` in the project root.
+On first run, Tallyman launches an interactive TUI where you can browse your project tree and configure which directories to exclude or mark as spec directories. Your choices are saved to `.tally-config.toml` in the directory you scanned.
 
 To re-run setup at any time:
 
 ```bash
 tallyman --setup
 ```
+
+In the TUI, `x` excludes or includes a directory, and `s` marks or unmarks it as specs. Pressing `s` on a directory Tallyman detected as specs (such as `plans/`) records that it isn't one.
+
+The config is plain TOML, and you can edit it by hand:
+
+```toml
+[exclude]
+directories = ["static/vendor", "docs/_build"]
+
+[specs]
+directories = ["design"]           # also count these as specs
+ignore = ["src/myapp/agents"]      # never specs, even if named plans/, agents/, ...
+```
+
+- Paths are relative to the directory the config file lives in. An entry covers everything beneath it.
+- In `[specs]`, `"."` means that directory itself.
+- When `directories` and `ignore` disagree, the deeper entry wins, so you can ignore `agents/` but still count `agents/plans/`. If both list the same directory, `directories` wins.
+
+**Which config applies.** Tallyman uses the nearest `.tally-config.toml` at or above the directory you scan, stopping at the root of the Git repository. Outside a repository it only looks in the scanned directory itself.
+
+- A config found in a parent directory is applied relative to where it lives, so `tallyman src/` honours the project's exclusions.
+- If your home directory is itself a Git repository, as some dotfiles setups are, a `~/.tally-config.toml` applies to every directory below it that isn't in its own repository.
+- Configs in subdirectories are merged in as Tallyman walks into them. They can add exclusions but can't re-include a directory excluded above. Their spec settings follow the same deeper-entry-wins rule, so a subdirectory's `ignore = ["."]` turns specs off for that subtree.
+
+**Without a terminal**, such as in CI or a pipe, a first run counts with default settings, writes no config, and prints a one-line note. `--setup` needs an interactive terminal.
 
 Tallyman also respects the `NO_COLOR` environment variable to disable colored output, following the [no-color.org](https://no-color.org) convention.
 

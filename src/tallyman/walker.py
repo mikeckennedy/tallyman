@@ -5,138 +5,140 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import NamedTuple, Optional
 
-import pathspec
-
-from tallyman.config import CONFIG_FILENAME, load_config
+from tallyman.config import CONFIG_FILENAME, SELF, load_nested_config
+from tallyman.encoding import has_wide_bom
+from tallyman.gitignore import GitIgnoreSpec, find_git_root, load_gitignore
 from tallyman.languages import Language, as_spec, identify_language
+from tallyman.paths import relative_posix
 
 SPEC_DIR_NAMES: frozenset[str] = frozenset({'specs', 'specifications', 'plans', 'agents'})
 
 
-def find_git_root(start: Path) -> Path | None:
-    """Walk up from *start* looking for a directory containing ``.git``.
+class SpecState(NamedTuple):
+    """Spec status of one directory."""
 
-    Returns the git repo root, or None if not inside a git repository.
+    is_spec: bool
+    detection_suppressed: bool  # under a [specs] ignore entry: names like plans/ are not auto-detected
+
+
+def root_spec_state(spec_dirs: set[str], non_spec_dirs: set[str], auto: bool = False) -> SpecState:
+    """Spec status of the scan root itself, from '.' entries.
+
+    The root's own name is never auto-detected. *auto* is True when the root
+    sits inside an auto-detected spec directory (see :func:`inside_auto_spec_dir`);
+    it then counts as specs unless an ignore entry says otherwise.
     """
-    current = start.resolve()
-    while True:
-        if (current / '.git').exists():
-            return current
-        parent = current.parent
-        if parent == current:
-            return None
-        current = parent
+    if SELF in spec_dirs:
+        return SpecState(True, False)
+    if SELF in non_spec_dirs:
+        return SpecState(False, True)
+    return SpecState(auto, False)
 
 
-class GitIgnoreSpec:
-    """Wraps a pathspec with an optional path prefix for subdirectory matching.
+def spec_state(rel: str, name: str, parent: SpecState, spec_dirs: set[str], non_spec_dirs: set[str]) -> SpecState:
+    """Spec status of the directory at *rel*, given its parent's.
 
-    When tallyman runs from a subdirectory of a git repo, gitignore patterns
-    are relative to the repo root.  This wrapper transparently prepends the
-    prefix so callers can keep using paths relative to the analysis directory.
+    The deepest explicit setting wins: a ``spec_dirs`` entry makes the subtree
+    specs; a ``non_spec_dirs`` entry makes it not specs and stops
+    auto-detection by name beneath it. Otherwise spec status is inherited, and
+    a directory named like ``plans`` is detected unless an ancestor is ignored.
+    Shared by walk_project() and the setup TUI so they always agree.
     """
-
-    def __init__(self, spec: pathspec.PathSpec, prefix: str = '') -> None:
-        self._spec = spec
-        self._prefix = prefix
-
-    def match_file(self, path: str) -> bool:
-        if self._prefix:
-            full = f'{self._prefix}/{path}'
-        else:
-            full = path
-        return self._spec.match_file(full)
+    if rel in spec_dirs:
+        return SpecState(True, False)
+    if rel in non_spec_dirs:
+        return SpecState(False, True)
+    if parent.is_spec:
+        return SpecState(True, False)
+    if parent.detection_suppressed:
+        return SpecState(False, True)
+    return SpecState(name.lower() in SPEC_DIR_NAMES, False)
 
 
-def load_gitignore(root: Path) -> GitIgnoreSpec:
-    """Load gitignore patterns, traversing up to find the git repo root.
+def inside_auto_spec_dir(root: Path) -> bool:
+    """True if *root* is, or is inside, a directory auto-detected as specs (``plans/``, ``specs/``, ...).
 
-    Collects patterns from:
-    - ``<git-root>/.gitignore``
-    - ``<git-root>/.git/info/exclude``
-    - Any ``.gitignore`` in directories between the git root and *root*
+    Only directories inside the git repo count, so scanning a project that is
+    itself named ``agents`` does not turn its docs into specs. Outside a repo
+    there is nothing above the scan root to check.
     """
-    git_root = find_git_root(root)
-    lines: list[str] = []
-
+    resolved = root.resolve()
+    git_root = find_git_root(resolved)
     if git_root is None:
-        # Not in a git repo  -  just check for a local .gitignore
-        local_ignore = root / '.gitignore'
-        if local_ignore.is_file():
-            lines.extend(local_ignore.read_text(encoding='utf-8', errors='replace').splitlines())
-        return GitIgnoreSpec(pathspec.PathSpec.from_lines('gitignore', lines))  # type: ignore[arg-type]
+        return False
+    return any(part.lower() in SPEC_DIR_NAMES for part in resolved.relative_to(git_root).parts)
 
-    # Load repo-root files
-    for ignore_file in [git_root / '.gitignore', git_root / '.git' / 'info' / 'exclude']:
-        if ignore_file.is_file():
-            lines.extend(ignore_file.read_text(encoding='utf-8', errors='replace').splitlines())
 
-    # Load intermediate .gitignore files between git root and analysis root
-    resolved_root = root.resolve()
-    if resolved_root != git_root:
-        rel = resolved_root.relative_to(git_root)
-        current = git_root
-        for part in rel.parts:
-            current = current / part
-            ignore_file = current / '.gitignore'
-            if ignore_file.is_file():
-                lines.extend(ignore_file.read_text(encoding='utf-8', errors='replace').splitlines())
+# Skipped whatever .gitignore says.
+# Generated files that would dwarf the real code. Lower case: the check ignores case.
+GENERATED_FILENAMES: frozenset[str] = frozenset(
+    {CONFIG_FILENAME, 'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml'}
+)
+GENERATED_SUFFIXES: tuple[str, ...] = ('.min.js', '.min.css')
 
-    spec = pathspec.PathSpec.from_lines('gitignore', lines)  # type: ignore[arg-type]
 
-    # Compute the prefix: path from git root to analysis root
-    prefix = str(resolved_root.relative_to(git_root)) if resolved_root != git_root else ''
-
-    return GitIgnoreSpec(spec, prefix)
+def _is_generated(filename: str) -> bool:
+    """True for tallyman's own config, npm and pnpm lockfiles, and minified bundles, in any letter case."""
+    name = filename.lower()
+    return name in GENERATED_FILENAMES or name.endswith(GENERATED_SUFFIXES)
 
 
 def _is_binary(path: Path) -> bool:
-    """Return True if the file appears to be binary."""
+    """Return True if the file appears to be binary (a NUL byte in the first 8 KB).
+
+    UTF-16 and UTF-32 text is full of NUL bytes, so a file that starts with
+    their byte-order mark is text. Only the first 8 KB is read.
+    """
     try:
-        chunk = path.read_bytes()[:8192]
-        return b'\x00' in chunk
+        with path.open('rb') as f:
+            chunk = f.read(8192)
     except OSError:
         return True
+    return b'\x00' in chunk and not has_wide_bom(chunk)
 
 
 def walk_project(
     root: Path,
     excluded_dirs: set[str],
     gitignore_spec: GitIgnoreSpec | None = None,
-    spec_dirs: set[str] | None = None,
+    spec_dirs: Optional[set[str]] = None,
+    non_spec_dirs: Optional[set[str]] = None,
 ) -> Iterator[tuple[Path, Language]]:
     """Yield (file_path, language) for every countable source file under root.
 
     Args:
         root: Project root directory.
         excluded_dirs: Relative directory paths to skip (e.g. {'static/external'}).
-        gitignore_spec: Pre-loaded gitignore patterns. Loaded from root if None.
-        spec_dirs: Relative directory paths designated as spec directories.
+        gitignore_spec: Pre-loaded gitignore patterns. Loaded from root if None. ``.gitignore``
+            files found while walking are registered on it as each directory is entered.
+        spec_dirs: Relative directory paths designated as spec directories. ``'.'`` marks *root*
+            itself, so docs files at every level count as specs.
+        non_spec_dirs: Relative directory paths that are never specs (``[specs] ignore``).
     """
     if gitignore_spec is None:
         gitignore_spec = load_gitignore(root)
 
     working_excluded = set(excluded_dirs)
     active_spec_roots: set[str] = set(spec_dirs) if spec_dirs else set()
+    active_non_spec: set[str] = set(non_spec_dirs) if non_spec_dirs else set()
+    states: dict[str, SpecState] = {}
 
     for dirpath_str, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
         dirpath = Path(dirpath_str)
-        rel_dir = dirpath.relative_to(root)
-        rel_dir_str = str(rel_dir) if rel_dir.parts else ''
+        rel_dir_str = relative_posix(dirpath, root)
+
+        # This directory's own .gitignore governs its children, so load it before filtering them
+        gitignore_spec.add_directory(rel_dir_str, dirpath)
 
         # Discover nested config files in subdirectories
         if rel_dir_str:
             config_file = dirpath / CONFIG_FILENAME
-            if config_file.is_file():
-                try:
-                    nested_config = load_config(config_file)
-                    for excl in nested_config.excluded_dirs:
-                        working_excluded.add(f'{rel_dir_str}/{excl}')
-                    for spec in nested_config.spec_dirs:
-                        active_spec_roots.add(f'{rel_dir_str}/{spec}')
-                except Exception:
-                    pass  # Skip malformed configs in subdirectories
+            if config_file.is_file() and (nested := load_nested_config(config_file, rel_dir_str)) is not None:
+                working_excluded |= nested.excluded_dirs
+                active_spec_roots |= nested.spec_dirs
+                active_non_spec |= nested.non_spec_dirs
 
         # Prune excluded and gitignored subdirectories in-place
         filtered_dirs: list[str] = []
@@ -156,21 +158,13 @@ def walk_project(
         dirnames[:] = filtered_dirs
 
         # Determine if this directory is inside a spec directory
-        dir_is_spec = False
         if rel_dir_str:
-            # Check auto-detection by directory name
-            if dirpath.name.lower() in SPEC_DIR_NAMES:
-                dir_is_spec = True
-                active_spec_roots.add(rel_dir_str)
-            # Check user-designated spec dirs
-            elif rel_dir_str in active_spec_roots:
-                dir_is_spec = True
-            # Check if parent is a spec dir (cascading)
-            else:
-                for sr in active_spec_roots:
-                    if rel_dir_str.startswith(sr + '/'):
-                        dir_is_spec = True
-                        break
+            parent_state = states[rel_dir_str.rpartition('/')[0]]
+            state = spec_state(rel_dir_str, dirpath.name, parent_state, active_spec_roots, active_non_spec)
+        else:
+            state = root_spec_state(active_spec_roots, active_non_spec)
+        states[rel_dir_str] = state
+        dir_is_spec = state.is_spec
 
         # Yield recognized, non-binary files
         for filename in sorted(filenames):
@@ -178,6 +172,11 @@ def walk_project(
             # Skip files matched by gitignore
             file_rel = f'{rel_dir_str}/{filename}' if rel_dir_str else filename
             if gitignore_spec.match_file(file_rel):
+                continue
+
+            # Skip generated files, and symlinks: the walk doesn't follow linked directories either,
+            # and a link to a file in the tree would count that file twice
+            if _is_generated(filename) or file_path.is_symlink():
                 continue
 
             language = identify_language(file_path)
