@@ -102,7 +102,7 @@ Planned elsewhere: the `X | None` to `Optional[X]` sweep is plan 006, step 4.
 
 ## Workflow
 
-Work happens on the `hardening` branch. After each phase, a Python Architect review runs in a sub-agent, its valid findings are addressed, and the phase is committed on the branch. Nothing is pushed or merged.
+Work happens on the `hardening` branch. After each phase, an architect review runs in a sub-agent (future reviews use the tallyman persona, `plans/agents/architect-tallyman.md`, not `architect-python.md`), its valid findings are addressed, and the phase is committed on the branch. Nothing is pushed or merged.
 
 ## Rules for every phase
 
