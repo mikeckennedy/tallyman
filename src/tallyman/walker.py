@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from tallyman.config import CONFIG_FILENAME, SELF, load_nested_config
+from tallyman.config import CONFIG_FILENAME, SELF, TallyConfig, load_nested_config, merge_configs
 from tallyman.encoding import has_wide_bom
 from tallyman.gitignore import GitIgnoreSpec, find_git_root, load_gitignore
 from tallyman.languages import Language, as_spec, identify_language
@@ -120,9 +120,7 @@ def walk_project(
     if gitignore_spec is None:
         gitignore_spec = load_gitignore(root)
 
-    working_excluded = set(excluded_dirs)
-    active_spec_roots: set[str] = set(spec_dirs) if spec_dirs else set()
-    active_non_spec: set[str] = set(non_spec_dirs) if non_spec_dirs else set()
+    active = TallyConfig(set(excluded_dirs), set(spec_dirs or ()), set(non_spec_dirs or ()))
     states: dict[str, SpecState] = {}
 
     for dirpath_str, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
@@ -136,9 +134,8 @@ def walk_project(
         if rel_dir_str:
             config_file = dirpath / CONFIG_FILENAME
             if config_file.is_file() and (nested := load_nested_config(config_file, rel_dir_str)) is not None:
-                working_excluded |= nested.excluded_dirs
-                active_spec_roots |= nested.spec_dirs
-                active_non_spec |= nested.non_spec_dirs
+                # os.walk is top-down, so an ancestor's config is merged first and the deeper config wins
+                active = merge_configs(active, nested)
 
         # Prune excluded and gitignored subdirectories in-place
         filtered_dirs: list[str] = []
@@ -148,7 +145,7 @@ def walk_project(
                 continue
             child_rel = f'{rel_dir_str}/{d}' if rel_dir_str else d
             # Check config exclusions
-            if child_rel in working_excluded:
+            if child_rel in active.excluded_dirs:
                 continue
             # Check gitignore (append / to match directory patterns)
             if gitignore_spec.match_file(child_rel + '/'):
@@ -160,9 +157,9 @@ def walk_project(
         # Determine if this directory is inside a spec directory
         if rel_dir_str:
             parent_state = states[rel_dir_str.rpartition('/')[0]]
-            state = spec_state(rel_dir_str, dirpath.name, parent_state, active_spec_roots, active_non_spec)
+            state = spec_state(rel_dir_str, dirpath.name, parent_state, active.spec_dirs, active.non_spec_dirs)
         else:
-            state = root_spec_state(active_spec_roots, active_non_spec)
+            state = root_spec_state(active.spec_dirs, active.non_spec_dirs)
         states[rel_dir_str] = state
         dir_is_spec = state.is_spec
 

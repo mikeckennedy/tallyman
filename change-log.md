@@ -24,6 +24,13 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `tests/test_config.py`, `tests/test_cli.py`
 - Plan: `plans/005-hardening/phase-02-config-handling.plan.md`
 
+- Every `.tally-config.toml` from the git repo root down to the scanned directory now applies, instead of only the nearest one. Exclusions add up; for specs, the deeper setting wins, and on the same path the deeper config wins. Scanning `repo/app` with configs in both `repo` and `repo/app` no longer silently drops `repo`'s settings.
+- `--setup` in a directory below another config shows that config's settings as locked ("set in a parent config") and no longer copies them into the new config. Copies written by earlier versions are dropped the next time setup saves.
+- Nested configs below the scanned directory also resolve a spec/ignore clash on the same path in favour of the deeper config. Before, the spec entry always won.
+- In setup, `x` now works on a directory whose spec setting comes from a nested config; only exclusions set in another config are locked. The walker already honoured such an exclusion.
+- Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/walker.py`, `src/tallyman/tui/setup_app.py`, `tests/test_config.py`, `tests/test_cli.py`, `tests/test_walker.py`, `tests/test_setup_app.py`
+- Plan: `plans/007-exclude-patterns/phase-01-merge-config-chain.plan.md`
+
 ### Fixed
 - An empty `NO_COLOR` no longer disables colour; per no-color.org only a non-empty value does.
 - Solidity's colour changed from `bright_cyan`, which SQL also uses, to `slate_blue1`, so the two are distinguishable in the bar.

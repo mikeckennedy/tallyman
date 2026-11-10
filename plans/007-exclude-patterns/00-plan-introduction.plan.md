@@ -49,8 +49,8 @@ Phase 1 comes first because phase 2's pattern layers need the list of configs in
 
 ## Workflow
 
-- Work on a feature branch, `exclude-patterns`. Commit after each phase. Never commit to `main`, never push, and leave merging to Michael.
-- After each phase, an architect review runs in a sub-agent using the tallyman persona, `plans/agents/architect-tallyman.md` (plan 006). If that file doesn't exist yet when a phase finishes, fall back to `architect-python.md` and say so. Address its valid findings, then commit.
+- Work on a feature branch, `exclude-patterns`. Commit and push this branch after each phase; Michael asked for pushes on it (2026-11-10). Never commit to or push `main`, never force-push, and leave merging to Michael.
+- After each phase, an architect review runs in a sub-agent using the tallyman persona, `plans/agents/architect-tallyman.md` (plan 006). Address its valid findings, then commit.
 
 ## Rules for every phase
 

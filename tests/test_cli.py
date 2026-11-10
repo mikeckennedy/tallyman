@@ -12,7 +12,7 @@ import pytest
 
 from tallyman import __version__, cli
 from tallyman.aggregator import TallyResult
-from tallyman.config import CONFIG_FILENAME, load_config
+from tallyman.config import CONFIG_FILENAME, TallyConfig, load_config
 
 
 def _make(root: Path, files: dict[str, str]) -> None:
@@ -31,12 +31,14 @@ def _run(
     interactive: bool = False,
     setup_result: object = None,
     setup_calls: Optional[list[tuple[set[str], set[str], set[str]]]] = None,
+    inherited_calls: Optional[list[TallyConfig]] = None,
 ) -> Optional[TallyResult]:
     """Run tallyman's main() with *argv*; return the result it would have displayed (None if it exited first).
 
     The setup TUI is replaced. It records the (excluded, specs, non-specs) it was pre-filled with in
-    *setup_calls*, then returns *setup_result*: such a tuple, ECHO to save the pre-fill unchanged, or None
-    to fail the test because setup should not have launched.
+    *setup_calls*, and the locked parent settings it was given in *inherited_calls*, then returns
+    *setup_result*: such a tuple, ECHO to save the pre-fill unchanged, or None to fail the test because
+    setup should not have launched.
     """
     captured: list[TallyResult] = []
     monkeypatch.setattr(sys, 'argv', ['tallyman', *argv])
@@ -44,11 +46,19 @@ def _run(
     monkeypatch.setattr(cli, 'display_results', lambda tally, **_: captured.append(tally))
 
     def fake_setup(
-        _root: Path, _spec: object, excluded: set[str], specs: set[str], non_specs: set[str], **_kwargs: object
+        _root: Path,
+        _spec: object,
+        excluded: set[str],
+        specs: set[str],
+        non_specs: set[str],
+        inherited: Optional[TallyConfig] = None,
+        **_kwargs: object,
     ) -> object:
         prefill = (set(excluded), set(specs), set(non_specs))
         if setup_calls is not None:
             setup_calls.append(prefill)
+        if inherited_calls is not None:
+            inherited_calls.append(inherited or TallyConfig())
         if setup_result is None:
             raise AssertionError('the setup TUI must not launch here')
         return prefill if setup_result == ECHO else setup_result
@@ -176,7 +186,7 @@ class TestSetupRecovery:
 
 
 class TestSetupWithParentConfig:
-    def test_setup_prefills_the_rebased_parent_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_setup_locks_parent_settings_instead_of_copying_them(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         (tmp_path / '.git').mkdir()
         _make(
             tmp_path,
@@ -186,14 +196,42 @@ class TestSetupWithParentConfig:
                 ),
                 'src/pkg/.tally-config.toml': '[exclude]\ndirectories = ["gen"]\n',
                 'src/app.py': 'x = 1\n',
+                'src/vendor/v.py': 'x = 1\n',
+            },
+        )
+        calls: list[tuple[set[str], set[str], set[str]]] = []
+        inherited: list[TallyConfig] = []
+        _run(
+            monkeypatch,
+            '--setup',
+            str(tmp_path / 'src'),
+            interactive=True,
+            setup_result=ECHO,
+            setup_calls=calls,
+            inherited_calls=inherited,
+        )
+        assert calls == [(set(), set(), set())]  # nothing local to edit; src/pkg's config stays in its own file
+        assert inherited == [TallyConfig({'vendor'}, {'design'}, set())]
+        saved = load_config(tmp_path / 'src' / CONFIG_FILENAME)
+        assert saved == TallyConfig()
+        tally = _run(monkeypatch, str(tmp_path / 'src'))
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}  # the parent still excludes vendor
+
+    def test_setup_drops_local_copies_of_parent_settings(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Older versions copied the parent's settings into the new config; setup clears those copies."""
+        (tmp_path / '.git').mkdir()
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: '[exclude]\ndirectories = ["src/vendor"]\n',
+                'src/.tally-config.toml': '[exclude]\ndirectories = ["vendor", "build"]\n',
             },
         )
         calls: list[tuple[set[str], set[str], set[str]]] = []
         _run(monkeypatch, '--setup', str(tmp_path / 'src'), interactive=True, setup_result=ECHO, setup_calls=calls)
-        assert calls == [({'vendor'}, {'design'}, set())]  # src/pkg's own config stays in its own file
-        saved = load_config(tmp_path / 'src' / CONFIG_FILENAME)
-        assert saved.excluded_dirs == {'vendor'}
-        assert saved.spec_dirs == {'design'}
+        assert calls == [({'vendor', 'build'}, set(), set())]
+        assert load_config(tmp_path / 'src' / CONFIG_FILENAME).excluded_dirs == {'build'}
 
     def test_setup_keeps_a_spec_dir_that_covers_the_scan_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """A no-op setup run must not change the numbers: design/ stays specs."""
@@ -203,7 +241,7 @@ class TestSetupWithParentConfig:
         assert tally is not None
         assert _files_by_category(tally)['Markdown/specs'] == 1
         assert 'Markdown/docs' not in _files_by_category(tally)
-        assert load_config(tmp_path / 'design' / CONFIG_FILENAME).spec_dirs == {'.'}
+        assert load_config(tmp_path / 'design' / CONFIG_FILENAME).spec_dirs == set()  # the parent's config says so
         tally = _run(monkeypatch, str(tmp_path / 'design'))
         assert tally is not None
         assert _files_by_category(tally)['Markdown/specs'] == 1
@@ -288,13 +326,89 @@ class TestSpecIgnoreEndToEnd:
             assert _files_by_category(tally).get('Markdown/docs') == 1, scan
             assert 'Markdown/specs' not in _files_by_category(tally), scan
 
-    def test_setup_prefill_and_save_carry_the_ignore_list(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_setup_passes_a_parent_ignore_list_as_inherited(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {CONFIG_FILENAME: '[specs]\nignore = ["src/agents"]\n', 'src/agents/a.md': '# a\n'})
         calls: list[tuple[set[str], set[str], set[str]]] = []
-        _run(monkeypatch, '--setup', str(tmp_path / 'src'), interactive=True, setup_result=ECHO, setup_calls=calls)
+        inherited: list[TallyConfig] = []
+        _run(
+            monkeypatch,
+            '--setup',
+            str(tmp_path / 'src'),
+            interactive=True,
+            setup_result=ECHO,
+            setup_calls=calls,
+            inherited_calls=inherited,
+        )
+        assert calls == [(set(), set(), set())]
+        assert inherited[0].non_spec_dirs == {'agents'}
+        assert load_config(tmp_path / 'src' / CONFIG_FILENAME).non_spec_dirs == set()
+
+    def test_setup_prefill_and_save_carry_a_local_ignore_list(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        _make(tmp_path, {CONFIG_FILENAME: '[specs]\nignore = ["agents"]\n', 'agents/a.md': '# a\n'})
+        calls: list[tuple[set[str], set[str], set[str]]] = []
+        _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup_result=ECHO, setup_calls=calls)
         assert calls == [(set(), set(), {'agents'})]
-        assert load_config(tmp_path / 'src' / CONFIG_FILENAME).non_spec_dirs == {'agents'}
+        assert load_config(tmp_path / CONFIG_FILENAME).non_spec_dirs == {'agents'}
+
+
+class TestConfigChain:
+    def test_every_config_down_to_the_scan_root_applies(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """repo/ excludes app/vendor, repo/app/ excludes build; scanning app/ must honour both."""
+        (tmp_path / '.git').mkdir()
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: '[exclude]\ndirectories = ["app/vendor"]\n',
+                'app/.tally-config.toml': '[exclude]\ndirectories = ["build"]\n',
+                'app/main.py': 'x = 1\n',
+                'app/vendor/v.py': 'x = 1\n',
+                'app/build/b.py': 'x = 1\n',
+            },
+        )
+        tally = _run(monkeypatch, str(tmp_path / 'app'))
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+
+    def test_deeper_config_wins_on_the_same_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        (tmp_path / '.git').mkdir()
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: '[specs]\nignore = ["app/plans"]\n',
+                'app/.tally-config.toml': '[specs]\ndirectories = ["plans"]\n',
+                'app/plans/p.md': '# p\n',
+            },
+        )
+        tally = _run(monkeypatch, str(tmp_path / 'app'))
+        assert tally is not None
+        assert _files_by_category(tally) == {'Markdown/specs': 1}
+
+    def test_malformed_parent_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ):
+        (tmp_path / '.git').mkdir()
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: 'not toml [\n',
+                'app/.tally-config.toml': '[exclude]\ndirectories = []\n',
+                'app/a.py': '',
+            },
+        )
+        with pytest.raises(SystemExit) as exc:
+            _run(monkeypatch, str(tmp_path / 'app'))
+        assert exc.value.code == 1
+        assert f'could not read {tmp_path / CONFIG_FILENAME}' in capsys.readouterr().err
+
+    def test_setup_skips_a_malformed_parent_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ):
+        (tmp_path / '.git').mkdir()
+        _make(tmp_path, {CONFIG_FILENAME: 'not toml [\n', 'app/a.py': 'x = 1\n'})
+        tally = _run(monkeypatch, '--setup', str(tmp_path / 'app'), interactive=True, setup_result=ECHO)
+        assert tally is not None
+        assert 'its settings are skipped until it is fixed' in capsys.readouterr().err
 
 
 class TestFlags:

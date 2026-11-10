@@ -332,6 +332,23 @@ class TestSpecRootAndNestedConfigs:
         assert cats['a.md'] == 'specs'
         assert cats['b.md'] == 'docs'
 
+    def test_deeper_nested_config_wins_on_the_same_path(self, tmp_path: Path):
+        """lib/ marks lib/notes as specs; lib/notes/ ignores itself. The deeper config wins, in both directions."""
+        (tmp_path / 'lib' / 'notes').mkdir(parents=True)
+        (tmp_path / 'lib' / '.tally-config.toml').write_text('[specs]\ndirectories = ["notes"]\n')
+        (tmp_path / 'lib' / 'notes' / '.tally-config.toml').write_text('[specs]\nignore = ["."]\n')
+        (tmp_path / 'lib' / 'notes' / 'n.md').write_text('# n\n')
+        assert _categories(tmp_path) == {'lib/notes/n.md': 'docs'}
+        (tmp_path / 'lib' / '.tally-config.toml').write_text('[specs]\nignore = ["notes"]\n')
+        (tmp_path / 'lib' / 'notes' / '.tally-config.toml').write_text('[specs]\ndirectories = ["."]\n')
+        assert _categories(tmp_path) == {'lib/notes/n.md': 'specs'}
+
+    def test_nested_config_beats_the_scan_roots_setting_on_the_same_path(self, tmp_path: Path):
+        (tmp_path / 'lib').mkdir()
+        (tmp_path / 'lib' / '.tally-config.toml').write_text('[specs]\nignore = ["."]\n')
+        (tmp_path / 'lib' / 'n.md').write_text('# n\n')
+        assert _categories(tmp_path, spec_dirs={'lib'}) == {'lib/n.md': 'docs'}
+
     @pytest.mark.parametrize('payload', [b'not toml [\n', b'[exclude]\ndirectories = ["caf\xe9"]\n'])
     def test_malformed_nested_config_is_skipped(self, tmp_path: Path, payload: bytes):
         """A broken config inside the scanned tree (often third-party) must not stop the scan."""

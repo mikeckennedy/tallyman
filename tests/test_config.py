@@ -9,22 +9,26 @@ from tallyman.config import (
     ConfigError,
     TallyConfig,
     discover_nested_configs,
-    find_config,
+    find_configs,
     load_config,
+    load_config_chain,
+    merge_configs,
+    prefixed,
     rebase_config,
     save_config,
+    without_inherited,
 )
 from tallyman.tui.setup_app import SetupApp
 
 
-class TestFindConfig:
+class TestFindConfigs:
     def test_returns_path_when_exists(self, tmp_path: Path):
         config = tmp_path / CONFIG_FILENAME
         config.write_text('[exclude]\ndirectories = []\n')
-        assert find_config(tmp_path) == config
+        assert find_configs(tmp_path) == [config]
 
-    def test_returns_none_when_missing(self, tmp_path: Path):
-        assert find_config(tmp_path) is None
+    def test_returns_empty_when_missing(self, tmp_path: Path):
+        assert find_configs(tmp_path) == []
 
     def test_finds_config_in_parent_directory(self, tmp_path: Path):
         (tmp_path / '.git').mkdir()
@@ -32,17 +36,18 @@ class TestFindConfig:
         config.write_text('[exclude]\ndirectories = []\n')
         sub = tmp_path / 'src' / 'app'
         sub.mkdir(parents=True)
-        assert find_config(sub) == config
+        assert find_configs(sub) == [config]
 
-    def test_finds_nearest_config(self, tmp_path: Path):
+    def test_finds_every_config_shallowest_first(self, tmp_path: Path):
+        (tmp_path / '.git').mkdir()
         root_config = tmp_path / CONFIG_FILENAME
         root_config.write_text('[exclude]\ndirectories = ["root"]\n')
-        sub = tmp_path / 'sub'
-        sub.mkdir()
-        sub_config = sub / CONFIG_FILENAME
+        (tmp_path / 'mid' / 'sub').mkdir(parents=True)
+        mid_config = tmp_path / 'mid' / CONFIG_FILENAME
+        mid_config.write_text('[exclude]\ndirectories = []\n')
+        sub_config = tmp_path / 'mid' / 'sub' / CONFIG_FILENAME
         sub_config.write_text('[exclude]\ndirectories = ["sub"]\n')
-        # From sub, should find sub's config (nearest)
-        assert find_config(sub) == sub_config
+        assert find_configs(tmp_path / 'mid' / 'sub') == [root_config, mid_config, sub_config]
 
     def test_stops_at_git_root(self, tmp_path: Path):
         """A stray config above the repo (say, in ~) must not apply to the project."""
@@ -50,13 +55,15 @@ class TestFindConfig:
         repo = tmp_path / 'repo'
         (repo / '.git').mkdir(parents=True)
         (repo / 'src').mkdir()
-        assert find_config(repo / 'src') is None
+        assert find_configs(repo / 'src') == []
 
     def test_outside_a_repo_checks_only_the_root(self, tmp_path: Path):
         (tmp_path / CONFIG_FILENAME).write_text('[exclude]\ndirectories = []\n')
         sub = tmp_path / 'sub'
         sub.mkdir()
-        assert find_config(sub) is None
+        assert find_configs(sub) == []
+        (sub / CONFIG_FILENAME).write_text('[exclude]\ndirectories = []\n')
+        assert find_configs(sub) == [sub / CONFIG_FILENAME]
 
 
 class TestLoadConfig:
@@ -217,6 +224,119 @@ class TestRebaseConfig:
     def test_deeper_spec_covering_the_root_wins(self, tmp_path: Path):
         result = self._rebase(tmp_path, TallyConfig(set(), {'a/b'}, {'a'}), 'a/b/c')
         assert (result.spec_dirs, result.non_spec_dirs) == ({'.'}, set())
+
+
+class TestMergeConfigs:
+    def test_exclusions_add_up(self):
+        merged = merge_configs(TallyConfig({'a'}), TallyConfig({'b'}))
+        assert merged.excluded_dirs == {'a', 'b'}
+
+    def test_deeper_wins_on_the_same_path(self):
+        assert merge_configs(TallyConfig(spec_dirs={'x'}), TallyConfig(non_spec_dirs={'x'})) == TallyConfig(
+            non_spec_dirs={'x'}
+        )
+        assert merge_configs(TallyConfig(non_spec_dirs={'x'}), TallyConfig(spec_dirs={'x'})) == TallyConfig(
+            spec_dirs={'x'}
+        )
+
+    def test_different_paths_are_kept(self):
+        merged = merge_configs(TallyConfig(spec_dirs={'x'}), TallyConfig(non_spec_dirs={'x/y'}))
+        assert merged == TallyConfig(spec_dirs={'x'}, non_spec_dirs={'x/y'})
+
+    def test_inputs_are_not_modified(self):
+        shallow = TallyConfig({'a'}, {'x'}, set())
+        merge_configs(shallow, TallyConfig(non_spec_dirs={'x'}))
+        assert shallow == TallyConfig({'a'}, {'x'}, set())
+
+
+class TestWithoutInherited:
+    def test_drops_exact_copies(self):
+        local = TallyConfig({'a', 'b'}, {'s'}, {'i'})
+        inherited = TallyConfig({'a'}, {'s'}, {'i', 'other'})
+        assert without_inherited(local, inherited) == TallyConfig({'b'})
+
+    def test_keeps_a_contradictory_local_pair(self):
+        """docs listed as both specs and ignored locally: specs wins now, and must still win after the save."""
+        local = TallyConfig(spec_dirs={'docs'}, non_spec_dirs={'docs'})
+        assert without_inherited(local, TallyConfig(spec_dirs={'docs'})) == local
+
+
+class TestPrefixed:
+    def test_self_becomes_the_directory(self):
+        assert prefixed(TallyConfig({'b'}, {'.'}, {'c'}), 'app') == TallyConfig({'app/b'}, {'app'}, {'app/c'})
+
+    def test_empty_prefix_copies(self):
+        config = TallyConfig({'b'}, {'.'}, set())
+        copy = prefixed(config, '')
+        assert copy == config
+        copy.excluded_dirs.add('z')
+        assert config.excluded_dirs == {'b'}
+
+
+def _write(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return path
+
+
+class TestLoadConfigChain:
+    def test_no_configs(self, tmp_path: Path):
+        chain = load_config_chain([], tmp_path)
+        assert chain.effective == TallyConfig()
+        assert chain.paths == []
+
+    def test_parent_and_local_both_apply(self, tmp_path: Path):
+        parent = _write(tmp_path / CONFIG_FILENAME, '[exclude]\ndirectories = ["app/vendor", "other"]\n')
+        local = _write(tmp_path / 'app' / CONFIG_FILENAME, '[exclude]\ndirectories = ["build"]\n')
+        chain = load_config_chain([parent, local], tmp_path / 'app')
+        assert chain.inherited == TallyConfig({'vendor'})
+        assert chain.local == TallyConfig({'build'})
+        assert chain.effective.excluded_dirs == {'vendor', 'build'}
+        assert chain.paths == [parent, local]
+
+    def test_local_config_wins_on_the_same_path(self, tmp_path: Path):
+        parent = _write(tmp_path / CONFIG_FILENAME, '[specs]\nignore = ["app/plans"]\n')
+        local = _write(tmp_path / 'app' / CONFIG_FILENAME, '[specs]\ndirectories = ["plans"]\n')
+        effective = load_config_chain([parent, local], tmp_path / 'app').effective
+        assert effective.spec_dirs == {'plans'}
+        assert effective.non_spec_dirs == set()
+
+    def test_middle_config_wins_over_the_top_one(self, tmp_path: Path):
+        top = _write(tmp_path / CONFIG_FILENAME, '[specs]\ndirectories = ["a/b"]\n')
+        mid = _write(tmp_path / 'a' / CONFIG_FILENAME, '[specs]\nignore = ["b"]\n')
+        (tmp_path / 'a' / 'b' / 'c').mkdir(parents=True)
+        chain = load_config_chain([top, mid], tmp_path / 'a' / 'b' / 'c')
+        assert chain.inherited == TallyConfig(non_spec_dirs={'.'})
+
+    def test_deeper_cover_of_the_scan_root_wins(self, tmp_path: Path):
+        """The top config marks a/ as specs; a middle config ignores a/b. Scanning a/b/c: not specs."""
+        top = _write(tmp_path / CONFIG_FILENAME, '[specs]\ndirectories = ["a"]\n')
+        mid = _write(tmp_path / 'a' / CONFIG_FILENAME, '[specs]\nignore = ["b"]\n')
+        (tmp_path / 'a' / 'b' / 'c').mkdir(parents=True)
+        chain = load_config_chain([top, mid], tmp_path / 'a' / 'b' / 'c')
+        assert chain.inherited == TallyConfig(non_spec_dirs={'.'})
+
+    def test_malformed_config_names_its_file(self, tmp_path: Path):
+        top = _write(tmp_path / CONFIG_FILENAME, '[exclude]\ndirectories = []\n')
+        mid = _write(tmp_path / 'a' / CONFIG_FILENAME, 'not toml [\n')
+        with pytest.raises(ConfigError) as exc:
+            load_config_chain([top, mid], tmp_path / 'a')
+        assert exc.value.path == mid
+
+    def test_wrong_shape_names_its_file(self, tmp_path: Path):
+        bad = _write(tmp_path / CONFIG_FILENAME, '[exclude]\ndirectories = "vendor"\n')
+        with pytest.raises(ConfigError) as exc:
+            load_config_chain([bad], tmp_path)
+        assert exc.value.path == bad
+
+    def test_on_error_skips_the_bad_file(self, tmp_path: Path):
+        top = _write(tmp_path / CONFIG_FILENAME, 'not toml [\n')
+        local = _write(tmp_path / 'a' / CONFIG_FILENAME, '[exclude]\ndirectories = ["x"]\n')
+        errors: list[ConfigError] = []
+        chain = load_config_chain([top, local], tmp_path / 'a', on_error=errors.append)
+        assert [e.path for e in errors] == [top]
+        assert chain.paths == [local]
+        assert chain.effective.excluded_dirs == {'x'}
 
 
 class TestSaveConfig:

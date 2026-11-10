@@ -43,6 +43,8 @@ In "Configuration":
   - the report line.
 - Mention issue #8 (inline `#[cfg(test)]` modules) as the known gap for Rust.
 
+- From the phase 1 review: README.md's "uses the nearest `.tally-config.toml`" line is now false. Also note one asymmetry: a malformed config inside a directory that a parent excludes stops a scan started inside that directory, while a scan from the repo root never reads it.
+
 ### `CLAUDE.md`
 
 - Key Design Decision 5 ("Config search walks up"): describe the chain and the merge.
