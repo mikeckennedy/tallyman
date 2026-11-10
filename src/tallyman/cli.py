@@ -214,7 +214,7 @@ def main() -> None:
     # Display
     # no-color.org: NO_COLOR disables colour only when set to a non-empty value
     no_color = args.no_color or bool(os.environ.get('NO_COLOR'))
-    display_results(tally, directory=root.name, no_color=no_color, with_spaces=args.with_spaces)
+    display_results(tally, directory=root.name, no_color=no_color, with_spaces=args.with_spaces, stats=stats)
 
     # Image export (lazy import so Pillow only loaded when requested)
     if args.image or args.image_light:

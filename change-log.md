@@ -11,6 +11,10 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - New `[exclude] patterns = [...]` config key: gitignore-style patterns, matched relative to the directory of the config that declares them, for files a directory exclude can't reach, such as Rust's `src/routing/tests.rs` beside `src/routing.rs` (issue #6). A pattern without a slash matches at any depth, a trailing `/` matches directories, and a deeper config's `!pattern` can bring back what a shallower config's pattern excluded. Patterns never bring back gitignored files, excluded or hidden directories, or the default skips, and a parent config's patterns never exclude the scanned directory itself. Setup shows directories a pattern excludes as locked and keeps the patterns, in order, when it rewrites the config.
 - Files: `src/tallyman/config.py`, `src/tallyman/gitignore.py`, `src/tallyman/walker.py`, `src/tallyman/cli.py`, `src/tallyman/tui/setup_app.py`, `tests/test_config.py`, `tests/test_gitignore.py`, `tests/test_walker.py`, `tests/test_cli.py`, `tests/test_setup_app.py`
 - Plan: `plans/007-exclude-patterns/phase-02-exclude-patterns.plan.md`
+- When `[exclude] patterns` remove anything, the report ends with a dim line such as `Excluded by [exclude] patterns: 12 files, 1 directory`, also shown when nothing else was counted. The image card is unchanged.
+- README and `CLAUDE.md` describe the merged config chain and patterns.
+- Files: `src/tallyman/display.py`, `src/tallyman/cli.py`, `tests/test_display.py`, `tests/test_cli.py`, `README.md`, `CLAUDE.md`
+- Plan: `plans/007-exclude-patterns/phase-03-report-and-docs.plan.md`
 - Solidity language support for `.sol` files, counted as Code with `//` single-line comment detection.
 - Files: `src/tallyman/languages.py`, `tests/test_languages.py`, `tests/test_counter.py`, `tests/test_walker.py`, `README.md`
 - New `[specs] ignore = [...]` config key: directories that are never specs, even when named `specs`, `plans`, `specifications` or `agents`. It covers the whole subtree, including auto-detection; a deeper `[specs] directories` entry still wins. Pressing `s` in setup on an auto-detected spec directory now writes it here, so un-marking one finally sticks.
@@ -26,7 +30,6 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - With no config and no terminal (CI, pipes), tallyman now counts with default settings and prints a one-line note on stderr instead of launching the setup TUI and hanging. No config is written. `--setup` without a terminal exits with status 2.
 - Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `tests/test_config.py`, `tests/test_cli.py`
 - Plan: `plans/005-hardening/phase-02-config-handling.plan.md`
-
 - Every `.tally-config.toml` from the git repo root down to the scanned directory now applies, instead of only the nearest one. Exclusions add up; for specs, the deeper setting wins, and on the same path the deeper config wins. Scanning `repo/app` with configs in both `repo` and `repo/app` no longer silently drops `repo`'s settings.
 - `--setup` in a directory below another config shows that config's settings as locked ("set in a parent config") and no longer copies them into the new config. Copies written by earlier versions are dropped the next time setup saves.
 - Nested configs below the scanned directory also resolve a spec/ignore clash on the same path in favour of the deeper config. Before, the spec entry always won.

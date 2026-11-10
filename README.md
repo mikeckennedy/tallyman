@@ -53,6 +53,7 @@ A few things that set it apart:
 - **Beautiful output** - Colored, formatted results with a language composition bar, powered by [Rich](https://github.com/Textualize/rich)
 - **Realistic metrics** - Only counts files *you* wrote, not third-party dependencies or generated code
 - **Persistent config** - Your setup choices are saved to `.tally-config.toml` and reused on every run
+- **File patterns** - Gitignore-style `[exclude] patterns` for files a directory exclude can't reach, such as Rust tests beside the code they test
 - **Image export** - Generate a shareable PNG summary card with `--image` (dark) or `--image-light` (light theme)
 - **Interactive TUI setup** - Visual directory tree for configuring exclusions and spec directories, powered by [Textual](https://github.com/Textualize/textual)
 
@@ -163,7 +164,7 @@ Tallyman recognizes **43 languages** across six categories:
 
 Tallyman runs a simple pipeline:
 
-1. **Walk** your project directory, respecting gitignore patterns and your config exclusions
+1. **Walk** your project directory, respecting `.gitignore` and your config's exclusions and patterns
 2. **Identify** each file's language by extension or filename
 3. **Count** lines, classifying each as code, comment, or blank
 4. **Aggregate** results by language and category
@@ -209,15 +210,46 @@ ignore = ["src/myapp/agents"]      # never specs, even if named plans/, agents/,
 - In `[specs]`, `"."` means that directory itself.
 - When `directories` and `ignore` disagree, the deeper entry wins, so you can ignore `agents/` but still count `agents/plans/`. If both list the same directory, `directories` wins.
 
-**Which config applies.** Tallyman uses the nearest `.tally-config.toml` at or above the directory you scan, stopping at the root of the Git repository. Outside a repository it only looks in the scanned directory itself.
+**Which configs apply.** Every `.tally-config.toml` from the root of the Git repository down to the directory you scan applies, not just the nearest one. Outside a repository, Tallyman only looks in the scanned directory itself.
 
-- A config found in a parent directory is applied relative to where it lives, so `tallyman src/` honours the project's exclusions.
+- Each config is applied relative to where it lives, so `tallyman src/` honours the project's exclusions as well as any config in `src/`.
+- Exclusions from every config add up. For specs, the deeper entry wins, and when two configs name the same directory, the deeper config wins.
+- A parent's exclusion of the directory you scan, or of one above it, is skipped: you asked to scan it.
+- `tallyman --setup` edits only the config in the scanned directory. Settings from parent configs are shown as "(set in a parent config)" and can't be changed there; they stay in their own file, so editing the parent later reaches every directory below it.
 - If your home directory is itself a Git repository, as some dotfiles setups are, a `~/.tally-config.toml` applies to every directory below it that isn't in its own repository.
-- Configs in subdirectories are merged in as Tallyman walks into them. They can add exclusions but can't re-include a directory excluded above. Their spec settings follow the same deeper-entry-wins rule, so a subdirectory's `ignore = ["."]` turns specs off for that subtree.
+- Configs in subdirectories are merged in as Tallyman walks into them. They can add exclusions but can't re-include a directory excluded above. Their spec settings follow the same deeper-wins rules, so a subdirectory's `ignore = ["."]` turns specs off for that subtree.
+- A broken config at or above the directory you scan stops the run with a message naming the file. A broken config in a subdirectory is skipped without a message, so scanning from the repo root and scanning from inside that subdirectory can differ.
 
 **Without a terminal**, such as in CI or a pipe, a first run counts with default settings, writes no config, and prints a one-line note. `--setup` needs an interactive terminal.
 
 Tallyman also respects the `NO_COLOR` environment variable to disable colored output, following the [no-color.org](https://no-color.org) convention.
+
+### Excluding files by pattern
+
+Some files can't be reached by excluding a directory. Some Rust projects, for example, keep unit tests in files beside the code they test: `src/routing/tests.rs` next to `src/routing/handlers.rs`. Excluding `src/routing` would drop the real code too. For those, add gitignore-style patterns:
+
+```toml
+[exclude]
+directories = ["target"]
+patterns = [
+    "tests.rs",
+    "testing.rs",
+    "!src/keep/tests.rs",
+]
+```
+
+- Patterns use `.gitignore` syntax and are matched relative to the directory of the config that declares them.
+- A pattern without a slash, like `tests.rs`, matches at any depth, so `**/tests.rs` isn't needed.
+- A pattern with a slash at the start or in the middle, like `/tests.rs` or `src/routing/tests.rs`, is matched from the config's directory. Use `**/routing/tests.rs` to match at any depth.
+- A trailing `/` matches directories only, such as `fixtures/`.
+- Within one config, later lines win, so `!src/keep/tests.rs` after `tests.rs` keeps that one file. Order matters, and setup keeps it.
+- Patterns layer like nested `.gitignore` files: a deeper config's `!tests.rs` brings back what a shallower config's `tests.rs` excluded.
+- A `!` only undoes other patterns. It never brings back gitignored files, excluded or hidden directories, or the files Tallyman always skips. As in Git, it also can't bring back a file whose directory a pattern excluded: `fixtures/` plus `!fixtures/keep.py` keeps nothing.
+- A parent config's patterns never exclude the directory you scan, so a parent's `app/` doesn't empty `tallyman app/`. A parent's `app/**` does, since it matches the files inside rather than the directory, just as it would in Git.
+- Setup shows directories a pattern excludes as "(excluded by pattern)". It doesn't edit patterns, but keeps them, in order, when it rewrites the config. Because setup can't re-create them, re-running `tallyman --setup` to replace a broken config loses its patterns. Fix the file by hand if it has any.
+- When patterns remove anything, the report ends with a line such as `Excluded by [exclude] patterns: 12 files, 1 directory`. It counts files Tallyman would otherwise have counted, plus the directories a pattern skipped. Files inside a skipped directory aren't looked at, so they aren't in the file count.
+
+Inline Rust test modules (`#[cfg(test)] mod tests { ... }`) share a file with the code they test, so no pattern can reach them. That is tracked in [issue #8](https://github.com/mikeckennedy/tallyman/issues/8).
 
 ## Requirements
 

@@ -310,6 +310,15 @@ class TestRealProcess:
         assert 'tallyman --setup' in result.stderr
         assert not (tmp_path / CONFIG_FILENAME).exists()
 
+    def test_pattern_note_is_printed(self, tmp_path: Path):
+        (tmp_path / CONFIG_FILENAME).write_text('[exclude]\npatterns = ["tests.rs"]\n')
+        (tmp_path / 'src' / 'routing').mkdir(parents=True)
+        (tmp_path / 'src' / 'routing.rs').write_text('fn a() {}\n')
+        (tmp_path / 'src' / 'routing' / 'tests.rs').write_text('fn t() {}\n')
+        result = _run_process(tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.rstrip().endswith('Excluded by [exclude] patterns: 1 file')
+
     @pytest.mark.skipif(sys.platform == 'win32', reason='closing stdin in the child is POSIX-only')
     def test_closed_stdin(self, tmp_path: Path):
         (tmp_path / 'a.py').write_text('x = 1\n')

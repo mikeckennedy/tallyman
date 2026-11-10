@@ -11,6 +11,7 @@ from rich.text import Text
 from tallyman import __version__
 from tallyman.aggregator import CATEGORY_DISPLAY_NAMES, TallyResult, language_percentages
 from tallyman.languages import Language
+from tallyman.walker import WalkStats
 
 
 def _can_encode_unicode() -> bool:
@@ -41,10 +42,12 @@ def display_results(
     no_color: bool = False,
     with_spaces: bool = False,
     console: Optional[Console] = None,
+    stats: Optional[WalkStats] = None,
 ) -> None:
     """Render the full tallyman output to the terminal, or to *console* when given (tests pass one).
 
     *no_color* applies only to the console created here; a passed-in console keeps its own setting.
+    *stats*, when given, adds a closing line saying what ``[exclude] patterns`` removed.
     """
     if console is None:
         console = Console(no_color=no_color, highlight=False)
@@ -53,6 +56,8 @@ def display_results(
 
     if not result.by_language:
         console.print('[dim]No recognized source files found.[/dim]')
+        # A too-broad pattern is one way to get here, so say what the patterns removed
+        _display_pattern_note(console, stats)
         return
 
     display_names = _language_display_names(result)
@@ -61,9 +66,35 @@ def display_results(
     _display_separator(console)
     _display_category_totals(console, result, with_spaces=with_spaces)
     _display_percentage_bar(console, result, display_names, with_spaces=with_spaces)
+    _display_pattern_note(console, stats)
 
 
 SECTION_WIDTH = 58
+
+
+def _plural(count: int, singular: str, plural: str) -> str:
+    return f'{count:,} {singular if count == 1 else plural}'
+
+
+def _pattern_note(stats: Optional[WalkStats]) -> Optional[str]:
+    """The report's closing line about ``[exclude] patterns``, or None when they removed nothing."""
+    if stats is None:
+        return None
+    parts = []
+    if stats.pattern_files:
+        parts.append(_plural(stats.pattern_files, 'file', 'files'))
+    if stats.pattern_dirs:
+        parts.append(_plural(stats.pattern_dirs, 'directory', 'directories'))
+    if not parts:
+        return None
+    return 'Excluded by [exclude] patterns: ' + ', '.join(parts)
+
+
+def _display_pattern_note(console: Console, stats: Optional[WalkStats]) -> None:
+    note = _pattern_note(stats)
+    if note is not None:
+        console.print()
+        console.print(Text(f'  {note}', style='dim'))  # Text, not markup: '[exclude]' would be read as a tag
 
 
 def _display_report_header(console: Console, directory: str) -> None:
