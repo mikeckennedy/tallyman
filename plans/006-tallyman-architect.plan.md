@@ -10,15 +10,11 @@ Do this **after plan 005 (hardening) is merged**. Several rules below describe b
 
 ## Decisions
 
-Confirmed:
-
-1. **Type hints use `Optional[X]`, not `X | None`.** This is Michael's standing preference and carries over from the original persona. Today no file in `src/` or `tests/` uses `Optional`; about a dozen annotations in 8 files use `X | None`. Step 4 converts them.
-
-Open, each with a recommendation:
-
-2. **File name.** Recommended: a new `plans/agents/architect-tallyman.md`, leaving `architect-python.md` as it is. That file is a shared copy from another project, so keeping it unchanged avoids drift between projects. Whether to delete it from this repo is Michael's call.
-3. **Tracking.** `plans/agents/` is gitignored (`.gitignore:103`), so the persona file stays local. Recommended: keep it that way, since the ignore looks deliberate. This plan file is tracked and carries the full draft, so the persona can be recreated from it.
-4. **Import style.** The original persona asks for namespace imports for functions (`from services import user_service`). Tallyman imports functions directly (`from tallyman.walker import load_gitignore, walk_project`). Recommended: keep tallyman's current style and have the persona document it as is.
+1. **Type hints use `Optional[X]`, not `X | None`.** This is Michael's standing preference and carries over from the original persona. After plan 005, `Optional` is already used in most modules; 7 annotations in 6 files (`languages.py`, `walker.py`, `display.py`, `image.py`, `tests/test_counter.py`, `tests/test_aggregator.py`) still use `X | None`. Step 4 converts them.
+2. **File name.** `plans/agents/architect-tallyman.md`. Michael chose to delete `architect-python.md` from this repo; the shared copy lives on in other projects (`commandbookapp`).
+3. **Tracking.** `plans/agents/` is gitignored (`.gitignore:103`), and so is `.cursor/rules/agents.mdc`, so the persona and its triggers stay local. This plan file is tracked and carries the full persona, so it can be recreated from it.
+4. **Import style.** Tallyman imports functions directly (`from tallyman.walker import load_gitignore, walk_project`), and the persona documents that rather than the original's namespace imports.
+5. **No codebase-wide changes from the persona yet.** Michael, 2026-11-10: build the architect now; sweeps it implies (step 4) come later.
 
 ## Steps
 
@@ -28,6 +24,14 @@ Open, each with a recommendation:
 4. Convert the existing `X | None` annotations to `Optional[X]` in one sweep, on its own branch, with no behaviour change. Confirm that Ruff's `UP` rules stay disabled: `UP045` enforces the opposite style and would undo the sweep. Run `ruff check`, `ruff format --check`, `uvx ty check`, `uvx pyrefly check` and `pytest`.
 5. **Validate the persona.** Run it as a sub-agent reviewer on a branch with planted problems: a `str(Path)` relative path, an unescaped directory name in a `console.print`, a TUI label that disagrees with the walker, a new language whose colour clashes with an existing one, and an `X | None` annotation. It should flag all five. Tighten the wording for any it misses.
 6. In plan 005's introduction, point future reviews at the new file instead of `architect-python.md`.
+7. Replace the old architect everywhere it is triggered from: delete `plans/agents/architect-python.md`, and point `.cursor/rules/agents.mdc` (always applied in Cursor), `plans/agents/README.md` and plan 007's workflow at `architect-tallyman.md`.
+
+## Status (2026-11-10)
+
+- Steps 1, 2, 3, 5, 6 and 7: done. `CLAUDE.md` and the Cursor coding guidelines both state the `Optional` convention.
+- Step 1 corrected the draft against the code: line counting differs from `wc -l` (an unterminated last line and a lone `\r` count); only Pillow is lazy, Rich and Textual load on every run; a nested `[specs]` entry can override a shallower one; the image legend is capped at 5 and says `Total:`, and the display/image selection logic is duplicated; backslash normalisation is Windows-only and `..` escapes are dropped; only the nearest config applied until issue #6 (since updated: plan 007 phase 1, `c6a53fb`, merges the whole chain, phase 2, `7cd3951`, adds `[exclude] patterns`, and phase 3, `9d32ec5`, reports them in the terminal; the persona now describes all three); `encoding.py` added to the module map.
+- Step 5: a fresh sub-agent, told nothing about the plants, flagged all five planted problems under the matching Never rules, plus follow-on bugs in the planted code. No wording needed tightening.
+- Step 4: deferred (decision 5). Ruff's `UP` rules are confirmed off (`ruff.toml` selects `E`, `F`, `W`, `I`).
 
 ## Done when
 
@@ -80,7 +84,7 @@ A CLI that scans a project and reports codebase size by language: raw lines plus
 
 ```
 cli.main()
-  → find, load and rebase .tally-config.toml (or run the setup TUI)
+  → find and merge every .tally-config.toml from the git root down (or run the setup TUI)
   → walker.walk_project()      yields (Path, Language)
   → counter.count_lines()      FileCount per file
   → aggregator.aggregate()     TallyResult
@@ -96,15 +100,15 @@ Each stage feeds the next and knows nothing about the stages after it. Keep it t
 |---|---|
 | `cli.py` | Argument parsing, config loading and its errors, no-terminal handling, orchestration, exit codes |
 | `languages.py` | The language registry (`LANGUAGES`), `EXTENSION_MAP`, `FILENAME_MAP`, Dockerfile and Compose variants, `identify_language()`, `as_spec()` |
-| `walker.py` | Traversal, exclusions, generated-file and symlink skipping, binary detection, spec status (`spec_state()`, `root_spec_state()`, `inside_auto_spec_dir()`) |
-| `gitignore.py` | Gitignore rules: `GitIgnoreSpec`, `load_gitignore()`, `find_git_root()`, and the pattern compiler |
+| `walker.py` | Traversal, exclusions (directories and `[exclude] patterns`), generated-file and symlink skipping, binary detection, spec status (`spec_state()`, `root_spec_state()`, `inside_auto_spec_dir()`), `WalkStats` |
+| `gitignore.py` | Gitignore rules: `GitIgnoreSpec` (`for_root()` for `.gitignore` files, `for_patterns()` + `add_rules()` for `[exclude] patterns`), `load_gitignore()`, `find_git_root()`, and the pattern compiler |
 | `encoding.py` | BOM detection: `text_encoding()`, `has_wide_bom()`, shared by the walker's binary check and the counter |
 | `paths.py` | `relative_posix()` for `/`-separated relative paths; `canonical_case()` for the scan root's real spelling |
 | `counter.py` | Reading files and classifying lines as code, comment or blank |
 | `aggregator.py` | Per-language and per-category stats, `language_percentages()`, category order |
-| `display.py` | Rich terminal rendering: per-language blocks, totals, percentage bar and legend |
+| `display.py` | Rich terminal rendering: per-language blocks, totals, percentage bar and legend, and the closing `[exclude] patterns` note from `WalkStats` (`_pattern_note()`) |
 | `image.py` | Pillow PNG card, themes, output path selection and slug |
-| `config.py` | `.tally-config.toml`: find, load with validation and normalisation, rebase, nested discovery, save with TOML escaping, `ConfigError` |
+| `config.py` | `.tally-config.toml`: find the chain (`find_configs()`), load with validation and normalisation, merge (`merge_configs()`, `load_config_chain()`, `ConfigChain`), rebase, nested discovery, save with TOML escaping, `ConfigError` |
 | `tui/setup_app.py` | The Textual setup wizard |
 
 ---
@@ -114,13 +118,13 @@ Each stage feeds the next and knows nothing about the stages after it. Keep it t
 ### Never
 
 - ❌ **Never use `X | None`.** Use `Optional[X]` from `typing`, in `src/` and `tests/`, for parameters, return types, attributes and nested types (`list[tuple[Optional[Language], float]]`). Ruff's `UP` rules stay off because `UP045` enforces the opposite.
-- ❌ **Never let the walker and the setup TUI disagree.** Gitignore status, exclusion and spec status are computed in both. The TUI must get spec status from `walker.spec_state()` / `root_spec_state()` (through `_derive()`) and gitignore status from the same `GitIgnoreSpec` calls the walker makes. A TUI label or toggle that checks a directory's name, `SPEC_DIR_NAMES` or a config set directly, instead of the state `_derive()` computed, is a disagreement waiting to happen. A change to one side is a change to both, with a test for each.
+- ❌ **Never let the walker and the setup TUI disagree.** Gitignore status, exclusion (directory entries and `[exclude] patterns`) and spec status are computed in both. The TUI must get spec status from `walker.spec_state()` / `root_spec_state()` (through `_derive()`) and gitignore and pattern status from the same `GitIgnoreSpec` calls the walker makes, in the same order (patterns are checked only for entries gitignore lets through, and neither kind of excluded directory is descended into). Its spec and ignore sets must be merged the way the walker merges them (`_spec_sets()`: parent configs, then the scan root's, then nested, through `merge_configs()`). A TUI label or toggle that checks a directory's name, `SPEC_DIR_NAMES` or a config set directly, instead of the state `_derive()` computed, is a disagreement waiting to happen. A change to one side is a change to both, with a test for each.
 - ❌ **Never build a relative path with `str(Path)`, `str(p.relative_to(...))` or `os.path.relpath`.** Use `relative_posix()`. Config entries, gitignore matching, spec roots and TUI node paths are all `/`-separated strings, and `str()` gives backslashes on Windows. It also gives `'.'` for the root where `relative_posix()` gives `''`. It passes every test on macOS, so look for it in the diff rather than waiting for a failure.
 - ❌ **Never group or compare languages by name.** `Markdown` (docs) and `Markdown` (specs) are different `Language` objects. Aggregation and display key on the object.
 - ❌ **Never pass user-derived text through Rich markup unescaped.** Directory names, paths and anything from the filesystem or config can contain `[...]` or `:emoji:` codes. In Rich output, wrap them in `Text(...)` (as `_display_report_header()` does) or `rich.markup.escape()` them (as the TUI does); in an f-string passed to `console.print()`, an unescaped `{name}` is a bug. Only registry values (language names, colours) may go into markup as they are.
 - ❌ **Never import Pillow at module level, or import `tallyman.image` from anywhere but inside the `--image` branch of `cli.main()`.** A plain run never loads Pillow. Rich and Textual are already loaded on every run; don't add other heavy module-level imports to the CLI path.
-- ❌ **Never write a config entry the loader can't read back.** Every `save_config()` change needs a load/save round-trip test.
-- ❌ **Never let a config error surface as a traceback.** `load_config()` raises `ConfigError`. A bad scan-root config is reported on stderr with a fix-it hint and exits 1; under `--setup` it's a warning and setup starts fresh. A malformed *nested* config is skipped.
+- ❌ **Never write a config entry the loader can't read back.** Every `save_config()` change needs a load/save round-trip test. `[exclude] patterns` are saved verbatim and in file order, never sorted, normalised or deduplicated, because a later `!pattern` undoes an earlier one.
+- ❌ **Never let a config error surface as a traceback.** `load_config()` raises `ConfigError`. A bad config anywhere in the chain from the git root down is reported on stderr, naming that file, with a fix-it hint, and exits 1. Under `--setup` it's a warning and the file is skipped (for the scan root's own config, setup writes a new one). A malformed *nested* config is skipped.
 - ❌ **Never add a runtime dependency without raising it first.** Three is the current count (`rich`, `textual`, `Pillow`); each one costs install time for every user. Gitignore matching was moved in-house to drop `pathspec`.
 - ❌ **Never give two languages the same colour.** Check the new colour against every entry in `LANGUAGES`; `test_no_new_shared_colours` allows only C and its header to share one. The bar and legend are unreadable when two segments match.
 - ❌ **Never commit to `main` or push.** On a feature branch, commit per phase. See `CLAUDE.md`.
@@ -149,16 +153,19 @@ These are the rules the codebase depends on. A change that breaks one is a bug, 
 - Never counted, in any letter case: tallyman's own config, `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `*.min.js`, `*.min.css`. Symlinked files are never counted and symlinked directories never followed.
 - Binary files are skipped: a NUL byte in the first 8 KB, unless the file starts with a UTF-16 or UTF-32 BOM. An unreadable file counts as binary.
 - Excluded directories are pruned before descending, so nothing beneath them is ever read, including nested configs.
+- `[exclude] patterns` are gitignore syntax, kept in a second `GitIgnoreSpec` (`for_patterns()`), one layer per config scoped to the directory of the config that declares it, layered like nested `.gitignore` files: the deepest layer with an opinion wins, so a deeper config's `!pattern` can undo a shallower one. Because the spec is separate, a `!pattern` can only undo another config pattern. For directories the walker checks hidden, config-excluded, gitignored, then patterns; for files gitignored, generated or symlinked, then patterns. So no pattern brings back anything those checks removed. The pattern spec never checks the scan root or its ancestors, so a parent config's pattern can't exclude the directory the user asked to scan. `WalkStats` records what patterns removed: files that would otherwise have counted, and pruned directories that aren't symlinks.
 - `identify_language()` checks the exact filename (`FILENAME_MAP`), then Dockerfile and Compose variants, then the lower-cased suffix. A Dockerfile variant with a docs, data, `.txt` or `.dockerignore` suffix is not a Dockerfile.
 
 **Config**
-- `find_config()` returns the nearest `.tally-config.toml` from the scan root up to the git root, or checks only the scan root when not in a repo. Only that one file applies; configs above it are not merged (that is planned with issue #6).
-- A config found above the scan root is rebased onto it with `rebase_config()`. Entries beneath the scan root are re-rooted. An exclusion of the scan root or an ancestor is dropped. Spec and ignore entries covering the scan root become `'.'`, the deeper of the two winning. Everything else points outside the scan and is dropped.
-- Entries are normalised on load: `./` and `..` segments resolved, leading and trailing `/` removed, entries that climb out of the config's directory dropped, empties dropped. Backslashes become `/` on Windows only; elsewhere a backslash is a legal filename character. `'.'` (`SELF`) is allowed in `[specs] directories` and `[specs] ignore`, not in `[exclude]`.
+- `find_configs()` returns every `.tally-config.toml` from the git root down to the scan root, shallowest first, or checks only the scan root when not in a repo. All of them apply.
+- `load_config_chain()` merges them shallow to deep with `merge_configs()`: exclusions add up, and when two configs name the same path, one as specs and one as ignored, the deeper config wins. `ConfigChain.inherited` is the merged parents, `local` the scan root's own config, `effective` both together, which is what the walker gets. Patterns don't go through `merge_configs()`, `prefixed()`, `rebase_config()` or `without_inherited()` (all drop them on purpose); they travel as `ConfigChain.pattern_layers`, one `(config_dir, patterns)` per file that has any, shallowest first.
+- The configs above the scan root are rebased onto it with `rebase_config()`. Entries beneath the scan root are re-rooted. An exclusion of the scan root or an ancestor is dropped. Spec and ignore entries covering the scan root become `'.'`, the deeper of the two winning. Everything else points outside the scan and is dropped.
+- Directory entries are normalised on load (`[exclude] patterns` are not; gitignore syntax gives slashes and backslashes their meaning): `./` and `..` segments resolved, leading and trailing `/` removed, entries that climb out of the config's directory dropped, empties dropped. Backslashes become `/` on Windows only; elsewhere a backslash is a legal filename character. `'.'` (`SELF`) is allowed in `[specs] directories` and `[specs] ignore`, not in `[exclude]`.
 - The wrong shape (a non-table section, a non-list or non-string entry) is a `ConfigError`, not a crash.
-- `save_config()` sorts entries and escapes them as TOML basic strings.
+- `save_config()` sorts entries and escapes them as TOML basic strings. Setup saves only the scan root's own settings: `without_inherited()` drops anything a parent config already says, so each setting lives in one file. Setup doesn't edit patterns; it writes the scan root config's own `chain.local.patterns` back unchanged.
 - The scan root goes through `canonical_case()` first, so on a case-insensitive filesystem the config and gitignore see the directory's real spelling.
-- Nested configs (below the scan root) are read by the walker as it enters their directory and are unioned with what is already known; entries are prefixed with the nested directory. They can't lift an exclusion from above (the walker never enters an excluded directory to read one). For specs, the deepest explicit setting wins, so a nested `[specs]` entry overrides a shallower one. The TUI shows nested settings locked and never saves them into the root config.
+- Nested configs (below the scan root) are read by the walker as it enters their directory, with entries prefixed by that directory, and merged with `merge_configs()` like the parent chain, the deeper config winning on the same path. Their patterns are registered with `add_rules()` on entering the directory, before its children are filtered (under `--setup`, `discover_nested_configs()` collects them up front for the TUI, and the repeat registration is a no-op). They can't lift an exclusion from above (the walker never enters an excluded directory to read one). For specs, the deepest explicit setting wins, so a nested `[specs]` entry overrides a shallower one.
+- Setup shows parent and nested settings locked ("set in a parent config" / "set in a nested config"), and `x` and `s` can't change them; they are edited in their own files and never copied into the scan root's config. A directory a pattern matches is labelled "(excluded by pattern)", locked, and not descended into.
 - No config and no terminal: count with defaults, print a one-line note on stderr, write nothing. `--setup` without a terminal exits 2.
 
 **Specs**
@@ -177,7 +184,8 @@ These are the rules the codebase depends on. A change that breaks one is a bug, 
 - `--with-spaces` switches totals, category order, percentages and the bar from effective to total lines, in both terminal and image output.
 - The terminal bar is exactly `BAR_WIDTH` characters. Languages under `SMALL_LANGUAGE_THRESHOLD` (2%) are grouped as Other. Box and block characters fall back to ASCII when stdout can't encode them.
 - Display names add the category (`Markdown (specs)`) only when one language name appears in more than one category (`_language_display_names()`, shared by display and image).
-- Terminal and image agree on numbers, category order and percentages. The selection logic (active categories, the 2% threshold, the Other segment) is written out in both `display.py` and `image.py`, so a change to one needs the same change to the other. Deliberate differences: the image legend shows at most `MAX_LEGEND_ITEMS` (5) languages plus Other, its total line says `Total:` where the terminal says `Combined:`, and its bar segments are pixels.
+- Terminal and image agree on numbers, category order and percentages. The selection logic (active categories, the 2% threshold, the Other segment) is written out in both `display.py` and `image.py`, so a change to one needs the same change to the other. Deliberate differences: the image legend shows at most `MAX_LEGEND_ITEMS` (5) languages plus Other, its total line says `Total:` where the terminal says `Combined:`, its bar segments are pixels, and the `[exclude] patterns` note is terminal-only.
+- When patterns removed something, the terminal report ends with a dim `Excluded by [exclude] patterns: N files, M directories` line (only the non-zero parts), also on the "No recognized source files" path. It is printed as `Text`, because the literal `[exclude]` would otherwise be read as a Rich tag.
 - Image files go to `~/Desktop` (or the current directory), named by an ASCII slug capped at 100 characters, with `-N` added rather than overwriting.
 
 ---
