@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Optional
 
@@ -99,12 +100,27 @@ def _is_binary(path: Path) -> bool:
     return b'\x00' in chunk and not has_wide_bom(chunk)
 
 
+@dataclass(slots=True)
+class WalkStats:
+    """What ``[exclude] patterns`` removed from a walk, for the report.
+
+    ``pattern_files`` counts only files that would otherwise have been counted
+    (a recognised language, not binary). ``pattern_dirs`` counts directories
+    pruned by a pattern; the files inside them are not looked at.
+    """
+
+    pattern_files: int = 0
+    pattern_dirs: int = 0
+
+
 def walk_project(
     root: Path,
     excluded_dirs: set[str],
     gitignore_spec: GitIgnoreSpec | None = None,
     spec_dirs: Optional[set[str]] = None,
     non_spec_dirs: Optional[set[str]] = None,
+    exclude_patterns: Optional[GitIgnoreSpec] = None,
+    stats: Optional[WalkStats] = None,
 ) -> Iterator[tuple[Path, Language]]:
     """Yield (file_path, language) for every countable source file under root.
 
@@ -116,9 +132,15 @@ def walk_project(
         spec_dirs: Relative directory paths designated as spec directories. ``'.'`` marks *root*
             itself, so docs files at every level count as specs.
         non_spec_dirs: Relative directory paths that are never specs (``[specs] ignore``).
+        exclude_patterns: ``[exclude] patterns`` from the configs that apply at *root*
+            (:meth:`GitIgnoreSpec.for_patterns`). An empty one is made if None. Patterns from
+            nested configs found while walking are registered on it as each directory is entered.
+        stats: Filled with what the patterns excluded, if given.
     """
     if gitignore_spec is None:
         gitignore_spec = load_gitignore(root)
+    if exclude_patterns is None:
+        exclude_patterns = GitIgnoreSpec.for_patterns(root)
 
     active = TallyConfig(set(excluded_dirs), set(spec_dirs or ()), set(non_spec_dirs or ()))
     states: dict[str, SpecState] = {}
@@ -133,9 +155,12 @@ def walk_project(
         # Discover nested config files in subdirectories
         if rel_dir_str:
             config_file = dirpath / CONFIG_FILENAME
-            if config_file.is_file() and (nested := load_nested_config(config_file, rel_dir_str)) is not None:
+            if config_file.is_file() and (loaded := load_nested_config(config_file, rel_dir_str)) is not None:
+                nested, patterns = loaded
                 # os.walk is top-down, so an ancestor's config is merged first and the deeper config wins
                 active = merge_configs(active, nested)
+                # Like a .gitignore, its patterns govern this directory's children, so register them first
+                exclude_patterns.add_rules(dirpath, patterns)
 
         # Prune excluded and gitignored subdirectories in-place
         filtered_dirs: list[str] = []
@@ -149,6 +174,11 @@ def walk_project(
                 continue
             # Check gitignore (append / to match directory patterns)
             if gitignore_spec.match_file(child_rel + '/'):
+                continue
+            if exclude_patterns.match_file(child_rel + '/'):
+                # A linked directory is never entered anyway, so it isn't something the pattern removed
+                if stats is not None and not (dirpath / d).is_symlink():
+                    stats.pattern_dirs += 1
                 continue
             filtered_dirs.append(d)
 
@@ -174,6 +204,12 @@ def walk_project(
             # Skip generated files, and symlinks: the walk doesn't follow linked directories either,
             # and a link to a file in the tree would count that file twice
             if _is_generated(filename) or file_path.is_symlink():
+                continue
+
+            if exclude_patterns.match_file(file_rel):
+                # Report only files that would otherwise have been counted
+                if stats is not None and identify_language(file_path) is not None and not _is_binary(file_path):
+                    stats.pattern_files += 1
                 continue
 
             language = identify_language(file_path)

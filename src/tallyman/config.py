@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import posixpath
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -20,6 +20,9 @@ SELF = '.'
 
 # Backslash is a separator only on Windows; elsewhere it is a legal filename character
 _WINDOWS = os.sep == '\\'
+
+# One config's [exclude] patterns, with the directory they are relative to
+PatternLayer = tuple[Path, list[str]]
 
 
 class ConfigError(Exception):
@@ -42,11 +45,18 @@ class TallyConfig:
     meaning that directory itself. ``non_spec_dirs`` (``[specs] ignore``) turns
     off spec classification for a directory and its descendants, including
     auto-detection by name; a deeper ``spec_dirs`` entry still wins.
+
+    ``patterns`` (``[exclude] patterns``) are gitignore-style lines in file
+    order, relative to the config's own directory. They stay attached to the
+    file they came from, so the functions that move or combine entries
+    (:func:`rebase_config`, :func:`prefixed`, :func:`merge_configs`,
+    :func:`without_inherited`) return none; see :class:`ConfigChain`.
     """
 
     excluded_dirs: set[str] = field(default_factory=set)
     spec_dirs: set[str] = field(default_factory=set)
     non_spec_dirs: set[str] = field(default_factory=set)
+    patterns: list[str] = field(default_factory=list)
 
 
 def find_configs(root: Path) -> list[Path]:
@@ -100,6 +110,17 @@ def _directories(data: dict[str, Any], section: str, key: str, allow_self: bool)
     return {normalized for e in entries if (normalized := _normalize_dir(e, allow_self))}
 
 
+def _patterns(data: dict[str, Any]) -> list[str]:
+    """Read ``[exclude] patterns`` as written. Gitignore syntax gives slashes and backslashes their meaning."""
+    table = data.get('exclude', {})
+    if not isinstance(table, dict):
+        raise ConfigError('[exclude] must be a table')
+    patterns = table.get('patterns', [])
+    if not isinstance(patterns, list) or not all(isinstance(p, str) for p in patterns):
+        raise ConfigError('exclude.patterns must be a list of strings')
+    return list(patterns)
+
+
 def load_config(config_path: Path) -> TallyConfig:
     """Load a .tally-config.toml and return the configuration.
 
@@ -118,6 +139,7 @@ def load_config(config_path: Path) -> TallyConfig:
             excluded_dirs=_directories(data, 'exclude', 'directories', allow_self=False),
             spec_dirs=_directories(data, 'specs', 'directories', allow_self=True),
             non_spec_dirs=_directories(data, 'specs', 'ignore', allow_self=True),
+            patterns=_patterns(data),
         )
     except ConfigError as e:
         e.path = config_path
@@ -206,16 +228,18 @@ def rebase_config(config: TallyConfig, config_dir: Path, root: Path) -> TallyCon
     return TallyConfig(excluded, specs, non_specs)
 
 
-def load_nested_config(config_file: Path, rel_dir: str) -> Optional[TallyConfig]:
-    """Load a config found in the subdirectory *rel_dir*, with its entries prefixed by *rel_dir*.
+def load_nested_config(config_file: Path, rel_dir: str) -> Optional[tuple[TallyConfig, list[str]]]:
+    """Load a config found in the subdirectory *rel_dir*: its entries prefixed by *rel_dir*, and its patterns.
 
-    Returns None if the config is malformed: a broken config inside a scanned
-    tree (often third-party code) must not stop the scan.
+    The patterns are returned as written, relative to the config's own
+    directory. Returns None if the config is malformed: a broken config inside
+    a scanned tree (often third-party code) must not stop the scan.
     """
     try:
-        return prefixed(load_config(config_file), rel_dir)
+        config = load_config(config_file)
     except ConfigError:
         return None
+    return prefixed(config, rel_dir), config.patterns
 
 
 @dataclass
@@ -224,13 +248,15 @@ class ConfigChain:
 
     ``inherited`` merges the configs above the scan root, rebased onto it. They
     are shown locked in setup and stay in their own files. ``local`` is the
-    scan root's own config, the one setup edits. ``paths`` lists the files that
-    loaded, shallowest first.
+    scan root's own config, the one setup edits, patterns included. ``paths``
+    lists the files that loaded, shallowest first, and ``pattern_layers`` the
+    patterns of each one that has any, in the same order.
     """
 
     inherited: TallyConfig = field(default_factory=TallyConfig)
     local: TallyConfig = field(default_factory=TallyConfig)
     paths: list[Path] = field(default_factory=list)
+    pattern_layers: list[PatternLayer] = field(default_factory=list)
 
     @property
     def effective(self) -> TallyConfig:
@@ -265,6 +291,8 @@ def load_config_chain(
             continue
         chain.paths.append(path)
         config_dir = path.parent.resolve()
+        if config.patterns:
+            chain.pattern_layers.append((config_dir, config.patterns))
         if config_dir == root:
             chain.local = config
         else:
@@ -273,8 +301,11 @@ def load_config_chain(
     return chain
 
 
-def discover_nested_configs(root: Path) -> TallyConfig:
+def discover_nested_configs(root: Path, pattern_layers: Optional[list[PatternLayer]] = None) -> TallyConfig:
     """Scan subdirectories for .tally-config.toml and merge their settings.
+
+    If *pattern_layers* is given, each nested config's patterns are appended to
+    it, shallowest first.
 
     Paths from nested configs are translated to be relative to *root*, and a
     deeper config wins on the same path, as in :func:`merge_configs`.
@@ -293,9 +324,12 @@ def discover_nested_configs(root: Path) -> TallyConfig:
             continue
 
         config_file = dirpath / CONFIG_FILENAME
-        if config_file.is_file() and (nested := load_nested_config(config_file, rel_dir_str)) is not None:
+        if config_file.is_file() and (loaded := load_nested_config(config_file, rel_dir_str)) is not None:
+            nested, patterns = loaded
             # Top-down, so an ancestor's config is merged before a descendant's and the deeper one wins
             merged = merge_configs(merged, nested)
+            if pattern_layers is not None and patterns:
+                pattern_layers.append((dirpath, patterns))
 
     return merged
 
@@ -316,9 +350,16 @@ def _toml_string(value: str) -> str:
 
 
 def save_config(
-    config_path: Path, excluded_dirs: set[str], spec_dirs: set[str], non_spec_dirs: Optional[set[str]] = None
+    config_path: Path,
+    excluded_dirs: set[str],
+    spec_dirs: set[str],
+    non_spec_dirs: Optional[set[str]] = None,
+    patterns: Sequence[str] = (),
 ) -> None:
     """Write a .tally-config.toml file. Sorts directories for deterministic output.
+
+    *patterns* are written in the order given, since a later ``!pattern`` can
+    undo an earlier one. Setup passes the loaded config's patterns through.
 
     Raises OSError if the file can't be written, and UnicodeEncodeError if a
     directory name isn't valid Unicode (possible on Linux, never on macOS).
@@ -332,6 +373,12 @@ def save_config(
     for d in sorted(excluded_dirs):
         lines.append(f'    {_toml_string(d)},')
     lines.append(']')
+    if patterns:
+        lines.append("# Gitignore-style patterns, relative to this file's directory")
+        lines.append('patterns = [')
+        for pattern in patterns:
+            lines.append(f'    {_toml_string(pattern)},')
+        lines.append(']')
 
     if spec_dirs or non_spec_dirs:
         lines.append('')

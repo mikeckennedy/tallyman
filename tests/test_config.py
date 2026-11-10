@@ -339,6 +339,59 @@ class TestLoadConfigChain:
         assert chain.effective.excluded_dirs == {'x'}
 
 
+class TestPatterns:
+    def test_loaded_in_order_as_written(self, tmp_path: Path):
+        config = _write(
+            tmp_path / CONFIG_FILENAME, '[exclude]\npatterns = ["tests.rs", "!keep/tests.rs", "/top/", "a\\\\b"]\n'
+        )
+        assert load_config(config).patterns == ['tests.rs', '!keep/tests.rs', '/top/', 'a\\b']
+
+    @pytest.mark.parametrize('value', ['"tests.rs"', '[1]', '["a", 2]'])
+    def test_wrong_shape(self, tmp_path: Path, value: str):
+        config = _write(tmp_path / CONFIG_FILENAME, f'[exclude]\npatterns = {value}\n')
+        with pytest.raises(ConfigError, match='exclude.patterns must be a list of strings'):
+            load_config(config)
+
+    def test_round_trip_keeps_order_and_awkward_characters(self, tmp_path: Path):
+        config = tmp_path / CONFIG_FILENAME
+        patterns = ['tests.rs', '!src/keep/tests.rs', '/gen/', 'we"ird', 'back\\slash', 'caf\u00e9', '# not a comment']
+        save_config(config, {'vendor'}, set(), patterns=patterns)
+        loaded = load_config(config)
+        assert loaded.patterns == patterns
+        assert loaded.excluded_dirs == {'vendor'}
+
+    def test_no_patterns_key_when_empty(self, tmp_path: Path):
+        config = tmp_path / CONFIG_FILENAME
+        save_config(config, set(), set())
+        assert 'patterns' not in config.read_text()
+
+    def test_moving_and_merging_drop_patterns(self, tmp_path: Path):
+        config = TallyConfig({'a/b'}, patterns=['x.rs'])
+        assert rebase_config(config, tmp_path, tmp_path / 'a').patterns == []
+        assert prefixed(config, 'p').patterns == []
+        assert merge_configs(config, config).patterns == []
+        assert without_inherited(config, TallyConfig()).patterns == []
+
+    def test_chain_keeps_one_layer_per_config(self, tmp_path: Path):
+        top = _write(tmp_path / CONFIG_FILENAME, '[exclude]\npatterns = ["a.rs"]\n')
+        mid = _write(tmp_path / 'm' / CONFIG_FILENAME, '[exclude]\ndirectories = ["x"]\n')
+        local = _write(tmp_path / 'm' / 's' / CONFIG_FILENAME, '[exclude]\npatterns = ["b.rs", "!c.rs"]\n')
+        chain = load_config_chain([top, mid, local], tmp_path / 'm' / 's')
+        assert chain.pattern_layers == [
+            (tmp_path.resolve(), ['a.rs']),
+            ((tmp_path / 'm' / 's').resolve(), ['b.rs', '!c.rs']),
+        ]
+        assert chain.local.patterns == ['b.rs', '!c.rs']
+
+    def test_nested_configs_report_their_layers(self, tmp_path: Path):
+        _write(tmp_path / 'a' / CONFIG_FILENAME, '[exclude]\npatterns = ["x.rs"]\n')
+        _write(tmp_path / 'a' / 'b' / CONFIG_FILENAME, '[exclude]\npatterns = ["y.rs"]\n')
+        _write(tmp_path / 'c' / CONFIG_FILENAME, '[exclude]\ndirectories = ["z"]\n')
+        layers: list[tuple[Path, list[str]]] = []
+        discover_nested_configs(tmp_path, layers)
+        assert layers == [(tmp_path / 'a', ['x.rs']), (tmp_path / 'a' / 'b', ['y.rs'])]
+
+
 class TestSaveConfig:
     def test_round_trip(self, tmp_path: Path):
         config = tmp_path / CONFIG_FILENAME

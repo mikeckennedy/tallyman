@@ -43,6 +43,9 @@ In "Configuration":
   - the report line.
 - Mention issue #8 (inline `#[cfg(test)]` modules) as the known gap for Rust.
 
+- From the phase 2 review:
+  - A parent's `app/` never empties a scan of `app`, but `app/**` does, since it matches the files inside rather than the directory. That is correct gitignore behaviour and worth one sentence.
+  - `tallyman --setup` can't re-create hand-written patterns, so the "re-create it with `tallyman --setup`" hint for a broken config loses them. Say so next to the patterns docs.
 - From the phase 1 review: README.md's "uses the nearest `.tally-config.toml`" line is now false. Also note one asymmetry: a malformed config inside a directory that a parent excludes stops a scan started inside that directory, while a scan from the repo root never reads it.
 
 ### `CLAUDE.md`

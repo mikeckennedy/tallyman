@@ -8,6 +8,9 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 ## 0.4.3 - UNRELEASED
 
 ### Added
+- New `[exclude] patterns = [...]` config key: gitignore-style patterns, matched relative to the directory of the config that declares them, for files a directory exclude can't reach, such as Rust's `src/routing/tests.rs` beside `src/routing.rs` (issue #6). A pattern without a slash matches at any depth, a trailing `/` matches directories, and a deeper config's `!pattern` can bring back what a shallower config's pattern excluded. Patterns never bring back gitignored files, excluded or hidden directories, or the default skips, and a parent config's patterns never exclude the scanned directory itself. Setup shows directories a pattern excludes as locked and keeps the patterns, in order, when it rewrites the config.
+- Files: `src/tallyman/config.py`, `src/tallyman/gitignore.py`, `src/tallyman/walker.py`, `src/tallyman/cli.py`, `src/tallyman/tui/setup_app.py`, `tests/test_config.py`, `tests/test_gitignore.py`, `tests/test_walker.py`, `tests/test_cli.py`, `tests/test_setup_app.py`
+- Plan: `plans/007-exclude-patterns/phase-02-exclude-patterns.plan.md`
 - Solidity language support for `.sol` files, counted as Code with `//` single-line comment detection.
 - Files: `src/tallyman/languages.py`, `tests/test_languages.py`, `tests/test_counter.py`, `tests/test_walker.py`, `README.md`
 - New `[specs] ignore = [...]` config key: directories that are never specs, even when named `specs`, `plans`, `specifications` or `agents`. It covers the whole subtree, including auto-detection; a deeper `[specs] directories` entry still wins. Pressing `s` in setup on an auto-detected spec directory now writes it here, so un-marking one finally sticks.

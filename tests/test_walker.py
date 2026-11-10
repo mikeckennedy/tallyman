@@ -7,7 +7,8 @@ from typing import Optional
 import pytest
 
 from tallyman.config import save_config
-from tallyman.walker import _is_binary, inside_auto_spec_dir, walk_project
+from tallyman.gitignore import GitIgnoreSpec
+from tallyman.walker import WalkStats, _is_binary, inside_auto_spec_dir, walk_project
 
 
 class TestIsBinary:
@@ -448,3 +449,85 @@ class TestFileSelection:
         f = tmp_path / 'late_nul.py'
         f.write_bytes(b'x = 1\n' * 2000 + b'\x00')  # NUL beyond the first 8 KB
         assert not _is_binary(f)
+
+
+def _tree(root: Path, files: dict[str, str]) -> None:
+    for rel, content in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
+
+def _walk_with_patterns(
+    root: Path, patterns: list[str], excluded: Optional[set[str]] = None, stats: Optional[WalkStats] = None
+) -> set[str]:
+    spec = GitIgnoreSpec.for_patterns(root)
+    spec.add_rules(root, patterns)
+    found = walk_project(root, excluded or set(), exclude_patterns=spec, stats=stats)
+    return {p.relative_to(root).as_posix() for p, _ in found}
+
+
+class TestExcludePatterns:
+    def test_rust_unit_tests_beside_the_code(self, tmp_path: Path):
+        """Issue #6: src/routing.rs counts, src/routing/tests.rs doesn't."""
+        _tree(tmp_path, {'src/routing.rs': 'fn a() {}\n', 'src/routing/tests.rs': 'fn t() {}\n', 'src/lib.rs': ''})
+        assert _walk_with_patterns(tmp_path, ['tests.rs', 'testing.rs']) == {'src/routing.rs', 'src/lib.rs'}
+
+    def test_negation_cannot_bring_back_what_else_excluded(self, tmp_path: Path):
+        _tree(tmp_path, {'.gitignore': 'gen.py\n', 'gen.py': '', 'vendor/v.py': '', 'a.py': '', '.hidden/h.py': ''})
+        walked = _walk_with_patterns(tmp_path, ['!gen.py', '!vendor/', '!vendor/v.py', '!.hidden/'], {'vendor'})
+        assert walked == {'a.py'}
+
+    def test_directory_pattern_prunes(self, tmp_path: Path):
+        _tree(tmp_path, {'a/fixtures/f.py': '', 'a/fixtures.py': '', 'b.py': ''})
+        assert _walk_with_patterns(tmp_path, ['fixtures/']) == {'a/fixtures.py', 'b.py'}
+
+    def test_nested_config_patterns_apply_only_beneath_it(self, tmp_path: Path):
+        _tree(
+            tmp_path,
+            {
+                'crate/.tally-config.toml': '[exclude]\npatterns = ["tests.rs"]\n',
+                'crate/src/tests.rs': '',
+                'other/tests.rs': '',
+            },
+        )
+        found = {p.relative_to(tmp_path).as_posix() for p, _ in walk_project(tmp_path, set())}
+        assert found == {'other/tests.rs'}
+
+    def test_nested_config_can_re_include_a_parent_pattern(self, tmp_path: Path):
+        _tree(
+            tmp_path,
+            {
+                'crate/.tally-config.toml': '[exclude]\npatterns = ["!tests.rs"]\n',
+                'crate/src/tests.rs': '',
+                'other/tests.rs': '',
+            },
+        )
+        assert _walk_with_patterns(tmp_path, ['tests.rs']) == {'crate/src/tests.rs'}
+
+    def test_nested_pattern_can_match_its_own_children_directories(self, tmp_path: Path):
+        _tree(
+            tmp_path,
+            {'pkg/.tally-config.toml': '[exclude]\npatterns = ["/gen/"]\n', 'pkg/gen/g.py': '', 'gen/g.py': ''},
+        )
+        found = {p.relative_to(tmp_path).as_posix() for p, _ in walk_project(tmp_path, set())}
+        assert found == {'gen/g.py'}
+
+    def test_stats_count_only_files_that_would_have_counted(self, tmp_path: Path):
+        _tree(
+            tmp_path, {'a/tests.rs': 'fn t() {}\n', 'b/tests.rs': '', 'tests.xyz': 'x', 'fixtures/f.py': '', 'k.rs': ''}
+        )
+        (tmp_path / 'bin').mkdir()
+        (tmp_path / 'bin' / 'tests.rs').write_bytes(b'\x00\x01')
+        stats = WalkStats()
+        walked = _walk_with_patterns(tmp_path, ['tests.*', 'fixtures/'], stats=stats)
+        assert walked == {'k.rs'}
+        assert stats == WalkStats(pattern_files=2, pattern_dirs=1)  # not the .xyz, the binary, or fixtures/f.py
+
+    @pytest.mark.skipif(sys.platform == 'win32', reason='symlinks need privileges on Windows')
+    def test_stats_skip_a_linked_directory(self, tmp_path: Path):
+        _tree(tmp_path, {'real/f.py': '', 'a.py': ''})
+        (tmp_path / 'fixtures').symlink_to(tmp_path / 'real', target_is_directory=True)
+        stats = WalkStats()
+        _walk_with_patterns(tmp_path, ['fixtures/'], stats=stats)
+        assert stats == WalkStats()

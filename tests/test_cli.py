@@ -13,6 +13,7 @@ import pytest
 from tallyman import __version__, cli
 from tallyman.aggregator import TallyResult
 from tallyman.config import CONFIG_FILENAME, TallyConfig, load_config
+from tallyman.gitignore import GitIgnoreSpec
 
 
 def _make(root: Path, files: dict[str, str]) -> None:
@@ -32,6 +33,7 @@ def _run(
     setup_result: object = None,
     setup_calls: Optional[list[tuple[set[str], set[str], set[str]]]] = None,
     inherited_calls: Optional[list[TallyConfig]] = None,
+    pattern_calls: Optional[list[GitIgnoreSpec]] = None,
 ) -> Optional[TallyResult]:
     """Run tallyman's main() with *argv*; return the result it would have displayed (None if it exited first).
 
@@ -52,6 +54,7 @@ def _run(
         specs: set[str],
         non_specs: set[str],
         inherited: Optional[TallyConfig] = None,
+        exclude_patterns: Optional[GitIgnoreSpec] = None,
         **_kwargs: object,
     ) -> object:
         prefill = (set(excluded), set(specs), set(non_specs))
@@ -59,6 +62,8 @@ def _run(
             setup_calls.append(prefill)
         if inherited_calls is not None:
             inherited_calls.append(inherited or TallyConfig())
+        if pattern_calls is not None and exclude_patterns is not None:
+            pattern_calls.append(exclude_patterns)
         if setup_result is None:
             raise AssertionError('the setup TUI must not launch here')
         return prefill if setup_result == ECHO else setup_result
@@ -409,6 +414,84 @@ class TestConfigChain:
         tally = _run(monkeypatch, '--setup', str(tmp_path / 'app'), interactive=True, setup_result=ECHO)
         assert tally is not None
         assert 'its settings are skipped until it is fixed' in capsys.readouterr().err
+
+
+class TestExcludePatterns:
+    def test_setup_keeps_hand_written_patterns(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Setup rewrites the file but never edits patterns: they must survive exactly, in order."""
+        block = 'patterns = [\n    "tests.rs",\n    "!src/keep/tests.rs",\n    "/gen/",\n    "we\\"ird",\n]\n'
+        _make(tmp_path, {CONFIG_FILENAME: '[exclude]\ndirectories = ["vendor"]\n' + block, 'a.rs': ''})
+        patterns = ['tests.rs', '!src/keep/tests.rs', '/gen/', 'we"ird']
+        assert load_config(tmp_path / CONFIG_FILENAME).patterns == patterns
+        _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup_result=({'vendor', 'build'}, set(), set()))
+        assert block in (tmp_path / CONFIG_FILENAME).read_text()
+        saved = load_config(tmp_path / CONFIG_FILENAME)
+        assert saved.patterns == patterns
+        assert saved.excluded_dirs == {'vendor', 'build'}
+
+    def test_setup_shows_parent_local_and_nested_patterns(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        (tmp_path / '.git').mkdir()
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: '[exclude]\npatterns = ["/app/gen/"]\n',
+                'app/.tally-config.toml': '[exclude]\npatterns = ["fixtures/"]\n',
+                'app/crate/.tally-config.toml': '[exclude]\npatterns = ["/out/"]\n',
+                'app/main.rs': '',
+            },
+        )
+        specs: list[GitIgnoreSpec] = []
+        _run(monkeypatch, '--setup', str(tmp_path / 'app'), interactive=True, setup_result=ECHO, pattern_calls=specs)
+        assert len(specs) == 1
+        assert specs[0].match_file('gen/')  # from the parent
+        assert specs[0].match_file('x/fixtures/')  # from the scan root's own config
+        assert specs[0].match_file('crate/out/')  # from a nested config
+        assert not specs[0].match_file('out/')
+
+    def test_patterns_apply_on_a_normal_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: '[exclude]\npatterns = ["tests.rs"]\n',
+                'src/routing.rs': 'fn a() {}\n',
+                'src/routing/tests.rs': 'fn t() {}\n',
+            },
+        )
+        tally = _run(monkeypatch, str(tmp_path))
+        assert tally is not None
+        assert _files_by_category(tally) == {'Rust/code': 1}
+
+    def test_parent_patterns_are_anchored_to_the_parent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        (tmp_path / '.git').mkdir()
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: '[exclude]\npatterns = ["/app/gen/", "tests.rs"]\n',
+                'app/main.rs': '',
+                'app/gen/g.rs': '',
+                'app/src/gen/kept.rs': '',
+                'app/src/tests.rs': '',
+            },
+        )
+        tally = _run(monkeypatch, str(tmp_path / 'app'))
+        assert tally is not None
+        assert _files_by_category(tally) == {'Rust/code': 2}  # main.rs and src/gen/kept.rs
+
+    def test_parent_pattern_never_excludes_the_scan_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        (tmp_path / '.git').mkdir()
+        _make(tmp_path, {CONFIG_FILENAME: '[exclude]\npatterns = ["app/", "app"]\n', 'app/main.rs': ''})
+        tally = _run(monkeypatch, str(tmp_path / 'app'))
+        assert tally is not None
+        assert _files_by_category(tally) == {'Rust/code': 1}
+
+    def test_wrong_shape_patterns_exit_cleanly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ):
+        _make(tmp_path, {CONFIG_FILENAME: '[exclude]\npatterns = "tests.rs"\n'})
+        with pytest.raises(SystemExit) as exc:
+            _run(monkeypatch, str(tmp_path))
+        assert exc.value.code == 1
+        assert 'exclude.patterns must be a list of strings' in capsys.readouterr().err
 
 
 class TestFlags:

@@ -16,6 +16,7 @@ from tallyman.config import (
     SELF,
     ConfigChain,
     ConfigError,
+    PatternLayer,
     TallyConfig,
     discover_nested_configs,
     find_configs,
@@ -26,10 +27,10 @@ from tallyman.config import (
 )
 from tallyman.counter import count_lines
 from tallyman.display import display_results
-from tallyman.gitignore import load_gitignore
+from tallyman.gitignore import GitIgnoreSpec, load_gitignore
 from tallyman.paths import canonical_case, relative_posix
 from tallyman.tui.setup_app import run_setup
-from tallyman.walker import inside_auto_spec_dir, walk_project
+from tallyman.walker import WalkStats, inside_auto_spec_dir, walk_project
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -107,6 +108,14 @@ def _warn_and_skip(root: Path) -> Callable[[ConfigError], None]:
     return warn
 
 
+def _pattern_spec(root: Path, layers: list[PatternLayer]) -> GitIgnoreSpec:
+    """The ``[exclude] patterns`` rules for *root*, one layer per config, shallowest first."""
+    spec = GitIgnoreSpec.for_patterns(root)
+    for config_dir, patterns in layers:
+        spec.add_rules(config_dir, patterns)
+    return spec
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -130,7 +139,9 @@ def main() -> None:
     config_paths = find_configs(root)
 
     if config_paths and not args.setup:
-        config = _load_chain_or_exit(config_paths, root).effective
+        chain = _load_chain_or_exit(config_paths, root)
+        config = chain.effective
+        exclude_patterns = _pattern_spec(root, chain.pattern_layers)
     elif not interactive:
         # First run with no terminal (CI, pipes): count with defaults rather than hang in the TUI
         print(
@@ -139,10 +150,15 @@ def main() -> None:
             file=sys.stderr,
         )
         config = TallyConfig()
+        exclude_patterns = _pattern_spec(root, [])
     else:
         # First run or --setup: launch TUI. --setup is how a broken config gets repaired, so skip
         # a malformed one with a warning rather than refuse.
         chain = load_config_chain(config_paths, root, on_error=_warn_and_skip(root))
+        # Nested configs' patterns are registered up front so the TUI sees them; the walker skips repeats
+        nested_layers: list[PatternLayer] = []
+        nested = discover_nested_configs(root, nested_layers)
+        exclude_patterns = _pattern_spec(root, chain.pattern_layers + nested_layers)
         # Parent and nested configs are shown locked; they stay in their own files, which are read on every run
         result = run_setup(
             root,
@@ -150,9 +166,10 @@ def main() -> None:
             chain.local.excluded_dirs,
             chain.local.spec_dirs,
             chain.local.non_spec_dirs,
-            nested=discover_nested_configs(root),
+            nested=nested,
             inherited=chain.inherited,
             root_auto_spec=root_auto_spec,
+            exclude_patterns=exclude_patterns,
         )
         if result is None:
             print('Setup cancelled.')
@@ -160,7 +177,10 @@ def main() -> None:
         # Older versions copied parent settings into a new config; drop those copies so each lives in one file
         local = without_inherited(TallyConfig(*result), chain.inherited)
         try:
-            save_config(config_path, local.excluded_dirs, local.spec_dirs, local.non_spec_dirs)
+            # Setup doesn't edit patterns: keep the scan-root config's own, as written and in order
+            save_config(
+                config_path, local.excluded_dirs, local.spec_dirs, local.non_spec_dirs, patterns=chain.local.patterns
+            )
         except (OSError, UnicodeEncodeError) as e:
             # Don't throw away the user's selections: warn, then count with them anyway
             print(f'Warning: could not save {config_path} ({e}); using this run only.', file=sys.stderr)
@@ -175,8 +195,15 @@ def main() -> None:
 
     # Walk and count
     file_results = []
+    stats = WalkStats()
     for file_path, language in walk_project(
-        root, excluded_dirs, gitignore_spec, spec_dirs=spec_dirs, non_spec_dirs=non_spec_dirs
+        root,
+        excluded_dirs,
+        gitignore_spec,
+        spec_dirs=spec_dirs,
+        non_spec_dirs=non_spec_dirs,
+        exclude_patterns=exclude_patterns,
+        stats=stats,
     ):
         counts = count_lines(file_path, language)
         file_results.append((language, counts))
