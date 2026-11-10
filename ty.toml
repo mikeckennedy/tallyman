@@ -1,0 +1,10 @@
+# Kept in step with pyrefly.toml: same Python version, platform, interpreter, import roots and excludes.
+
+[environment]
+python-version = "3.14"
+python-platform = "darwin"
+root = ["src", "."]
+python = "venv"
+
+[src]
+exclude = ["**/.*", "**/__pycache__/**", "**/venv/**", "**/.venv/**", "**/venv-*/**", "plans"]

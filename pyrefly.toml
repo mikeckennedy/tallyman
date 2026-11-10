@@ -2,8 +2,8 @@
 
 # check all files in "."
 project-includes = ["."]
-# exclude dotfiles
-project-excludes = ["**/.[!/.]*", "**/*venv/**"]
+# exclude dotfiles, caches, virtual environments and planning docs (kept in step with ty.toml)
+project-excludes = ["**/.[!/.]*", "**/__pycache__/**", "**/*venv/**", "**/venv-*/**", "plans"]
 # perform an upward search for `.gitignore`, `.ignore`, and `.git/info/exclude`, and
 # add those to `project-excludes` automatically
 use-ignore-files = true
@@ -24,7 +24,8 @@ python-version = "3.14"
 skip-interpreter-query = false
 # query the default Python interpreter on your system, if installed and `python_platform`,
 # `python-version`, or `site-package-path` are unset.
-# python-interpreter = null # this is commented out because there are no `null` values in TOML
+# use the project venv, the same environment ty.toml points at with `python = "venv"`
+python-interpreter-path = "venv/bin/python"
 
 #### configuring your type check settings
 
