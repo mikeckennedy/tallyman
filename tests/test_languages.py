@@ -225,13 +225,8 @@ def test_docker_and_compose_variants(name: str, expected: str):
     assert (lang.name if lang else None) == expected
 
 
-# Pairs that share a colour today. C and its header share one on purpose; the other two predate the
-# rule and are Michael's call. New languages must not add to this list.
-_SHARED_COLOURS = {
-    frozenset({'C', 'C/C++ Header'}),
-    frozenset({'Rust', 'HTML'}),
-    frozenset({'C++', 'R'}),
-}
+# C and its header share a colour on purpose. No other language may share one.
+_SHARED_COLOURS = {frozenset({'C', 'C/C++ Header'})}
 
 
 def test_every_colour_is_a_valid_rich_colour():

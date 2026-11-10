@@ -3,24 +3,20 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and never resets (see `CLAUDE.md`).
 
-## UNRELEASED
+## 0.4.3 - UNRELEASED
 
 ### Added
 - Solidity language support for `.sol` files, counted as Code with `//` single-line comment detection.
 - Files: `src/tallyman/languages.py`, `tests/test_languages.py`, `tests/test_counter.py`, `tests/test_walker.py`, `README.md`
-- `--with-spaces` flag: use total lines (including comments and blanks) for category totals, combined total, percentage bar, and legend. Applies to both terminal output and PNG image export. Default behavior (effective lines) is unchanged.
-- Percentage bar and legend now use effective lines by default, consistent with the category totals shown above them (previously always used total lines).
-- Files: `src/tallyman/cli.py`, `src/tallyman/display.py`, `src/tallyman/image.py`, `src/tallyman/aggregator.py`, `tests/test_aggregator.py`
-- Nested config discovery: when running setup on a parent directory, `.tally-config.toml` files found in subprojects are discovered and their exclusions/spec designations are pre-applied in the TUI (union merge). The walker also respects nested configs during analysis.
-- Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/walker.py`, `tests/test_config.py`, `tests/test_walker.py`
-- Plan: `plans/004-nested-config-discovery/`
 - New `[specs] ignore = [...]` config key: directories that are never specs, even when named `specs`, `plans`, `specifications` or `agents`. It covers the whole subtree, including auto-detection; a deeper `[specs] directories` entry still wins. Pressing `s` in setup on an auto-detected spec directory now writes it here, so un-marking one finally sticks.
 - Files: `src/tallyman/config.py`, `src/tallyman/walker.py`, `src/tallyman/cli.py`, `src/tallyman/tui/setup_app.py`, `tests/test_setup_app.py`, `tests/test_walker.py`, `tests/test_config.py`, `tests/test_cli.py`
 - Plan: `plans/005-hardening/phase-03-spec-overrides-and-tui.plan.md`
 
 ### Changed
+- The image card's attribution footer links to mkennedy.codes/tools/tallyman.
+- Files: `src/tallyman/image.py`
 - Removed the `pathspec` dependency; tallyman now compiles gitignore patterns itself (`src/tallyman/gitignore.py`).
 - Ruff is configured only in `ruff.toml`; the ignored `[tool.ruff]` tables in `pyproject.toml` are gone, and the `W` rules they listed are now on.
 - The `.tally-config.toml` search now stops at the git repo root, and outside a repo only the scanned directory is checked, so a stray config in a home directory no longer applies to every project or suppresses first-run setup.
@@ -68,6 +64,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Files: `src/tallyman/gitignore.py`, `src/tallyman/walker.py`, `src/tallyman/paths.py`, `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/tui/setup_app.py`, `pyproject.toml`, `uv.lock`, `tests/test_gitignore.py`, `tests/test_walker.py`, `tests/test_paths.py`
 - Plan: `plans/005-hardening/phase-01-gitignore-correctness.plan.md`
 
+## 0.3.2 - 2026-03-06
+
+### Added
+- `--with-spaces` flag: use total lines (including comments and blanks) for category totals, combined total, percentage bar, and legend. Applies to both terminal output and PNG image export. Default behavior (effective lines) is unchanged.
+- Percentage bar and legend now use effective lines by default, consistent with the category totals shown above them (previously always used total lines).
+- Files: `src/tallyman/cli.py`, `src/tallyman/display.py`, `src/tallyman/image.py`, `src/tallyman/aggregator.py`, `tests/test_aggregator.py`
+- Nested config discovery: when running setup on a parent directory, `.tally-config.toml` files found in subprojects are discovered and their exclusions/spec designations are pre-applied in the TUI (union merge). The walker also respects nested configs during analysis.
+- Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/walker.py`, `tests/test_config.py`, `tests/test_walker.py`
+- Plan: `plans/004-nested-config-discovery/`
+
+### Changed
+- The image card's attribution footer lines are right-aligned to the edge of the percentage bar.
+- Files: `src/tallyman/image.py`
+
+### Fixed
 - Fixed `ColorParseError` crash when generating image for projects containing TypeScript files — `dodger_blue` is not a valid Rich color name; changed to `dodger_blue1`
 - Added defensive fallback in `_rich_color_to_rgb` so unrecognised color names degrade to grey instead of crashing the image export
 - Files: `src/tallyman/languages.py`, `src/tallyman/image.py`

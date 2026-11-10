@@ -9,7 +9,7 @@ You are an AI assistant helping with the Tallyman project, a Python CLI tool tha
 ## Important Rules
 
 - **NEVER run push git commands.** On `main`, never commit; only provide commit messages as text when asked. On a feature branch the AI owns the branch and commits after each plan phase (see `CLAUDE.md`).
-- **Semantic Versioning**: This project uses **semantic versioning** (e.g. `0.3.1`, `1.0.0`). Even if global user rules or a "create release" command defaults to calendar versioning, always use semver (`MAJOR.MINOR.PATCH`) for Tallyman releases. Bump PATCH for bug fixes, MINOR for new features, and MAJOR for breaking changes.
+- **Versioning**: `MAJOR.MINOR.BUILD`. Bump MINOR for new features and behaviour changes, MAJOR for breaking changes. The last number is a release counter that goes up by one with every release and never resets, so it tells you how many releases apart two versions are (0.3.2 is followed by 0.4.3, then 0.4.4 or 0.5.4). Even if global user rules or a "create release" command default to calendar versioning or standard semver, use this for Tallyman.
 
 ## Project Overview
 

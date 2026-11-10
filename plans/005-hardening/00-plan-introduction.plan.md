@@ -70,31 +70,35 @@ Phases 1-3 are ordered by impact on reported numbers and should land first. Phas
 2. **How far `find_config` walks up (phase 2):** stop at the git root when inside a repo; outside a repo, check only the scan root.
 3. **No TTY and no config (phase 2):** run with defaults, write no config, print a one-line note on stderr.
 4. **Config key for "not specs" (phase 3):** `[specs] ignore = [...]`.
-5. **Default file skips (phase 4):** always skip `.tally-config.toml`, `package-lock.json` / `npm-shrinkwrap.json`, and `*.min.js` / `*.min.css`. During phase 4, `pnpm-lock.yaml` was added on the same rationale, pending Michael's confirmation. `.github/` stays uncounted (hidden directories are skipped); document that in the README.
+5. **Default file skips (phase 4):** always skip `.tally-config.toml`, `package-lock.json` / `npm-shrinkwrap.json`, and `*.min.js` / `*.min.css`. During phase 4, `pnpm-lock.yaml` was added on the same rationale; Michael confirmed it. `.github/` stays uncounted (hidden directories are skipped); document that in the README.
 
-## Deferred and awaiting decision
+## Deferred and decided after the branch
 
-Each item is collected from the phase outcomes.
+Decided 2026-11-10, after phase 5:
 
-- **Nearest config wins** (phases 2 and 3, needs a decision).
-  - A closer config hides a parent's exclusions, and an intermediate config hides a root config's spec entries for the scan root.
-  - The fix would fold every config from the git root down, but then setup could no longer remove a parent's entry from the TUI.
-  - Decide alongside issue #6 (pattern excludes).
-- **`pnpm-lock.yaml` skip** (phase 4, needs confirmation). It is beyond decision 5's explicit list.
-- **Shared language colours** (phase 5, needs a decision).
-  - Rust and HTML (`dark_orange`), and C++ and R (`bright_blue`), predate the colour rule.
-  - They are allowlisted in `test_no_new_shared_colours`. C and C/C++ Header sharing `steel_blue` looks deliberate.
-- **Known gitignore differences** (phase 1):
+- **Nearest config wins.**
+  - Decision: merge every config from the git root down to the scan root. In setup, parent settings appear locked, as nested ones already do.
+  - Built in the issue #6 plan, which rewrites the same config code.
+  - Until then a closer config hides a parent's entries.
+- **`pnpm-lock.yaml`.** Keep skipping it.
+- **Shared colours.** HTML is now `indian_red` and R is `dodger_blue3`. Only C and C/C++ Header still share a colour, on purpose.
+- **Version.** This branch ships as 0.4.3, under Michael's convention that the last number counts releases and never resets.
+  - The changelog now has a 0.3.2 section for what actually shipped, checked against the published wheel.
+
+Known limitations, not planned:
+
+- **Gitignore** (phase 1):
   - matching is case-sensitive;
   - the global `core.excludesFile` isn't read;
   - `?` matches a character, not a byte;
   - tracked-but-ignored files are skipped.
-- **Counting limits** (phase 4):
+- **Counting** (phase 4):
   - UTF-16 without a BOM is skipped as binary;
   - hard links count twice;
   - the image font has no CJK or emoji glyphs;
   - all-non-ASCII directory names give the slug `tallyman-report`.
-- **Annotations.** The `X | None` to `Optional[X]` sweep is plan 006, step 4.
+
+Planned elsewhere: the `X | None` to `Optional[X]` sweep is plan 006, step 4.
 
 ## Workflow
 

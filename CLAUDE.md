@@ -6,6 +6,10 @@
 - **On `main`, NEVER run commit.** Only provide commit messages as text when asked.
 - **On a feature branch, Claude owns the branch and commits.** When working through a multi-phase plan, commit after each phase so the branch history shows how the work evolved. Never commit to `main`, never push, and leave merging to Michael.
 
+## Versioning
+
+`MAJOR.MINOR.BUILD`. MINOR goes up for new features and behaviour changes, MAJOR for breaking changes. The last number counts releases: it goes up by one with every release and never resets, so 0.3.2 is followed by 0.4.3, then 0.4.4 or 0.5.4. The version lives in `pyproject.toml`; run `uv lock` after changing it.
+
 ## What This Is
 
 Tallyman is a Python CLI tool that scans a project directory and reports codebase size by language. It shows raw line counts and "effective" lines (excluding comments and blanks), grouped into categories: **Code**, **DevOps**, **Design**, **Docs**, **Specs**, and **Data**. It can also export a PNG summary card.

@@ -38,7 +38,7 @@ LANGUAGES: tuple[Language, ...] = (
     Language('Lua',          'code',   'blue',            '--', ('.lua',)),
     Language('PHP',          'code',   'medium_purple3',  '//', ('.php',)),
     Language('Perl',         'code',   'grey62',          '#',  ('.pl', '.pm')),
-    Language('R',            'code',   'bright_blue',     '#',  ('.r', '.R')),
+    Language('R',            'code',   'dodger_blue3',    '#',  ('.r', '.R')),
     Language('Dart',         'code',   'cyan3',           '//', ('.dart',)),
     Language('Scala',        'code',   'red3',            '//', ('.scala',)),
     Language('Elixir',       'code',   'dark_violet',     '#',  ('.ex', '.exs')),
@@ -57,7 +57,7 @@ LANGUAGES: tuple[Language, ...] = (
     Language('CSS',          'design', 'magenta',         None, ('.css',)),
     Language('SCSS',         'design', 'hot_pink',        '//', ('.scss',)),
     Language('LESS',         'design', 'magenta3',        '//', ('.less',)),
-    Language('HTML',         'design', 'dark_orange',     None, (
+    Language('HTML',         'design', 'indian_red',      None, (
         '.html', '.htm', '.xhtml', '.shtml',                                   # plain HTML
         '.pt', '.jinja', '.jinja2', '.j2', '.njk', '.hbs', '.ejs', '.mustache',  # template formats
     )),
