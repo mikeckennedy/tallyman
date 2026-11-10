@@ -5,11 +5,15 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Union
 
 from tallyman import __version__
 from tallyman.aggregator import TallyResult, language_percentages
 from tallyman.display import _language_display_names
 from tallyman.languages import Language
+
+if TYPE_CHECKING:  # Pillow is imported lazily at runtime
+    from PIL.ImageFont import FreeTypeFont, ImageFont
 
 IMAGE_WIDTH = 1200
 PADDING = 60
@@ -97,7 +101,7 @@ def _load_font(size: int, bold: bool = False):
     return ImageFont.load_default()
 
 
-def _fit_text(text: str, font, max_width: int) -> str:
+def _fit_text(text: str, font: Union[FreeTypeFont, ImageFont], max_width: int) -> str:
     """Shorten *text* with an ellipsis until it fits in *max_width* pixels."""
     if font.getlength(text) <= max_width:
         return text

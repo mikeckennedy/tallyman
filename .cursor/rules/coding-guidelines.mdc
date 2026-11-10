@@ -9,7 +9,9 @@ alwaysApply: true
 - **Python 3.14+** (uses match statements, dataclass slots, `tomllib`)
 - **textual** - TUI framework for first-run setup wizard
 - **rich** - colored terminal output
-- **pathspec** - gitignore pattern matching
+- **Pillow** - PNG export, imported lazily
+- Gitignore matching is in-house (`gitignore.py`), no pathspec
+- **ty** and **pyrefly** for type checking
 - **pytest** + **ruff** for dev tooling
 - **Build backend**: hatchling
 

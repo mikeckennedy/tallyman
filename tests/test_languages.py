@@ -211,6 +211,9 @@ class TestAsSpec:
         ('Dockerfile-dev', 'Docker'),
         ('Dockerfile_prod', 'Docker'),
         ('Dockerfile.json', 'JSON'),
+        ('Dockerfile.toml', 'TOML'),  # any docs or data extension
+        ('Dockerfile.mdx', 'Markdown'),
+        ('Dockerfile.txt', None),
         ('Dockerfile.dockerignore', None),  # BuildKit's per-Dockerfile ignore file
         ('api.Dockerfile', 'Docker'),
         ('dockerfile', None),
@@ -220,3 +223,28 @@ class TestAsSpec:
 def test_docker_and_compose_variants(name: str, expected: str):
     lang = identify_language(Path(name))
     assert (lang.name if lang else None) == expected
+
+
+# Pairs that share a colour today. C and its header share one on purpose; the other two predate the
+# rule and are Michael's call. New languages must not add to this list.
+_SHARED_COLOURS = {
+    frozenset({'C', 'C/C++ Header'}),
+    frozenset({'Rust', 'HTML'}),
+    frozenset({'C++', 'R'}),
+}
+
+
+def test_every_colour_is_a_valid_rich_colour():
+    """An invalid name (like 'dodger_blue' once) crashes image export."""
+    from rich.color import Color
+
+    for lang in LANGUAGES:
+        Color.parse(lang.color)
+
+
+def test_no_new_shared_colours():
+    by_colour: dict[str, set[str]] = {}
+    for lang in LANGUAGES:
+        by_colour.setdefault(lang.color, set()).add(lang.name)
+    shared = {frozenset(names) for names in by_colour.values() if len(names) > 1}
+    assert shared <= _SHARED_COLOURS, shared - _SHARED_COLOURS

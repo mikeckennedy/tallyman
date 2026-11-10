@@ -109,6 +109,7 @@ def main() -> None:
     gitignore_spec = load_gitignore(root)
 
     # Load or create config
+    root_auto_spec = inside_auto_spec_dir(root)
     config_path = root / CONFIG_FILENAME
     existing_config = find_config(root)
 
@@ -140,7 +141,7 @@ def main() -> None:
             existing.spec_dirs,
             existing.non_spec_dirs,
             nested=discover_nested_configs(root),
-            root_auto_spec=inside_auto_spec_dir(root),
+            root_auto_spec=root_auto_spec,
         )
         if result is None:
             print('Setup cancelled.')
@@ -154,7 +155,7 @@ def main() -> None:
 
     # A scan root inside plans/, specs/, ... counts as specs, as it does when scanned from above,
     # unless a config already decided for the scan root ('.' in either set)
-    if SELF not in spec_dirs and SELF not in non_spec_dirs and inside_auto_spec_dir(root):
+    if SELF not in spec_dirs and SELF not in non_spec_dirs and root_auto_spec:
         spec_dirs = spec_dirs | {SELF}
 
     # Walk and count
@@ -169,7 +170,8 @@ def main() -> None:
     tally = aggregate(file_results)
 
     # Display
-    no_color = args.no_color or os.environ.get('NO_COLOR') is not None
+    # no-color.org: NO_COLOR disables colour only when set to a non-empty value
+    no_color = args.no_color or bool(os.environ.get('NO_COLOR'))
     display_results(tally, directory=root.name, no_color=no_color, with_spaces=args.with_spaces)
 
     # Image export (lazy import so Pillow only loaded when requested)

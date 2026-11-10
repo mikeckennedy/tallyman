@@ -8,7 +8,7 @@
 
 ## What This Is
 
-Tallyman is a Python CLI tool that scans a project directory and reports codebase size by language. It shows raw line counts and "effective" lines (excluding comments and blanks), grouped into categories: **Code**, **Design**, **Docs**, **Specs**, and **Data**.
+Tallyman is a Python CLI tool that scans a project directory and reports codebase size by language. It shows raw line counts and "effective" lines (excluding comments and blanks), grouped into categories: **Code**, **DevOps**, **Design**, **Docs**, **Specs**, and **Data**. It can also export a PNG summary card.
 
 ## Quick Reference
 
@@ -21,15 +21,19 @@ tallyman                    # analyze current directory
 tallyman /path/to/project   # analyze specific path
 tallyman --setup            # re-run interactive TUI setup
 tallyman --no-color         # disable colors
+tallyman --with-spaces      # totals and bar use total lines, not effective lines
+tallyman --image            # PNG summary card on the Desktop (--image-light for the light theme)
 
 # Tests
-pytest                      # all 84 tests
+pytest                      # all 400 tests (about 15 s, mostly the Textual pilot tests)
 pytest -v                   # verbose
 pytest tests/test_walker.py # single module
 
-# Lint & Format
+# Lint, format, type check (all must be clean)
 ruff check src/ tests/
 ruff format src/ tests/
+uvx ty check                # ty.toml
+uvx pyrefly check           # pyrefly.toml, kept consistent with ty.toml
 ```
 
 ## Tech Stack
@@ -37,7 +41,9 @@ ruff format src/ tests/
 - **Python 3.14+** (uses match statements, dataclass slots, `tomllib`)
 - **textual**  -  TUI framework for first-run setup wizard
 - **rich**  -  colored terminal output
-- **pytest** + **ruff** for dev tooling
+- **Pillow**  -  PNG export, imported lazily so a plain run never loads it
+- Gitignore matching is in-house (`gitignore.py`); there is no pathspec dependency
+- **pytest** + **ruff** (configured only in `ruff.toml`) + **ty** + **pyrefly** for dev tooling
 - Build backend: **hatchling**
 
 ## Architecture
@@ -51,13 +57,14 @@ cli.main()
   → counter.count_lines()    returns FileCount per file
   → aggregator.aggregate()   produces TallyResult
   → display.display_results() renders to terminal
+  → image.generate_image()   optional PNG (--image / --image-light)
 ```
 
 ## Module Map
 
 | Module | Role |
 |---|---|
-| `src/tallyman/cli.py` | Entry point. Arg parsing, orchestrates the pipeline |
+| `src/tallyman/cli.py` | Entry point. Arg parsing, config loading and errors, no-terminal handling, orchestrates the pipeline |
 | `src/tallyman/languages.py` | Language registry (40+ languages). Frozen dataclasses with name, category, color, comment marker, extensions. `EXTENSION_MAP` for O(1) lookup |
 | `src/tallyman/walker.py` | Directory traversal. Respects gitignore + config exclusions. Detects spec dirs. Yields `(Path, Language)` |
 | `src/tallyman/gitignore.py` | Gitignore rules (`GitIgnoreSpec`, `load_gitignore`, `find_git_root`). Own pattern compiler that follows gitignore(5) |
@@ -66,7 +73,9 @@ cli.main()
 | `src/tallyman/counter.py` | Reads files, classifies lines as code/comment/blank. Returns `FileCount` |
 | `src/tallyman/aggregator.py` | Accumulates FileCount into LanguageStats, groups by category. Produces `TallyResult` |
 | `src/tallyman/display.py` | Rich-based rendering. Per-language stats, category totals, percentage bar |
-| `src/tallyman/config.py` | `.tally-config.toml` read/write. Searches up directory tree for nearest config |
+| `src/tallyman/config.py` | `.tally-config.toml` find (up to the git root), load with validation and normalisation, rebase onto the scan root, save with TOML escaping. `ConfigError` for unreadable configs |
+| `src/tallyman/image.py` | Pillow PNG summary card, themes, output path (Desktop or cwd, slug capped at 100 chars) |
+| `src/tallyman/fonts/` | Bundled JetBrains Mono for the image |
 | `src/tallyman/tui/setup_app.py` | Textual App for interactive directory selection (exclude/spec marking) |
 | `src/tallyman/__main__.py` | Enables `python -m tallyman` |
 | `src/tallyman/__init__.py` | Package init, `__version__` |
@@ -74,7 +83,7 @@ cli.main()
 ## Core Data Structures
 
 ```python
-# All use slots=True for efficiency
+# Dataclasses use slots=True (TallyConfig is a plain dataclass; SpecState is a NamedTuple)
 
 Language(frozen=True)         # name, category, color, single_line_comment, extensions
 FileCount                     # total_lines, code_lines, comment_lines, blank_lines
@@ -106,15 +115,16 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 | Test File | Tests | Covers |
 |---|---|---|
 | `tests/test_counter.py` | 29 | Line counting, line endings, BOMs and wide encodings |
-| `tests/test_languages.py` | 53 | Language registry, extension map, Docker/Compose variants, `as_spec` |
-| `tests/test_display.py` | 3 | Terminal rendering |
+| `tests/test_languages.py` | 58 | Language registry, extension map, Docker/Compose variants, valid and unshared colours, `as_spec` |
+| `tests/test_display.py` | 17 | Terminal rendering: header escaping, wording, labels, bar width |
+| `tests/test_image.py` | 20 | Slugs, image paths, themes, PNG generation, title fitting |
 | `tests/test_walker.py` | 42 | Walking, exclusions, spec detection, nested configs |
 | `tests/test_gitignore.py` | 93 | Git root, gitignore loading and scoping, negation, TUI agreement, parity with `git` |
 | `tests/test_paths.py` | 6 | POSIX relative paths, canonical case |
-| `tests/test_aggregator.py` | 11 | Stats aggregation, categories, percentages |
+| `tests/test_aggregator.py` | 12 | Stats aggregation, categories, percentages |
 | `tests/test_config.py` | 58 | Config find/load/save, `[specs] ignore`, normalisation, rebasing, escaping, directory cleanup |
 | `tests/test_setup_app.py` | 39 | Setup TUI via Textual pilot: toggles, labels, agreement with the walker |
-| `tests/test_cli.py` | 19 | End-to-end CLI: parent configs, errors, no-terminal runs, setup pre-fill |
+| `tests/test_cli.py` | 26 | End-to-end CLI: parent configs, errors, no-terminal runs, setup pre-fill, flags, colour |
 
 Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` create test Language instances.
 
@@ -129,7 +139,12 @@ Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` creat
 
 ## When Adding a New Language
 
-Add a `Language(...)` instance to `languages.py` and include it in the `LANGUAGES` tuple. The `EXTENSION_MAP` is built automatically. Add tests in `test_languages.py`.
+Add a `Language(...)` instance to `languages.py` and include it in the `LANGUAGES` tuple. The `EXTENSION_MAP` is built automatically. Then:
+
+- Check the extensions don't collide with an existing language.
+- Pick a colour no other language uses. `test_languages.py` checks every colour parses and that no new colour is shared (three existing pairs are allowlisted).
+- Update the README's category table, the per-language extension table, and both "N languages" counts. Recount them against `LANGUAGES`.
+- Add tests in `test_languages.py`.
 
 ## When Adding a New Category
 
@@ -137,7 +152,7 @@ Update `aggregator.py` category ordering, `display.py` rendering, and ensure wal
 
 ## Environment & Config
 
-- **NO_COLOR** env var disables colored output (standard convention)
+- **NO_COLOR** env var, when set to a non-empty value, disables colored output (no-color.org)
 - `.tally-config.toml` is gitignored and generated per-project
 - No other env vars needed
 - Entry point defined in `pyproject.toml`: `tallyman = "tallyman.cli:main"`

@@ -12,7 +12,7 @@ from typing import Optional
 @dataclass(frozen=True, slots=True)
 class Language:
     name: str
-    category: str  # 'code', 'devops', 'design', 'docs', 'data'
+    category: str  # 'code', 'devops', 'design', 'docs', 'specs' (via as_spec), 'data'
     color: str  # Rich color name
     single_line_comment: str | None  # e.g. '#', '//', '--'; None if no simple detection
     extensions: tuple[str, ...]
@@ -48,7 +48,7 @@ LANGUAGES: tuple[Language, ...] = (
     Language('OCaml',        'code',   'sandy_brown',     None, ('.ml', '.mli')),
     Language('Nim',          'code',   'gold3',           '#',  ('.nim', '.nims')),
     Language('V',            'code',   'sky_blue1',       '//', ('.v', '.vv')),
-    Language('Solidity',     'code',   'bright_cyan',     '//', ('.sol',)),
+    Language('Solidity',     'code',   'slate_blue1',     '//', ('.sol',)),
     # --- DevOps ---
     Language('Terraform',    'devops', 'purple4',         '#',  ('.tf', '.tfvars')),
     Language('Makefile',     'devops', 'bright_white',    '#',  ('.mk',)),
@@ -111,8 +111,12 @@ _COMPOSE_VARIANT = re.compile(r'(?:docker-)?compose\.[^/]+\.ya?ml')
 
 # Dockerfile variants: Dockerfile.dev, Dockerfile.go (per-language images), Dockerfile.j2, Dockerfile-prod, ...
 _DOCKERFILE_VARIANT = re.compile(r'Dockerfile[._-].+')
-# ...except these suffixes, which mark a file *about* a Dockerfile rather than one
-_NOT_A_DOCKERFILE = frozenset({'.md', '.txt', '.rst', '.json', '.yml', '.yaml', '.dockerignore'})
+# ...except a docs or data extension (Dockerfile.md, Dockerfile.json, ...), .txt and .dockerignore,
+# which mark a file *about* a Dockerfile rather than one
+_NOT_A_DOCKERFILE = frozenset(
+    {ext for lang in LANGUAGES if lang.category in ('docs', 'data') for ext in lang.extensions}
+    | {'.txt', '.dockerignore'}
+)
 
 
 def identify_language(path: Path) -> Optional[Language]:

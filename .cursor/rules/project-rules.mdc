@@ -8,12 +8,12 @@ You are an AI assistant helping with the Tallyman project, a Python CLI tool tha
 
 ## Important Rules
 
-- **NEVER run commit or push git commands.** Only provide commit messages as text when asked.
+- **NEVER run push git commands.** On `main`, never commit; only provide commit messages as text when asked. On a feature branch the AI owns the branch and commits after each plan phase (see `CLAUDE.md`).
 - **Semantic Versioning**: This project uses **semantic versioning** (e.g. `0.3.1`, `1.0.0`). Even if global user rules or a "create release" command defaults to calendar versioning, always use semver (`MAJOR.MINOR.PATCH`) for Tallyman releases. Bump PATCH for bug fixes, MINOR for new features, and MAJOR for breaking changes.
 
 ## Project Overview
 
-Tallyman scans a project directory and reports codebase size by language. It shows raw line counts and "effective" lines (excluding comments and blanks), grouped into categories: **Code**, **Design**, **Docs**, **Specs**, and **Data**.
+Tallyman scans a project directory and reports codebase size by language. It shows raw line counts and "effective" lines (excluding comments and blanks), grouped into categories: **Code**, **DevOps**, **Design**, **Docs**, **Specs**, and **Data**.
 
 ### How It Works
 
@@ -58,41 +58,18 @@ ruff check src/ tests/
 ruff format src/ tests/
 ```
 
-## Module Map
+## Module Map and Test Structure
 
-| Module | Role |
-|--------|------|
-| `src/tallyman/cli.py` | Entry point. Arg parsing, orchestrates the pipeline |
-| `src/tallyman/languages.py` | Language registry (40+ languages). Frozen dataclasses with name, category, color, comment marker, extensions. `EXTENSION_MAP` for O(1) lookup |
-| `src/tallyman/walker.py` | Directory traversal. Respects gitignore + config exclusions. Detects spec dirs. Yields `(Path, Language)` |
-| `src/tallyman/counter.py` | Reads files, classifies lines as code/comment/blank. Returns `FileCount` |
-| `src/tallyman/aggregator.py` | Accumulates FileCount into LanguageStats, groups by category. Produces `TallyResult` |
-| `src/tallyman/display.py` | Rich-based rendering. Per-language stats, category totals, percentage bar |
-| `src/tallyman/config.py` | `.tally-config.toml` read/write. Searches up directory tree for nearest config |
-| `src/tallyman/tui/setup_app.py` | Textual App for interactive directory selection (exclude/spec marking) |
-| `src/tallyman/__main__.py` | Enables `python -m tallyman` |
-| `src/tallyman/__init__.py` | Package init, `__version__` |
-
-## Test Structure
-
-| Test File | Covers |
-|-----------|--------|
-| `tests/test_counter.py` | Line counting, encoding errors |
-| `tests/test_languages.py` | Language registry, extension map, `as_spec` |
-| `tests/test_walker.py` | Git root, gitignore, walking, spec detection |
-| `tests/test_aggregator.py` | Stats aggregation, categories, percentages |
-| `tests/test_config.py` | Config find/load/save, directory cleanup |
-
-Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` create test Language instances.
+See `CLAUDE.md`, which is kept current: module map, data structures, design decisions and the per-file test table.
 
 ## Environment & Config
 
-- **NO_COLOR** env var disables colored output (standard convention)
+- **NO_COLOR** env var, when non-empty, disables colored output (no-color.org)
 - `.tally-config.toml` is gitignored and generated per-project
 - No other env vars needed
 - Entry point defined in `pyproject.toml`: `tallyman = "tallyman.cli:main"`
-- Auto-detected spec dirs: `specs/`, `plans/`, `specifications/`, `agents/` - detected even without config
-- Gitignore integration loads patterns from repo root `.gitignore`, `.git/info/exclude`, and intermediate `.gitignore` files
+- Auto-detected spec dirs: `specs/`, `plans/`, `specifications/`, `agents/` - detected even without config, unless listed in `[specs] ignore`
+- Gitignore follows git: `.git/info/exclude` and every `.gitignore` in the tree, each scoped to its own directory (`gitignore.py`)
 
 ## History of Changes and Motivation
 

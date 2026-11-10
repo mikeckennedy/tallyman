@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -9,7 +10,7 @@ from typing import Optional
 
 import pytest
 
-from tallyman import cli
+from tallyman import __version__, cli
 from tallyman.aggregator import TallyResult
 from tallyman.config import CONFIG_FILENAME, load_config
 
@@ -241,6 +242,9 @@ class TestErrorHint:
 
 _SRC = str(Path(__file__).resolve().parent.parent / 'src')
 
+# An SGR sequence that sets a foreground or background colour (30-37, 38;..., 40-47, 90-97, 100-107)
+_COLOUR_CODE = re.compile(r'\x1b\[(?:\d+;)*(?:3[0-8]|4[0-8]|9[0-7]|10[0-7])[;m]')
+
 
 def _run_process(directory: Path, preexec_fn: Optional[Callable[[], None]] = None) -> subprocess.CompletedProcess[str]:
     """Run the real CLI in a subprocess with stdin at /dev/null: no monkeypatching, so the real terminal check runs."""
@@ -291,3 +295,55 @@ class TestSpecIgnoreEndToEnd:
         _run(monkeypatch, '--setup', str(tmp_path / 'src'), interactive=True, setup_result=ECHO, setup_calls=calls)
         assert calls == [(set(), set(), {'agents'})]
         assert load_config(tmp_path / 'src' / CONFIG_FILENAME).non_spec_dirs == {'agents'}
+
+
+class TestFlags:
+    def test_version(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+        monkeypatch.setattr(sys, 'argv', ['tallyman', '--version'])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 0
+        assert capsys.readouterr().out == f'tallyman {__version__}\n'
+
+    @pytest.mark.parametrize(
+        ('flag', 'env', 'coloured'),
+        [
+            (None, {}, True),  # guards the others: FORCE_COLOR really produces colour when nothing turns it off
+            ('--no-color', {}, False),
+            (None, {'NO_COLOR': '1'}, False),
+            (None, {'NO_COLOR': ''}, True),  # no-color.org: an empty value does not disable colour
+        ],
+    )
+    def test_colour_switches(self, tmp_path: Path, flag: Optional[str], env: dict[str, str], coloured: bool):
+        """Colour codes only; bold and dim are styles, which no-color.org allows."""
+        (tmp_path / 'a.py').write_text('x = 1\n')
+        environment = {k: v for k, v in os.environ.items() if k != 'NO_COLOR'}
+        # TERM=dumb would make Rich drop colour even with FORCE_COLOR, so pin a colour terminal
+        environment |= {'PYTHONPATH': _SRC, 'FORCE_COLOR': '1', 'TERM': 'xterm-256color', **env}
+        argv = [sys.executable, '-m', 'tallyman', str(tmp_path), *([flag] if flag else [])]
+        result = subprocess.run(
+            argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, env=environment, timeout=60
+        )
+        assert result.returncode == 0, result.stderr
+        assert 'Python' in result.stdout
+        assert bool(_COLOUR_CODE.search(result.stdout)) is coloured
+
+    def test_with_spaces_reaches_the_display(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        (tmp_path / 'a.py').write_text('x = 1\n')
+        seen: list[bool] = []
+        monkeypatch.setattr(sys, 'argv', ['tallyman', '--with-spaces', str(tmp_path)])
+        monkeypatch.setattr(cli, '_is_interactive', lambda: False)
+        monkeypatch.setattr(cli, 'display_results', lambda tally, **kw: seen.append(kw['with_spaces']))
+        cli.main()
+        assert seen == [True]
+
+    def test_with_spaces_reaches_the_image(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        (tmp_path / 'a.py').write_text('x = 1\n')
+        seen: list[bool] = []
+        monkeypatch.setattr(sys, 'argv', ['tallyman', '--with-spaces', '--image', str(tmp_path)])
+        monkeypatch.setattr(cli, '_is_interactive', lambda: False)
+        monkeypatch.setattr(cli, 'display_results', lambda *a, **kw: None)
+        monkeypatch.setattr('tallyman.image.generate_image', lambda *a, **kw: seen.append(kw['with_spaces']))
+        monkeypatch.setattr('tallyman.image.resolve_image_path', lambda *a, **kw: tmp_path / 'out.png')
+        cli.main()
+        assert seen == [True]

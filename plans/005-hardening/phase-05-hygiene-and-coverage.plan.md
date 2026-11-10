@@ -63,3 +63,32 @@ Local environment, for information only: the project `venv` reported tallyman v0
 - `ruff check src/ tests/` and `ruff format --check src/ tests/` are clean with a single Ruff config.
 - `pytest` passes with the new test modules in place.
 - `CLAUDE.md` and `README.md` match the code.
+
+## Outcome
+
+**H17** was already fixed on `main` before the branch.
+
+**H18.** Ruff is configured only in `ruff.toml`, with `W` on and `src = ["src"]`. The ignored `[tool.ruff]` tables are gone from `pyproject.toml`, and so is the unused mccabe setting. The `W` rules raised no new findings.
+
+**H19.** New baseline tests:
+
+- Display: wording per language section, category labels, the `, etc` list, the `--with-spaces` switch for categories, Combined and the bar, and bar width.
+- CLI: an exact `--version`, colour switches in a real subprocess, and `--with-spaces` reaching both display and image.
+
+The architect review ran mutation tests: 20 mutants of display and CLI behaviour. Several first-draft tests let mutants survive, because they checked the wrong legend line or used distributions that never needed the clamp. After strengthening, all 20 are killed. The clamp case needs 17 languages, which shows how rarely it fires.
+
+**H20.**
+
+- README: language count corrected to 43, the stray `;` removed, Docker rules and the template count fixed. A new configuration section covers search and rebasing, `[specs] ignore`, `"."`, nested configs, no-terminal runs and what is never counted. The TOML example is checked to load.
+- `CLAUDE.md`: brought current.
+- `.cursor/rules`: corrected and pointed at `CLAUDE.md`.
+
+**Beyond the plan:**
+
+- An empty `NO_COLOR` disabled colour; per no-color.org only a non-empty value should, and now does.
+- Solidity's colour (from PR #7) clashed with SQL; it is now `slate_blue1`.
+- New tests check that every language colour parses and that no new colour is shared.
+
+**Local environment, not changed.** The project `venv` reports tallyman 0.3.2, still has pathspec installed, and has ruff 0.15.0 against the lock's 0.14.14. Recreate it with `uv venv`, then `uv pip install -e ".[dev]"`.
+
+**Release note.** UNRELEASED holds everything since 0.3.1, while `pyproject.toml` says 0.3.3. If 0.3.2 or 0.3.3 were published, split their entries out before the next release.

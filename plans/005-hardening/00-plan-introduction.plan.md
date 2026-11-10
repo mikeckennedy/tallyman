@@ -70,7 +70,31 @@ Phases 1-3 are ordered by impact on reported numbers and should land first. Phas
 2. **How far `find_config` walks up (phase 2):** stop at the git root when inside a repo; outside a repo, check only the scan root.
 3. **No TTY and no config (phase 2):** run with defaults, write no config, print a one-line note on stderr.
 4. **Config key for "not specs" (phase 3):** `[specs] ignore = [...]`.
-5. **Default file skips (phase 4):** always skip `.tally-config.toml`, `package-lock.json` / `npm-shrinkwrap.json`, and `*.min.js` / `*.min.css`. `.github/` stays uncounted (hidden directories are skipped); document that in the README.
+5. **Default file skips (phase 4):** always skip `.tally-config.toml`, `package-lock.json` / `npm-shrinkwrap.json`, and `*.min.js` / `*.min.css`. During phase 4, `pnpm-lock.yaml` was added on the same rationale, pending Michael's confirmation. `.github/` stays uncounted (hidden directories are skipped); document that in the README.
+
+## Deferred and awaiting decision
+
+Each item is collected from the phase outcomes.
+
+- **Nearest config wins** (phases 2 and 3, needs a decision).
+  - A closer config hides a parent's exclusions, and an intermediate config hides a root config's spec entries for the scan root.
+  - The fix would fold every config from the git root down, but then setup could no longer remove a parent's entry from the TUI.
+  - Decide alongside issue #6 (pattern excludes).
+- **`pnpm-lock.yaml` skip** (phase 4, needs confirmation). It is beyond decision 5's explicit list.
+- **Shared language colours** (phase 5, needs a decision).
+  - Rust and HTML (`dark_orange`), and C++ and R (`bright_blue`), predate the colour rule.
+  - They are allowlisted in `test_no_new_shared_colours`. C and C/C++ Header sharing `steel_blue` looks deliberate.
+- **Known gitignore differences** (phase 1):
+  - matching is case-sensitive;
+  - the global `core.excludesFile` isn't read;
+  - `?` matches a character, not a byte;
+  - tracked-but-ignored files are skipped.
+- **Counting limits** (phase 4):
+  - UTF-16 without a BOM is skipped as binary;
+  - hard links count twice;
+  - the image font has no CJK or emoji glyphs;
+  - all-non-ASCII directory names give the slug `tallyman-report`.
+- **Annotations.** The `X | None` to `Optional[X]` sweep is plan 006, step 4.
 
 ## Workflow
 

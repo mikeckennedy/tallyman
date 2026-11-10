@@ -1,9 +1,10 @@
-# [ruff]
+# The one Ruff config for this project (pyproject.toml has no [tool.ruff] section)
 line-length = 120
+src = ["src"]
 format.quote-style = "single"
 
-# Enable Pyflakes `E` and `F` codes by default.
-lint.select = ["E", "F", "I"]
+# pycodestyle errors (E) and warnings (W), Pyflakes (F), isort (I)
+lint.select = ["E", "F", "W", "I"]
 lint.ignore = []
 
 # Exclude a variety of commonly ignored directories.
@@ -38,6 +39,4 @@ lint.per-file-ignores = { }
 # Assume Python 3.14.
 target-version = "py314"
 
-#[tool.ruff.mccabe]
-## Unlike Flake8, default to a complexity level of 10.
-lint.mccabe.max-complexity = 10
+
