@@ -30,6 +30,15 @@ class TestCountLines:
         assert result.blank_lines == 1
         assert result.code_lines == 1
 
+    def test_solidity_style_comments(self, tmp_path: Path):
+        f = tmp_path / 'Token.sol'
+        f.write_text('// SPDX-License-Identifier: MIT\ncontract Token {\n    // storage\n    uint256 totalSupply;\n}\n')
+        result = count_lines(f, _lang('//'))
+        assert result.total_lines == 5
+        assert result.comment_lines == 2
+        assert result.blank_lines == 0
+        assert result.code_lines == 3
+
     def test_dash_comments(self, tmp_path: Path):
         f = tmp_path / 'example.lua'
         f.write_text('-- comment\nprint("hi")\n')

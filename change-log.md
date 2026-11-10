@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## UNRELEASED
 
 ### Added
+- Solidity language support for `.sol` files, counted as Code with `//` single-line comment detection.
+- Files: `src/tallyman/languages.py`, `tests/test_languages.py`, `tests/test_counter.py`, `tests/test_walker.py`, `README.md`
 - `--with-spaces` flag: use total lines (including comments and blanks) for category totals, combined total, percentage bar, and legend. Applies to both terminal output and PNG image export. Default behavior (effective lines) is unchanged.
 - Percentage bar and legend now use effective lines by default, consistent with the category totals shown above them (previously always used total lines).
 - Files: `src/tallyman/cli.py`, `src/tallyman/display.py`, `src/tallyman/image.py`, `src/tallyman/aggregator.py`, `tests/test_aggregator.py`

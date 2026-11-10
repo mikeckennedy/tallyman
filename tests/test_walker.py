@@ -113,6 +113,17 @@ class TestWalkProject:
         paths = {r[0].name for r in results}
         assert 'LICENSE' not in paths
 
+    def test_yields_solidity_files(self, tmp_path: Path):
+        root = self._setup_project(tmp_path)
+        contracts = root / 'contracts'
+        contracts.mkdir()
+        (contracts / 'Token.sol').write_text('contract Token {}\n')
+
+        results = list(walk_project(root, set()))
+        solidity_lang = next(lang for path, lang in results if path.name == 'Token.sol')
+        assert solidity_lang.name == 'Solidity'
+        assert solidity_lang.category == 'code'
+
     def test_respects_excluded_dirs(self, tmp_path: Path):
         root = self._setup_project(tmp_path)
         results = list(walk_project(root, {'src'}))
