@@ -9,6 +9,7 @@ from pathlib import Path
 from tallyman import __version__
 from tallyman.aggregator import TallyResult, language_percentages
 from tallyman.display import _language_display_names
+from tallyman.languages import Language
 
 IMAGE_WIDTH = 1200
 PADDING = 60
@@ -97,8 +98,8 @@ def _load_font(size: int, bold: bool = False):
 
 
 def _cap_legend(
-    main_langs: list[tuple],
-    display_names: dict,
+    main_langs: list[tuple[Language | None, float]],
+    display_names: dict[Language, str],
 ) -> list[str]:
     """Build legend parts, capping at MAX_LEGEND_ITEMS and grouping the rest as 'Other'."""
     legend_parts: list[str] = []
@@ -147,7 +148,10 @@ def generate_image(
     num_category_lines = len(active_categories) + 1 if active_categories else 0  # +1 for Combined
     has_bar = result.grand_total_lines > 0
     percentages = language_percentages(result, with_spaces=with_spaces) if has_bar else []
-    main_langs = [(lang, pct) for lang, pct in percentages if pct >= SMALL_LANGUAGE_THRESHOLD]
+    # A None language is the "Other" segment that groups the small languages
+    main_langs: list[tuple[Language | None, float]] = [
+        (lang, pct) for lang, pct in percentages if pct >= SMALL_LANGUAGE_THRESHOLD
+    ]
     other_pct = sum(pct for _, pct in percentages if pct < SMALL_LANGUAGE_THRESHOLD)
     if other_pct > 0:
         main_langs.append((None, other_pct))
