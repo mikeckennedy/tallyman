@@ -169,4 +169,4 @@ Update `aggregator.py` category ordering, `display.py` rendering, and ensure wal
 
 ## Planning Documents
 
-`plans/` contains structured planning docs organized by feature number. `plans/agents/` has AI agent prompts. `plans/planning-rules.md` has project planning guidelines. Consult these when implementing new features.
+`plans/` contains structured planning docs organized by feature number. `plans/agents/` has other AI agent prompts. Architect reviews (including the per-phase reviews plans call for) use the `architect-tallyman` sub-agent, `.claude/agents/architect-tallyman.md` (gitignored; plan 006 holds a copy). `plans/planning-rules.md` has project planning guidelines. Consult these when implementing new features.

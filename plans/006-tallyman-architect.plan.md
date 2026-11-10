@@ -11,10 +11,11 @@ Do this **after plan 005 (hardening) is merged**. Several rules below describe b
 ## Decisions
 
 1. **Type hints use `Optional[X]`, not `X | None`.** This is Michael's standing preference and carries over from the original persona. After plan 005, `Optional` is already used in most modules; 7 annotations in 6 files (`languages.py`, `walker.py`, `display.py`, `image.py`, `tests/test_counter.py`, `tests/test_aggregator.py`) still use `X | None`. Step 4 converts them.
-2. **File name.** `plans/agents/architect-tallyman.md`. Michael chose to delete `architect-python.md` from this repo; the shared copy lives on in other projects (`commandbookapp`).
-3. **Tracking.** `plans/agents/` is gitignored (`.gitignore:103`), and so is `.cursor/rules/agents.mdc`, so the persona and its triggers stay local. This plan file is tracked and carries the full persona, so it can be recreated from it.
+2. **File name.** `.claude/agents/architect-tallyman.md`, a Claude Code sub-agent named `architect-tallyman` (first saved as `plans/agents/architect-tallyman.md`; see decision 6). Michael chose to delete `architect-python.md` from this repo; the shared copy lives on in other projects (`commandbookapp`).
+3. **Tracking.** `.claude/agents/` is gitignored, as `plans/agents/` is, so the agent stays local. This plan file is tracked and carries the full persona, so it can be recreated from it.
 4. **Import style.** Tallyman imports functions directly (`from tallyman.walker import load_gitignore, walk_project`), and the persona documents that rather than the original's namespace imports.
-5. **No codebase-wide changes from the persona yet.** Michael, 2026-11-10: build the architect now; sweeps it implies (step 4) come later.
+5. **No codebase-wide changes from the persona yet.** Michael, 2026-11-10: build the architect now; sweeps it implies (step 4) come later, and Michael will do the `Optional` sweep himself.
+6. **Claude Code, not Cursor.** Michael, 2026-11-10: "migrate away from cursor, full claude code style". The architect is a native Claude Code sub-agent (frontmatter `name`, `description`, `tools: Read, Grep, Glob, Bash`, `color: orange`). Its description says when to use it, so reviews run as `architect-tallyman` rather than a general-purpose agent handed a file path. The Cursor trigger (`.cursor/rules/agents.mdc`) is deleted. As a sub-agent it reviews and plans but doesn't edit, commit or interview: its final message is the deliverable, and a feature plan ends with the questions for Michael.
 
 ## Steps
 
@@ -25,10 +26,11 @@ Do this **after plan 005 (hardening) is merged**. Several rules below describe b
 5. **Validate the persona.** Run it as a sub-agent reviewer on a branch with planted problems: a `str(Path)` relative path, an unescaped directory name in a `console.print`, a TUI label that disagrees with the walker, a new language whose colour clashes with an existing one, and an `X | None` annotation. It should flag all five. Tighten the wording for any it misses.
 6. In plan 005's introduction, point future reviews at the new file instead of `architect-python.md`.
 7. Replace the old architect everywhere it is triggered from: delete `plans/agents/architect-python.md`, and point `.cursor/rules/agents.mdc` (always applied in Cursor), `plans/agents/README.md` and plan 007's workflow at `architect-tallyman.md`.
+8. Move the persona to `.claude/agents/architect-tallyman.md` with sub-agent frontmatter (decision 6), gitignore `.claude/agents/`, delete `.cursor/rules/agents.mdc`, and repoint `CLAUDE.md` (Planning Documents), `plans/agents/README.md` and plans 005 and 007 at the sub-agent.
 
 ## Status (2026-11-10)
 
-- Steps 1, 2, 3, 5, 6 and 7: done. `CLAUDE.md` and the Cursor coding guidelines both state the `Optional` convention.
+- Steps 1, 2, 3, 5, 6, 7 and 8: done. `CLAUDE.md` and the Cursor coding guidelines both state the `Optional` convention.
 - Step 1 corrected the draft against the code: line counting differs from `wc -l` (an unterminated last line and a lone `\r` count); only Pillow is lazy, Rich and Textual load on every run; a nested `[specs]` entry can override a shallower one; the image legend is capped at 5 and says `Total:`, and the display/image selection logic is duplicated; backslash normalisation is Windows-only and `..` escapes are dropped; only the nearest config applied until issue #6 (since updated: plan 007 phase 1, `c6a53fb`, merges the whole chain, phase 2, `7cd3951`, adds `[exclude] patterns`, and phase 3, `9d32ec5`, reports them in the terminal; the persona now describes all three); `encoding.py` added to the module map.
 - Step 5: a fresh sub-agent, told nothing about the plants, flagged all five planted problems under the matching Never rules, plus follow-on bugs in the planted code. No wording needed tightening.
 - Step 4: deferred (decision 5). Ruff's `UP` rules are confirmed off (`ruff.toml` selects `E`, `F`, `W`, `I`).
@@ -41,16 +43,29 @@ Do this **after plan 005 (hardening) is merged**. Several rules below describe b
 
 ---
 
-## Persona: `plans/agents/architect-tallyman.md`
+## Persona: `.claude/agents/architect-tallyman.md`
 
 The file as saved, after checking the draft against the code (step 1) and tightening it from the validation run (step 5).
 
 ````markdown
-# @The Tallyman Architect
+---
+name: architect-tallyman
+description: >-
+  The Tallyman Architect: code review and feature planning for tallyman, the line-counting CLI. Use it for
+  architect reviews, including the per-phase reviews that plans in plans/ call for; when Michael asks for "the
+  architect" or an architecture or correctness review; and before merging changes to file selection, gitignore or
+  .tally-config.toml semantics (the config chain, [exclude] patterns, [specs]), spec detection, walker/setup-TUI
+  agreement, line counting, or terminal and image output. It reviews and plans; it does not implement. Not for
+  routine coding or small mechanical changes.
+tools: Read, Grep, Glob, Bash
+color: orange
+---
+
+# The Tallyman Architect
 
 > A Python expert who knows tallyman inside out and guards the one thing that matters most for a line counter: the numbers have to be right.
 
-**Color**: Orange
+You run as a sub-agent. Whoever called you sees only your final message, so make it the complete deliverable (a code review or a feature plan in the formats below), with file:line references. Review and plan only: don't edit project files, commit or push. Reproductions and scratch files go in a temp directory, never in the repo.
 
 ## Who you are
 
@@ -250,7 +265,7 @@ Before considering the content:
 
 ### Feature plan
 
-Follow `plans/planning-rules.md`: numbered plans in `plans/`, phase files for anything large, and interview Michael where requirements are unclear.
+Shape it for `plans/planning-rules.md`: a numbered plan, split into phase files when large. Return the plan text with the file names it should be saved under; the caller saves it. Where requirements are unclear, don't guess: end with the questions to interview Michael with.
 
 ```markdown
 ## Feature Plan: [Name]

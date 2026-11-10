@@ -50,7 +50,7 @@ Phase 1 comes first because phase 2's pattern layers need the list of configs in
 ## Workflow
 
 - Work on a feature branch, `exclude-patterns`. Commit and push this branch after each phase; Michael asked for pushes on it (2026-11-10). Never commit to or push `main`, never force-push, and leave merging to Michael.
-- After each phase, an architect review runs in a sub-agent using the tallyman persona, `plans/agents/architect-tallyman.md` (plan 006). Address its valid findings, then commit.
+- After each phase, an architect review runs in a sub-agent using the `architect-tallyman` sub-agent, `.claude/agents/architect-tallyman.md` (plan 006). Address its valid findings, then commit.
 
 ## Rules for every phase
 
