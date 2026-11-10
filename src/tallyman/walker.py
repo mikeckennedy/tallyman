@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 from tallyman.config import CONFIG_FILENAME, SELF, load_nested_config
+from tallyman.encoding import has_wide_bom
 from tallyman.gitignore import GitIgnoreSpec, find_git_root, load_gitignore
 from tallyman.languages import Language, as_spec, identify_language
 from tallyman.paths import relative_posix
@@ -70,13 +71,32 @@ def inside_auto_spec_dir(root: Path) -> bool:
     return any(part.lower() in SPEC_DIR_NAMES for part in resolved.relative_to(git_root).parts)
 
 
+# Skipped whatever .gitignore says.
+# Generated files that would dwarf the real code. Lower case: the check ignores case.
+GENERATED_FILENAMES: frozenset[str] = frozenset(
+    {CONFIG_FILENAME, 'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml'}
+)
+GENERATED_SUFFIXES: tuple[str, ...] = ('.min.js', '.min.css')
+
+
+def _is_generated(filename: str) -> bool:
+    """True for tallyman's own config, npm and pnpm lockfiles, and minified bundles, in any letter case."""
+    name = filename.lower()
+    return name in GENERATED_FILENAMES or name.endswith(GENERATED_SUFFIXES)
+
+
 def _is_binary(path: Path) -> bool:
-    """Return True if the file appears to be binary."""
+    """Return True if the file appears to be binary (a NUL byte in the first 8 KB).
+
+    UTF-16 and UTF-32 text is full of NUL bytes, so a file that starts with
+    their byte-order mark is text. Only the first 8 KB is read.
+    """
     try:
-        chunk = path.read_bytes()[:8192]
-        return b'\x00' in chunk
+        with path.open('rb') as f:
+            chunk = f.read(8192)
     except OSError:
         return True
+    return b'\x00' in chunk and not has_wide_bom(chunk)
 
 
 def walk_project(
@@ -152,6 +172,11 @@ def walk_project(
             # Skip files matched by gitignore
             file_rel = f'{rel_dir_str}/{filename}' if rel_dir_str else filename
             if gitignore_spec.match_file(file_rel):
+                continue
+
+            # Skip generated files, and symlinks: the walk doesn't follow linked directories either,
+            # and a link to a file in the tree would count that file twice
+            if _is_generated(filename) or file_path.is_symlink():
                 continue
 
             language = identify_language(file_path)

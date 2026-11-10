@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -338,7 +339,7 @@ class TestSpecRootAndNestedConfigs:
         sub.mkdir()
         (sub / '.tally-config.toml').write_bytes(payload)
         (sub / 'v.py').write_text('x = 1\n')
-        assert {p.name for p, _ in walk_project(tmp_path, set()) if p.suffix == '.py'} == {'v.py'}
+        assert {p.name for p, _ in walk_project(tmp_path, set())} == {'v.py'}
 
 
 class TestInsideAutoSpecDir:
@@ -399,3 +400,34 @@ class TestSpecIgnore:
         cats = _categories(tree)
         assert cats['agents/plans/d.md'] == 'docs'
         assert cats['agents/e.md'] == 'specs'
+
+
+class TestFileSelection:
+    def test_skips_generated_files(self, tmp_path: Path):
+        names = ['.tally-config.toml', 'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'app.min.js']
+        for name in [*names, 'site.MIN.css', 'Package-Lock.json', 'sub/deep/package-lock.json', 'sub/x.min.js']:
+            (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / name).write_text('{}\n')
+        (tmp_path / 'package.json').write_text('{}\n')
+        (tmp_path / 'app.js').write_text('x\n')
+        (tmp_path / 'pyproject.toml').write_text('[x]\n')
+        assert {p.name for p, _ in walk_project(tmp_path, set())} == {'package.json', 'app.js', 'pyproject.toml'}
+
+    @pytest.mark.skipif(sys.platform == 'win32', reason='creating symlinks needs privileges on Windows')
+    def test_symlinked_file_is_not_counted_twice(self, tmp_path: Path):
+        (tmp_path / 'real.py').write_text('x = 1\n')
+        (tmp_path / 'link.py').symlink_to(tmp_path / 'real.py')
+        (tmp_path / 'broken.py').symlink_to(tmp_path / 'missing.py')
+        outside = tmp_path.parent / f'{tmp_path.name}-outside.md'
+        outside.write_text('# o\n')
+        (tmp_path / 'outside.md').symlink_to(outside)  # content lives elsewhere: not counted here
+        assert {p.name for p, _ in walk_project(tmp_path, set())} == {'real.py'}
+
+    def test_utf16_file_is_text_not_binary(self, tmp_path: Path):
+        (tmp_path / 'wide.sql').write_bytes('select 1;\n'.encode('utf-16'))
+        assert {p.name for p, _ in walk_project(tmp_path, set())} == {'wide.sql'}
+
+    def test_nul_after_the_first_8kb_is_not_binary(self, tmp_path: Path):
+        f = tmp_path / 'late_nul.py'
+        f.write_bytes(b'x = 1\n' * 2000 + b'\x00')  # NUL beyond the first 8 KB
+        assert not _is_binary(f)

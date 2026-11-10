@@ -191,3 +191,32 @@ class TestAsSpec:
         spec_rst = as_spec(rst)
         assert spec_rst.category == 'specs'
         assert spec_rst.name == 'reStructuredText'
+
+
+@pytest.mark.parametrize(
+    ('name', 'expected'),
+    [
+        ('Dockerfile', 'Docker'),
+        ('Dockerfile.dev', 'Docker'),
+        ('Dockerfile.prod', 'Docker'),
+        ('Dockerfile.md', 'Markdown'),  # a known extension wins
+        ('Dockerfiles.py', 'Python'),
+        ('docker-compose.yml', 'Docker'),
+        ('docker-compose.override.yml', 'Docker'),
+        ('compose.prod.yaml', 'Docker'),
+        ('mycompose.prod.yml', 'YAML'),
+        ('compose.yml.bak', None),
+        ('Dockerfile.go', 'Docker'),  # per-language images: a Dockerfile, not Go
+        ('Dockerfile.j2', 'Docker'),
+        ('Dockerfile-dev', 'Docker'),
+        ('Dockerfile_prod', 'Docker'),
+        ('Dockerfile.json', 'JSON'),
+        ('Dockerfile.dockerignore', None),  # BuildKit's per-Dockerfile ignore file
+        ('api.Dockerfile', 'Docker'),
+        ('dockerfile', None),
+        ('docker-compose.yml.example', None),
+    ],
+)
+def test_docker_and_compose_variants(name: str, expected: str):
+    lang = identify_language(Path(name))
+    assert (lang.name if lang else None) == expected

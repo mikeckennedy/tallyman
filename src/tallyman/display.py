@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from typing import Optional
 
 from rich.console import Console
 from rich.text import Text
@@ -34,9 +35,19 @@ BAR_WIDTH = 60
 SMALL_LANGUAGE_THRESHOLD = 2.0  # Percentage below which languages are grouped as "Other"
 
 
-def display_results(result: TallyResult, directory: str, no_color: bool = False, with_spaces: bool = False) -> None:
-    """Render the full tallyman output to the terminal."""
-    console = Console(no_color=no_color, highlight=False)
+def display_results(
+    result: TallyResult,
+    directory: str,
+    no_color: bool = False,
+    with_spaces: bool = False,
+    console: Optional[Console] = None,
+) -> None:
+    """Render the full tallyman output to the terminal, or to *console* when given (tests pass one).
+
+    *no_color* applies only to the console created here; a passed-in console keeps its own setting.
+    """
+    if console is None:
+        console = Console(no_color=no_color, highlight=False)
 
     _display_report_header(console, directory)
 
@@ -58,7 +69,8 @@ SECTION_WIDTH = 58
 def _display_report_header(console: Console, directory: str) -> None:
     console.print(f'[dim]{HORIZONTAL_RULE * SECTION_WIDTH}[/dim]')
     console.print(f'[bold]Tallyman [dim]v{__version__} created by Michael Kennedy[/dim][/bold]')
-    console.print(f'{directory}')
+    # A directory name is printed as-is: no markup ([bold]), no emoji codes (:rocket:), no control characters
+    console.print(Text(''.join(ch if ch.isprintable() else '?' for ch in directory)))
     console.print('')
 
 

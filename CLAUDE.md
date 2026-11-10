@@ -61,6 +61,7 @@ cli.main()
 | `src/tallyman/languages.py` | Language registry (40+ languages). Frozen dataclasses with name, category, color, comment marker, extensions. `EXTENSION_MAP` for O(1) lookup |
 | `src/tallyman/walker.py` | Directory traversal. Respects gitignore + config exclusions. Detects spec dirs. Yields `(Path, Language)` |
 | `src/tallyman/gitignore.py` | Gitignore rules (`GitIgnoreSpec`, `load_gitignore`, `find_git_root`). Own pattern compiler that follows gitignore(5) |
+| `src/tallyman/encoding.py` | BOM detection: `text_encoding()`, `has_wide_bom()`. Shared by walker (binary check) and counter |
 | `src/tallyman/paths.py` | `relative_posix()`: `/`-separated relative paths, safe on Windows |
 | `src/tallyman/counter.py` | Reads files, classifies lines as code/comment/blank. Returns `FileCount` |
 | `src/tallyman/aggregator.py` | Accumulates FileCount into LanguageStats, groups by category. Produces `TallyResult` |
@@ -92,7 +93,7 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 
 3. **Comment detection is single-line only.** Strips the line, checks `startswith(marker)`. Multi-line comments (`/* */`, `""" """`) are NOT detected.
 
-4. **Binary detection** checks first 8KB for `\x00` byte.
+4. **Binary detection** checks the first 8KB for a `\x00` byte, unless the file starts with a UTF-16/32 BOM. Lines end only at `\n`, `\r\n` or a lone `\r`, and a final line without a newline counts. BOMs pick the encoding (`encoding.py`). Tallyman's own config, npm/pnpm lockfiles, `*.min.js`/`*.min.css` and symlinked files are never counted.
 
 5. **Config search stops at the git root, and parent configs are rebased.** `find_config()` returns the nearest `.tally-config.toml` from the scan root up to the git repo root (outside a repo, only the scan root itself). `rebase_config()` translates its entries to be relative to the scan root. Entries are normalised on load. In `[specs] directories` and `[specs] ignore`, `"."` means the config's own directory. With no config and no terminal, tallyman runs with defaults and writes nothing.
 
@@ -104,9 +105,10 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 
 | Test File | Tests | Covers |
 |---|---|---|
-| `tests/test_counter.py` | 10 | Line counting, encoding errors |
-| `tests/test_languages.py` | 14 | Language registry, extension map, `as_spec` |
-| `tests/test_walker.py` | 38 | Walking, exclusions, spec detection, nested configs |
+| `tests/test_counter.py` | 29 | Line counting, line endings, BOMs and wide encodings |
+| `tests/test_languages.py` | 53 | Language registry, extension map, Docker/Compose variants, `as_spec` |
+| `tests/test_display.py` | 3 | Terminal rendering |
+| `tests/test_walker.py` | 42 | Walking, exclusions, spec detection, nested configs |
 | `tests/test_gitignore.py` | 93 | Git root, gitignore loading and scoping, negation, TUI agreement, parity with `git` |
 | `tests/test_paths.py` | 6 | POSIX relative paths, canonical case |
 | `tests/test_aggregator.py` | 11 | Stats aggregation, categories, percentages |

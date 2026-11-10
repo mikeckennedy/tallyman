@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import functools
+import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,19 +106,33 @@ def _build_filename_map() -> dict[str, Language]:
 FILENAME_MAP: dict[str, Language] = _build_filename_map()
 
 
-def identify_language(path: Path) -> Language | None:
+# Compose file variants: docker-compose.override.yml, compose.prod.yaml, ...
+_COMPOSE_VARIANT = re.compile(r'(?:docker-)?compose\.[^/]+\.ya?ml')
+
+# Dockerfile variants: Dockerfile.dev, Dockerfile.go (per-language images), Dockerfile.j2, Dockerfile-prod, ...
+_DOCKERFILE_VARIANT = re.compile(r'Dockerfile[._-].+')
+# ...except these suffixes, which mark a file *about* a Dockerfile rather than one
+_NOT_A_DOCKERFILE = frozenset({'.md', '.txt', '.rst', '.json', '.yml', '.yaml', '.dockerignore'})
+
+
+def identify_language(path: Path) -> Optional[Language]:
     """Return the Language for a file path, or None if unrecognized.
 
     Checks exact filename matches first (e.g. Makefile, docker-compose.yml),
-    then Dockerfile prefix variants (Dockerfile.dev, Dockerfile.prod),
-    then falls back to extension matching.
+    then Dockerfile and Compose variants (Dockerfile.dev, Dockerfile.go,
+    Dockerfile-prod, compose.prod.yaml), then falls back to extension
+    matching. A Dockerfile variant with a docs or data suffix (Dockerfile.md,
+    Dockerfile.dockerignore) is not a Dockerfile.
     """
     name = path.name
     if name in FILENAME_MAP:
         return FILENAME_MAP[name]
-    if name.startswith('Dockerfile'):
+    suffix = path.suffix.lower()
+    if _DOCKERFILE_VARIANT.fullmatch(name) and suffix not in _NOT_A_DOCKERFILE:
         return FILENAME_MAP['Dockerfile']
-    return EXTENSION_MAP.get(path.suffix.lower())
+    if _COMPOSE_VARIANT.fullmatch(name):
+        return FILENAME_MAP['docker-compose.yml']
+    return EXTENSION_MAP.get(suffix)
 
 
 @functools.cache

@@ -158,9 +158,7 @@ class TestNoTerminal:
         )
         tally = _run(monkeypatch, str(tmp_path))
         assert tally is not None
-        assert (
-            _files_by_category(tally)['Python/code'] == 1
-        )  # vendor/v.py excluded (phase 4 stops the config counting as TOML)
+        assert _files_by_category(tally) == {'Python/code': 1}  # vendor/v.py excluded, the config itself not counted
         assert capsys.readouterr().err == ''
 
 
