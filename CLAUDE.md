@@ -137,6 +137,7 @@ Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` creat
 - Single quotes for strings (Ruff enforced)
 - `from __future__ import annotations` in every module
 - Type hints on all function signatures
+- Use `Optional[X]` from `typing` for optional types, not `X | None`
 - `_prefixed` for module-private functions
 - 120-char line length
 - Frozen dataclasses for immutable values, mutable ones for accumulators
@@ -146,7 +147,7 @@ Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` creat
 Add a `Language(...)` instance to `languages.py` and include it in the `LANGUAGES` tuple. The `EXTENSION_MAP` is built automatically. Then:
 
 - Check the extensions don't collide with an existing language.
-- Pick a colour no other language uses. `test_languages.py` checks every colour parses and that no new colour is shared (three existing pairs are allowlisted).
+- Pick a colour no other language uses. `test_languages.py` checks every colour parses and that no new colour is shared (only C and its header may share one).
 - Update the README's category table, the per-language extension table, and both "N languages" counts. Recount them against `LANGUAGES`.
 - Add tests in `test_languages.py`.
 

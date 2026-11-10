@@ -39,7 +39,7 @@ src/tallyman/
 - **Quotes**: Single quotes for strings (per ruff.toml)
 - **Linting**: `ruff check src/ tests/` and `ruff format src/ tests/`
 - **Target Python**: 3.14+ features are allowed
-- **Type Hints**: Use modern Python type hints on all function signatures
+- **Type Hints**: Use modern Python type hints on all function signatures, but `Optional[X]` from `typing` for optional types, not `X | None`
 - **Imports**: `from __future__ import annotations` in every module
 - **Private Functions**: `_prefixed` for module-private functions
 - **Dataclasses**: Frozen for immutable values (Language), mutable for accumulators (LanguageStats)
