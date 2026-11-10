@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tallyman.config import CONFIG_FILENAME, discover_nested_configs, find_config, load_config, save_config
+import pytest
+
+from tallyman.config import (
+    CONFIG_FILENAME,
+    ConfigError,
+    TallyConfig,
+    discover_nested_configs,
+    find_config,
+    load_config,
+    rebase_config,
+    save_config,
+)
 from tallyman.tui.setup_app import SetupApp
 
 
@@ -16,6 +27,7 @@ class TestFindConfig:
         assert find_config(tmp_path) is None
 
     def test_finds_config_in_parent_directory(self, tmp_path: Path):
+        (tmp_path / '.git').mkdir()
         config = tmp_path / CONFIG_FILENAME
         config.write_text('[exclude]\ndirectories = []\n')
         sub = tmp_path / 'src' / 'app'
@@ -31,6 +43,20 @@ class TestFindConfig:
         sub_config.write_text('[exclude]\ndirectories = ["sub"]\n')
         # From sub, should find sub's config (nearest)
         assert find_config(sub) == sub_config
+
+    def test_stops_at_git_root(self, tmp_path: Path):
+        """A stray config above the repo (say, in ~) must not apply to the project."""
+        (tmp_path / CONFIG_FILENAME).write_text('[exclude]\ndirectories = ["src"]\n')
+        repo = tmp_path / 'repo'
+        (repo / '.git').mkdir(parents=True)
+        (repo / 'src').mkdir()
+        assert find_config(repo / 'src') is None
+
+    def test_outside_a_repo_checks_only_the_root(self, tmp_path: Path):
+        (tmp_path / CONFIG_FILENAME).write_text('[exclude]\ndirectories = []\n')
+        sub = tmp_path / 'sub'
+        sub.mkdir()
+        assert find_config(sub) is None
 
 
 class TestLoadConfig:
@@ -68,6 +94,100 @@ class TestLoadConfig:
         assert result.excluded_dirs == {'vendor'}
         assert result.spec_dirs == set()
 
+    def test_malformed_toml_raises_config_error(self, tmp_path: Path):
+        config = tmp_path / CONFIG_FILENAME
+        config.write_text('not toml [\n')
+        with pytest.raises(ConfigError):
+            load_config(config)
+
+    @pytest.mark.parametrize(
+        'text',
+        [
+            'exclude = "vendor"\n',
+            '[exclude]\ndirectories = "vendor"\n',
+            '[exclude]\ndirectories = [1, 2]\n',
+            '[specs]\ndirectories = [true]\n',
+        ],
+    )
+    def test_wrong_shape_raises_config_error(self, tmp_path: Path, text: str):
+        config = tmp_path / CONFIG_FILENAME
+        config.write_text(text)
+        with pytest.raises(ConfigError):
+            load_config(config)
+
+    def test_unreadable_file_raises_config_error(self, tmp_path: Path):
+        config = tmp_path / CONFIG_FILENAME
+        config.mkdir()  # a directory where the file should be
+        with pytest.raises(ConfigError):
+            load_config(config)
+
+    def test_normalizes_hand_edited_paths(self, tmp_path: Path):
+        config = tmp_path / CONFIG_FILENAME
+        config.write_text('[exclude]\ndirectories = ["vendor/", "./static", "a//b", "/top", "", ".", "./"]\n')
+        assert load_config(config).excluded_dirs == {'vendor', 'static', 'a/b', 'top'}
+
+    @pytest.mark.parametrize(('windows', 'expected'), [(False, {'a\\b'}), (True, {'a/b'})])
+    def test_backslash_is_a_separator_only_on_windows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, windows: bool, expected: set[str]
+    ):
+        monkeypatch.setattr('tallyman.config._WINDOWS', windows)
+        config = tmp_path / CONFIG_FILENAME
+        config.write_text('[exclude]\ndirectories = ["a\\\\b"]\n')
+        assert load_config(config).excluded_dirs == expected
+
+    def test_resolves_dot_segments_and_drops_escapes(self, tmp_path: Path):
+        config = tmp_path / CONFIG_FILENAME
+        config.write_text('[exclude]\ndirectories = ["a/./b", "a/../c", "a/.", "../x", "..", "d/../../y"]\n')
+        assert load_config(config).excluded_dirs == {'a/b', 'c', 'a'}
+
+    def test_dot_means_this_directory_for_specs_only(self, tmp_path: Path):
+        config = tmp_path / CONFIG_FILENAME
+        config.write_text('[exclude]\ndirectories = ["."]\n\n[specs]\ndirectories = [".", "./"]\n')
+        result = load_config(config)
+        assert result.excluded_dirs == set()
+        assert result.spec_dirs == {'.'}
+
+    @pytest.mark.parametrize('payload', [b'[exclude]\ndirectories = ["caf\xe9"]\n', b'a = ' + b'[' * 100_000])
+    def test_undecodable_or_pathological_file_raises_config_error(self, tmp_path: Path, payload: bytes):
+        """Non-UTF-8 bytes raise UnicodeDecodeError and deep nesting RecursionError inside tomllib."""
+        config = tmp_path / CONFIG_FILENAME
+        config.write_bytes(payload)
+        with pytest.raises(ConfigError):
+            load_config(config)
+
+
+class TestRebaseConfig:
+    def _rebase(self, tmp_path: Path, config: TallyConfig, scan: str) -> TallyConfig:
+        (tmp_path / scan).mkdir(parents=True, exist_ok=True)
+        return rebase_config(config, tmp_path, tmp_path / scan)
+
+    def test_same_directory_is_unchanged(self, tmp_path: Path):
+        config = TallyConfig({'vendor'}, {'plans'})
+        assert rebase_config(config, tmp_path, tmp_path) == config
+
+    def test_entries_below_the_scan_root_keep_their_tail(self, tmp_path: Path):
+        result = self._rebase(tmp_path, TallyConfig({'src/vendor', 'src/a/b'}, {'src/design'}), 'src')
+        assert result == TallyConfig({'vendor', 'a/b'}, {'design'})
+
+    def test_entries_outside_the_scan_root_are_dropped(self, tmp_path: Path):
+        """The bug this fixes: 'docs' meant proj/docs, not proj/src/docs."""
+        result = self._rebase(tmp_path, TallyConfig({'docs', 'srcx/vendor'}, {'plans'}), 'src')
+        assert result == TallyConfig(set(), set())
+
+    def test_excluded_scan_root_or_ancestor_is_dropped(self, tmp_path: Path):
+        """Scanning a directory explicitly overrides an exclusion of it or of a parent."""
+        assert self._rebase(tmp_path, TallyConfig({'src'}, set()), 'src').excluded_dirs == set()
+        assert self._rebase(tmp_path, TallyConfig({'src'}, set()), 'src/app').excluded_dirs == set()
+
+    def test_spec_scan_root_or_ancestor_becomes_self(self, tmp_path: Path):
+        assert self._rebase(tmp_path, TallyConfig(set(), {'design'}), 'design').spec_dirs == {'.'}
+        assert self._rebase(tmp_path, TallyConfig(set(), {'design', 'design/v2/a'}), 'design/v2').spec_dirs == {
+            '.',
+            'a',
+        }
+        assert self._rebase(tmp_path, TallyConfig(set(), {'.'}), 'src').spec_dirs == {'.'}
+        assert self._rebase(tmp_path, TallyConfig(set(), {'design'}), 'src').spec_dirs == set()
+
 
 class TestSaveConfig:
     def test_round_trip(self, tmp_path: Path):
@@ -96,6 +216,14 @@ class TestSaveConfig:
         loaded = load_config(config)
         assert loaded.excluded_dirs == {'vendor'}
         assert loaded.spec_dirs == {'plans', 'docs/arch'}
+
+    @pytest.mark.parametrize('name', ['we"ird', 'back\\slash', 'caf\u00e9', 'tab\there', 'ctl\x01\x7f', 'sp ace '])
+    def test_round_trip_awkward_names(self, tmp_path: Path, name: str):
+        config = tmp_path / CONFIG_FILENAME
+        save_config(config, {name, f'{name}/sub'}, {name})
+        loaded = load_config(config)
+        assert loaded.excluded_dirs == {name, f'{name}/sub'}
+        assert loaded.spec_dirs == {name}
 
     def test_no_specs_omits_section(self, tmp_path: Path):
         config = tmp_path / CONFIG_FILENAME

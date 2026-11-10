@@ -5,13 +5,28 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Optional
 
-from tallyman.config import CONFIG_FILENAME, load_config
-from tallyman.gitignore import GitIgnoreSpec, load_gitignore
+from tallyman.config import CONFIG_FILENAME, SELF, load_nested_config
+from tallyman.gitignore import GitIgnoreSpec, find_git_root, load_gitignore
 from tallyman.languages import Language, as_spec, identify_language
 from tallyman.paths import relative_posix
 
 SPEC_DIR_NAMES: frozenset[str] = frozenset({'specs', 'specifications', 'plans', 'agents'})
+
+
+def inside_auto_spec_dir(root: Path) -> bool:
+    """True if *root* is, or is inside, a directory auto-detected as specs (``plans/``, ``specs/``, ...).
+
+    Only directories inside the git repo count, so scanning a project that is
+    itself named ``agents`` does not turn its docs into specs. Outside a repo
+    there is nothing above the scan root to check.
+    """
+    resolved = root.resolve()
+    git_root = find_git_root(resolved)
+    if git_root is None:
+        return False
+    return any(part.lower() in SPEC_DIR_NAMES for part in resolved.relative_to(git_root).parts)
 
 
 def _is_binary(path: Path) -> bool:
@@ -27,7 +42,7 @@ def walk_project(
     root: Path,
     excluded_dirs: set[str],
     gitignore_spec: GitIgnoreSpec | None = None,
-    spec_dirs: set[str] | None = None,
+    spec_dirs: Optional[set[str]] = None,
 ) -> Iterator[tuple[Path, Language]]:
     """Yield (file_path, language) for every countable source file under root.
 
@@ -36,13 +51,15 @@ def walk_project(
         excluded_dirs: Relative directory paths to skip (e.g. {'static/external'}).
         gitignore_spec: Pre-loaded gitignore patterns. Loaded from root if None. ``.gitignore``
             files found while walking are registered on it as each directory is entered.
-        spec_dirs: Relative directory paths designated as spec directories.
+        spec_dirs: Relative directory paths designated as spec directories. ``'.'`` marks *root*
+            itself, so docs files at every level count as specs.
     """
     if gitignore_spec is None:
         gitignore_spec = load_gitignore(root)
 
     working_excluded = set(excluded_dirs)
     active_spec_roots: set[str] = set(spec_dirs) if spec_dirs else set()
+    root_is_spec = SELF in active_spec_roots
 
     for dirpath_str, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
         dirpath = Path(dirpath_str)
@@ -54,15 +71,9 @@ def walk_project(
         # Discover nested config files in subdirectories
         if rel_dir_str:
             config_file = dirpath / CONFIG_FILENAME
-            if config_file.is_file():
-                try:
-                    nested_config = load_config(config_file)
-                    for excl in nested_config.excluded_dirs:
-                        working_excluded.add(f'{rel_dir_str}/{excl}')
-                    for spec in nested_config.spec_dirs:
-                        active_spec_roots.add(f'{rel_dir_str}/{spec}')
-                except Exception:
-                    pass  # Skip malformed configs in subdirectories
+            if config_file.is_file() and (nested := load_nested_config(config_file, rel_dir_str)) is not None:
+                working_excluded |= nested.excluded_dirs
+                active_spec_roots |= nested.spec_dirs
 
         # Prune excluded and gitignored subdirectories in-place
         filtered_dirs: list[str] = []
@@ -82,8 +93,8 @@ def walk_project(
         dirnames[:] = filtered_dirs
 
         # Determine if this directory is inside a spec directory
-        dir_is_spec = False
-        if rel_dir_str:
+        dir_is_spec = root_is_spec
+        if rel_dir_str and not dir_is_spec:
             # Check auto-detection by directory name
             if dirpath.name.lower() in SPEC_DIR_NAMES:
                 dir_is_spec = True

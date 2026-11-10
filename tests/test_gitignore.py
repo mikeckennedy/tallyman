@@ -465,3 +465,16 @@ def test_matches_git(tmp_path: Path, files: dict[str, str], scan: str, exclude: 
     if exclude is not None:
         (repo / '.git' / 'info' / 'exclude').write_text(exclude)
     assert _walked(repo / scan) == _git_untracked(repo / scan, env)
+
+
+def test_tui_shows_every_directory_as_spec_when_root_is_spec(tmp_path: Path):
+    """spec_dirs containing '.' (the scan root) makes the walker count everything as specs; the TUI must agree."""
+    _make(tmp_path, {'a/b/x.md': '# x\n'})
+
+    async def labels() -> list[str]:
+        app = SetupApp(tmp_path, load_gitignore(tmp_path), set(), {'.'})
+        async with app.run_test(size=(100, 30)):
+            root = app.query_one(SetupTree).root
+            return [str(root.children[0].label), str(root.children[0].children[0].label)]
+
+    assert all(label.startswith('S ') for label in asyncio.run(labels()))

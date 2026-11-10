@@ -10,6 +10,7 @@ from textual.containers import Horizontal
 from textual.widgets import Button, Footer, Header, Static, Tree
 from textual.widgets.tree import TreeNode
 
+from tallyman.config import SELF
 from tallyman.gitignore import GitIgnoreSpec
 from tallyman.walker import SPEC_DIR_NAMES
 
@@ -78,7 +79,7 @@ class SetupApp(App[tuple[set[str], set[str]] | None]):
             'spec': False,
             'auto_spec': False,
         }
-        self._populate(tree.root, self.root, '')
+        self._populate(tree.root, self.root, '', parent_is_spec=SELF in self.user_spec_dirs)
         tree.root.expand_all()
         if self.user_excluded:
             self._collapse_excluded(tree.root)

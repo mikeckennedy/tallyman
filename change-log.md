@@ -17,7 +17,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/walker.py`, `tests/test_config.py`, `tests/test_walker.py`
 - Plan: `plans/004-nested-config-discovery/`
 
+### Changed
+- The `.tally-config.toml` search now stops at the git repo root, and outside a repo only the scanned directory is checked, so a stray config in a home directory no longer applies to every project or suppresses first-run setup.
+- With no config and no terminal (CI, pipes), tallyman now counts with default settings and prints a one-line note on stderr instead of launching the setup TUI and hanging. No config is written. `--setup` without a terminal exits with status 2.
+- Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `tests/test_config.py`, `tests/test_cli.py`
+- Plan: `plans/005-hardening/phase-02-config-handling.plan.md`
+
 ### Fixed
+- A config found in a parent directory is now rebased onto the scanned directory. Running `tallyman proj/src` with `proj/.tally-config.toml` excluding `src/vendor` and `docs` used to count `src/vendor` and drop `src/docs`. A parent spec directory that covers the scanned directory now classifies its docs as specs.
+- A malformed or wrongly shaped root config is reported on stderr with exit status 1 instead of a traceback. `tallyman --setup` replaces a broken config instead of failing on it.
+- Directory names containing `"`, `\` or control characters are escaped when the config is saved, so the next run can read it.
+- Hand-edited config paths are normalised: `vendor/`, `./static`, `a//b`, `a/./b`, `a/../b` and `/top` now match, and entries that climb out with `..` are dropped. Backslashes are treated as separators on Windows only.
+- `[specs] directories` accepts `"."` for the config's own directory, so `tallyman --setup` run inside a spec directory no longer silently turns its specs into docs.
+- Scanning from inside an auto-detected spec directory (`tallyman plans/sub`) now counts its docs as specs, the same as scanning from the repo root.
+- A config that isn't valid UTF-8, or is pathologically nested, is reported like any other bad config; in a nested directory it is skipped instead of aborting the scan.
+- If setup can't save the config, tallyman warns and still counts with the chosen settings instead of crashing. A closed stdin no longer crashes, and a path typed in the wrong case on macOS (`proj/SRC`) no longer defeats config matching.
+- Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/walker.py`, `tests/test_config.py`, `tests/test_cli.py`
+- Plan: `plans/005-hardening/phase-02-config-handling.plan.md`
+
 - Gitignore handling rewritten to follow git's rules, in the walker and the setup TUI alike:
   - `.gitignore` files below the scanned directory are honoured, including the `*` file uv and virtualenv write inside a venv.
   - Each file's patterns are anchored to the directory it lives in, and a deeper file wins, so `!pattern` can re-include.

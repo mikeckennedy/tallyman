@@ -93,9 +93,9 @@ TallyConfig                   # excluded_dirs: set[str], spec_dirs: set[str]
 
 4. **Binary detection** checks first 8KB for `\x00` byte.
 
-5. **Config search walks up.** `find_config()` walks up from target dir to filesystem root looking for `.tally-config.toml`.
+5. **Config search stops at the git root, and parent configs are rebased.** `find_config()` returns the nearest `.tally-config.toml` from the scan root up to the git repo root (outside a repo, only the scan root itself). `rebase_config()` translates its entries to be relative to the scan root. Entries are normalised on load. In `[specs] directories`, `"."` means the config's own directory. With no config and no terminal, tallyman runs with defaults and writes nothing.
 
-6. **Auto-detected spec dirs:** `specs/`, `plans/`, `specifications/`, `agents/`  -  detected even without config.
+6. **Auto-detected spec dirs:** `specs/`, `plans/`, `specifications/`, `agents/`  -  detected even without config, at any depth. Scanning from inside one (`tallyman plans/sub`) still counts specs, but a repo that is itself named `agents` does not.
 
 7. **Gitignore follows git, entry by entry.** `.git/info/exclude`, then every `.gitignore` from the repo root down, each scoped to its own directory; the deepest opinion wins. Nested files load lazily as the walker and TUI descend, and nothing inside an ignored directory is ever looked at. Callers pass directory paths with a trailing `/`. `tests/test_gitignore.py` checks parity with real `git`; its pattern-compiler table runs without git.
 
@@ -105,11 +105,12 @@ TallyConfig                   # excluded_dirs: set[str], spec_dirs: set[str]
 |---|---|---|
 | `tests/test_counter.py` | 10 | Line counting, encoding errors |
 | `tests/test_languages.py` | 14 | Language registry, extension map, `as_spec` |
-| `tests/test_walker.py` | 26 | Walking, exclusions, spec detection, nested configs |
-| `tests/test_gitignore.py` | 92 | Git root, gitignore loading and scoping, negation, TUI agreement, parity with `git` |
-| `tests/test_paths.py` | 3 | POSIX relative paths |
+| `tests/test_walker.py` | 33 | Walking, exclusions, spec detection, nested configs |
+| `tests/test_gitignore.py` | 93 | Git root, gitignore loading and scoping, negation, TUI agreement, parity with `git` |
+| `tests/test_paths.py` | 6 | POSIX relative paths, canonical case |
 | `tests/test_aggregator.py` | 11 | Stats aggregation, categories, percentages |
-| `tests/test_config.py` | 25 | Config find/load/save, directory cleanup |
+| `tests/test_config.py` | 51 | Config find/load/save, normalisation, rebasing, escaping, directory cleanup |
+| `tests/test_cli.py` | 17 | End-to-end CLI: parent configs, errors, no-terminal runs, setup pre-fill |
 
 Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` create test Language instances.
 
