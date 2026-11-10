@@ -2,7 +2,9 @@
 
 ## Important Rules
 
-- **NEVER run commit or push git commands.** Only provide commit messages as text when asked.
+- **NEVER run push git commands.**
+- **On `main`, NEVER run commit.** Only provide commit messages as text when asked.
+- **On a feature branch, Claude owns the branch and commits.** When working through a multi-phase plan, commit after each phase so the branch history shows how the work evolved. Never commit to `main`, never push, and leave merging to Michael.
 
 ## What This Is
 

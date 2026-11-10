@@ -64,19 +64,21 @@ IDs are referenced from the phase files.
 
 Phases 1-3 are ordered by impact on reported numbers and should land first. Phases 4 and 5 are independent of each other. Phase 5's test additions for `cli.py` and the TUI are easier once phases 2 and 3 have settled the behaviour.
 
-## Open decisions
+## Decisions (confirmed 2026-11-10)
 
-Each phase file states a recommended default. These need Michael's confirmation before the phase is implemented:
+1. **Parent config (phase 2):** rebase the parent config's paths onto the scan root.
+2. **How far `find_config` walks up (phase 2):** stop at the git root when inside a repo; outside a repo, check only the scan root.
+3. **No TTY and no config (phase 2):** run with defaults, write no config, print a one-line note on stderr.
+4. **Config key for "not specs" (phase 3):** `[specs] ignore = [...]`.
+5. **Default file skips (phase 4):** always skip `.tally-config.toml`, `package-lock.json` / `npm-shrinkwrap.json`, and `*.min.js` / `*.min.css`. `.github/` stays uncounted (hidden directories are skipped); document that in the README.
 
-1. **Parent config (phase 2):** rebase the parent config's paths onto the scan root (recommended), or stop using parent configs at all?
-2. **How far `find_config` walks up (phase 2):** stop at the git root when inside a repo (recommended), or keep walking to the filesystem root?
-3. **No TTY and no config (phase 2):** run with defaults and write nothing (recommended), or exit with an error?
-4. **Config key for "not specs" (phase 3):** `[specs] ignore = [...]` (recommended name), or something else?
-5. **Default file skips (phase 4):** always skip `.tally-config.toml` (recommended); also skip lockfiles and `*.min.*` by default (recommended), or leave those to gitignore and config? Should `.github/` be counted?
+## Workflow
+
+Work happens on the `hardening` branch. After each phase, a Python Architect review runs in a sub-agent, its valid findings are addressed, and the phase is committed on the branch. Nothing is pushed or merged.
 
 ## Rules for every phase
 
-- Do not run `git commit` or `git push`. Provide a commit message as text when asked.
+- Commit each phase on the `hardening` branch once its review findings are addressed. Never commit to `main`, never push.
 - Follow the conventions in `CLAUDE.md`: single quotes, `from __future__ import annotations`, type hints, 120-char lines.
 - Each fix lands with a test that fails before the change and passes after.
 - Finish each phase with `pytest`, `ruff check src/ tests/` and `ruff format --check src/ tests/` all clean.
