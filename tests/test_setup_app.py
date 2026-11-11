@@ -65,6 +65,7 @@ class Session:
         )
         self.labels: dict[str, str] = {}
         self.flags: dict[str, bool] = {}
+        self.excluded: dict[str, bool] = {}
         self.root_label = ''
 
     def run(self, actions: list[tuple[str, str]], save: bool = True) -> Optional[SetupResult]:
@@ -91,6 +92,7 @@ class Session:
             path = str(node.data.path)
             self.labels[path] = str(node.label)
             self.flags[path] = bool(node.data.spec)
+            self.excluded[path] = node.data.excluded
         for child in node.children:
             self._record(child)
 
@@ -440,3 +442,49 @@ def test_root_spec_state_rule():
     assert root_spec_state(set(), set(), auto=True) == _P
     assert root_spec_state(set(), {'.'}, auto=True) == _SUP
     assert root_spec_state({'.'}, {'.'}) == _P
+
+
+def _nested_repo_tree(root: Path) -> None:
+    """Repos at the root, ``sub``, ``sub/deep`` and (submodule style) ``lib/sub2``, each with its own rules.
+
+    Only directory rules, and an ``x.py`` in every directory, so the directories the walker enters are exactly
+    the parents of the files it yields.
+    """
+    files = {
+        '.gitignore': '*.md\nbuild/\n',
+        '.git/info/exclude': 'vendor/\n',
+        'sub/.gitignore': 'tmp/\n',
+        'sub/deep/.git/info/exclude': 'cache/\n',
+        'lib/sub2/.git': 'gitdir: ../../.git/modules/lib/sub2\n',
+        '.git/modules/lib/sub2/HEAD': 'ref: refs/heads/main\n',
+        '.git/modules/lib/sub2/info/exclude': 'out/\n',
+    }
+    dirs = ['', 'build', 'vendor', 'lib', 'sub', 'sub/build', 'sub/vendor', 'sub/tmp', 'sub/deep']
+    dirs += ['sub/deep/tmp', 'sub/deep/cache', 'lib/sub2', 'lib/sub2/out']
+    (root / 'sub' / '.git').mkdir(parents=True)
+    for rel, content in files.items() | {(f'{d}/x.py'.lstrip('/'), 'x = 1\n') for d in dirs}:
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
+
+class TestNestedRepos:
+    def test_tui_and_walker_agree_across_nested_repos(self, tmp_path: Path) -> None:
+        _nested_repo_tree(tmp_path)
+        session = Session(tmp_path)
+        result = session.run([])
+        assert result is not None
+        excluded, specs, non_specs = result
+        found = walk_project(tmp_path, excluded, load_gitignore(tmp_path), spec_dirs=specs, non_spec_dirs=non_specs)
+        entered = {p.parent.relative_to(tmp_path).as_posix() for p, _ in found} - {'.'}
+        assert {d for d, ex in session.excluded.items() if not ex} == entered
+        assert entered == {'lib', 'lib/sub2', 'sub', 'sub/build', 'sub/vendor', 'sub/deep', 'sub/deep/tmp'}
+
+    def test_nested_repo_labels_follow_its_rules(self, tmp_path: Path) -> None:
+        _nested_repo_tree(tmp_path)
+        session = Session(tmp_path)
+        session.run([])
+        assert session.labels['build'].endswith('(gitignored)')
+        assert not session.labels['sub/build'].endswith('(gitignored)')
+        assert session.labels['sub/tmp'].endswith('(gitignored)')
+        assert not session.labels['sub/deep/tmp'].endswith('(gitignored)')

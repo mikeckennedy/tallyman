@@ -189,6 +189,17 @@ class TestNoTerminal:
         assert capsys.readouterr().err == ''
 
 
+class TestNestedRepo:
+    def test_nested_repo_counts_with_its_own_gitignore(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        for repo in ('', 'sub'):
+            (tmp_path / repo / '.git').mkdir(parents=True)
+        _make(tmp_path, {'.gitignore': '*.md\n', 'top.md': '# t\n' * 5, 'sub/README.md': '# r\n' * 3})
+        tally = _run(monkeypatch, str(tmp_path))
+        assert tally is not None
+        markdown = [s for s in tally.by_language if s.language.name == 'Markdown']
+        assert [(s.file_count, s.total_lines) for s in markdown] == [(1, 3)]  # sub/README.md; top.md stays ignored
+
+
 class TestSetupRecovery:
     def test_setup_replaces_a_malformed_config(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

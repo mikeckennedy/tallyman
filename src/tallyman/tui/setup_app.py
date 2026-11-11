@@ -133,7 +133,8 @@ class SetupApp(App[Optional[SetupResult]]):
 
     def _populate(self, parent_node: TreeNode[NodeInfo], dir_path: Path, rel_path: str) -> None:
         """Recursively add subdirectories to the tree. Labels and states are filled in by _refresh()."""
-        # This directory's own .gitignore governs its children, matching walk_project()
+        # This directory's own .gitignore governs its children, matching walk_project(). It is also where a
+        # nested git repository's own rules start, so this must run before its children are judged.
         self.gitignore_spec.add_directory(rel_path, dir_path)
         try:
             entries = sorted(dir_path.iterdir(), key=lambda p: p.name.lower())

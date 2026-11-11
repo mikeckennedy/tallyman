@@ -29,7 +29,7 @@ tallyman --with-spaces      # totals and bar use total lines, not effective line
 tallyman --image            # PNG summary card on the Desktop (--image-light for the light theme)
 
 # Tests
-pytest                      # all 598 tests (about 20 s, mostly the Textual pilot tests)
+pytest                      # all 637 tests (about 20 s, mostly the Textual pilot tests)
 pytest -v                   # verbose
 pytest tests/test_walker.py # single module
 
@@ -71,7 +71,7 @@ cli.main()
 | `src/tallyman/cli.py` | Entry point. Sets stdout to replace characters it can't encode, arg parsing, config loading and errors, no-terminal handling, orchestrates the pipeline |
 | `src/tallyman/languages.py` | Language registry (40+ languages). Frozen dataclasses with name, category, color, comment marker, extensions, and `spec_color` on docs languages. `EXTENSION_MAP` for O(1) lookup. `OTHER_COLOR` for the bar's "Other" segment |
 | `src/tallyman/walker.py` | Directory traversal. Respects gitignore, config exclusions and `[exclude] patterns`. Detects spec dirs. Yields `(Path, Language)`; fills `WalkStats` |
-| `src/tallyman/gitignore.py` | Gitignore rules (`GitIgnoreSpec`, `load_gitignore`, `find_git_root`). Own pattern compiler that follows gitignore(5). Finds `info/exclude` through `gitdir:`/`commondir`. `GitIgnoreSpec.for_patterns()` + `add_rules()` hold `[exclude] patterns` |
+| `src/tallyman/gitignore.py` | Gitignore rules (`GitIgnoreSpec`, `load_gitignore`, `find_git_root`). Own pattern compiler that follows gitignore(5). Finds `info/exclude` through `gitdir:`/`commondir`. `add_directory()` notices nested repos, whose own rules replace the outer ones inside them. `GitIgnoreSpec.for_patterns()` + `add_rules()` hold `[exclude] patterns` |
 | `src/tallyman/encoding.py` | BOM detection: `text_encoding()`, `has_wide_bom()`. Shared by walker (binary check), counter and config loading |
 | `src/tallyman/paths.py` | `relative_posix()`: `/`-separated relative paths, safe on Windows |
 | `src/tallyman/counter.py` | Reads files, classifies lines as code/comment/blank. Returns `FileCount` |
@@ -117,7 +117,7 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 
 6. **Auto-detected spec dirs:** `specs/`, `plans/`, `specifications/`, `agents/`  -  detected even without config, at any depth, unless listed (or beneath a directory listed) in `[specs] ignore`. The deepest explicit setting wins. `walker.spec_state()` is the one rule; the walker and the setup TUI both call it. Scanning from inside one (`tallyman plans/sub`) still counts specs, but a repo that is itself named `agents` does not.
 
-7. **Gitignore follows git, entry by entry.** `info/exclude`, then every `.gitignore` from the repo root down, each scoped to its own directory; the deepest opinion wins. `info/exclude` is found through the `.git` directory, or a `.git` file's `gitdir:` and its `commondir` (worktrees, submodules). Nested files load lazily as the walker and TUI descend, and nothing inside an ignored directory is ever looked at. Callers pass directory paths with a trailing `/`. `tests/test_gitignore.py` checks parity with real `git`, including a worktree and a submodule; its pattern-compiler table runs without git.
+7. **Gitignore follows git, entry by entry.** `info/exclude`, then every `.gitignore` from the repo root down, each scoped to its own directory; the deepest opinion wins. `info/exclude` is found through the `.git` directory, or a `.git` file's `gitdir:` and its `commondir` (worktrees, submodules). Nested files load lazily as the walker and TUI descend, and nothing inside an ignored directory is ever looked at. Callers pass directory paths with a trailing `/`. A nested repo (any `.git` directory or file below the scan root, the same test as `find_git_root()`) is still counted, but `add_directory()` records its root, and inside it only its own `info/exclude` and `.gitignore` files apply, as if git were run there; its own entry is judged by the outer rules, so an ignored nested repo stays out. Tallyman settings (configs, `[exclude] patterns`, `[specs]`, spec auto-detection) cross repo boundaries. `tests/test_gitignore.py` checks parity with real `git` (run in every repo), including worktrees, submodules and nested repos; its pattern-compiler table runs without git.
 
 8. **`[exclude] patterns` are a second `GitIgnoreSpec`.** `GitIgnoreSpec.for_patterns(root)` holds one `add_rules()` layer per config, scoped to that config's directory, so patterns layer like nested `.gitignore` files and a deeper `!` wins. It is separate from the gitignore spec, and the walker checks it last, so `!` never brings back gitignored, hidden, excluded or generated entries. The scan root and its ancestors are never checked, so a parent's pattern can't exclude the scan root. Patterns are kept raw and never rebased, merged or sorted; they travel as `ConfigChain.pattern_layers`, and `--setup` writes `local.patterns` back verbatim. The TUI shows matched directories as "(excluded by pattern)" and locks them.
 
@@ -131,13 +131,13 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 | `tests/test_languages.py` | 65 | Language registry, extension map, Docker/Compose variants, valid and unshared colours (languages, spec variants, Other), `as_spec` |
 | `tests/test_display.py` | 38 | Terminal rendering: header escaping, wording, labels, bar width and cells, bar colour runs, no bar for nothing, pattern note, Unicode probe |
 | `tests/test_image.py` | 27 | Slugs, image paths, themes, PNG generation, title fitting, bar segments, agreement with the terminal |
-| `tests/test_walker.py` | 55 | Walking, exclusions, spec detection, nested configs, exclude patterns, `WalkStats`, FIFOs and sockets |
-| `tests/test_gitignore.py` | 139 | Git root, gitignore loading and scoping, `info/exclude` in worktrees and submodules, negation, line-end escapes, TUI agreement, parity with `git`, config pattern layers, FIFO ignore files |
+| `tests/test_walker.py` | 59 | Walking, exclusions, spec detection, nested configs, exclude patterns, `WalkStats`, FIFOs and sockets, settings inside nested repos |
+| `tests/test_gitignore.py` | 171 | Git root, gitignore loading and scoping, `info/exclude` in worktrees and submodules, negation, line-end escapes, nested repos, TUI agreement, parity with `git`, config pattern layers, FIFO ignore files |
 | `tests/test_paths.py` | 6 | POSIX relative paths, canonical case |
 | `tests/test_aggregator.py` | 56 | Stats aggregation, categories, percentages, effective lines, the report model: bar segments, widths, labels |
 | `tests/test_config.py` | 90 | Config find/load/save, `[specs] ignore`, `[exclude] patterns`, normalisation, rebasing, chain merging, escaping, directory cleanup, BOMs |
-| `tests/test_setup_app.py` | 51 | Setup TUI via Textual pilot: toggles, labels, parent/nested locks, patterns, agreement with the walker |
-| `tests/test_cli.py` | 42 | End-to-end CLI: config chain, errors, no-terminal runs, setup pre-fill and pattern preservation, flags, colour, narrow stdout encodings, BOM config |
+| `tests/test_setup_app.py` | 53 | Setup TUI via Textual pilot: toggles, labels, parent/nested locks, patterns, agreement with the walker (also across nested repos) |
+| `tests/test_cli.py` | 43 | End-to-end CLI: config chain, errors, no-terminal runs, setup pre-fill and pattern preservation, flags, colour, narrow stdout encodings, BOM config |
 
 Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` create test Language instances. `tests/conftest.py` holds the `make_fifo` fixture: it creates a FIFO and, if a reader blocks on it, writes to it after 2 s, so a regression fails instead of hanging the suite (skip FIFO tests where `os.mkfifo` is missing).
 

@@ -22,6 +22,9 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - Plan: `plans/005-hardening/phase-03-spec-overrides-and-tui.plan.md`
 
 ### Changed
+- Nested git repositories, including submodules and worktrees inside the tree, are still counted, but now with their own rules: inside one, only its own `.gitignore` files and `info/exclude` apply, as if git were run there, and the outer repository's patterns stop at its root. A nested repository the outer one ignores stays out. When the scanned folder isn't itself a repository, its .gitignore likewise stops at each repository inside it. `[exclude]` and `[specs]` settings apply across repository boundaries as before.
+- Files: `src/tallyman/gitignore.py`, `src/tallyman/walker.py`, `src/tallyman/tui/setup_app.py`, `tests/test_gitignore.py`, `tests/test_walker.py`, `tests/test_setup_app.py`, `tests/test_cli.py`, `CLAUDE.md`
+- Plan: `plans/010-git-fidelity/phase-02-nested-repos.plan.md`
 - The image card's bar now folds languages past the fifth into Other, as its legend already did, so every coloured block on the card has a legend entry.
 - A legend share that isn't zero but rounds to 0% reads `<1%`, and one that rounds to 100% while something else is listed reads `>99%`, in the terminal and on the image.
 - The terminal report and the image card now get their categories, totals, bar segments, legend labels and segment widths from one report model in `aggregator.py` (`active_categories()`, `bar_segments()`, `segment_widths()`, `percent_label()`), so they can't disagree; a test checks that they don't. The image no longer imports from `display.py`.

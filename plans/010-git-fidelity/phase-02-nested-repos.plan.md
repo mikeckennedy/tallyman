@@ -165,7 +165,7 @@ Under `0.4.3 - UNRELEASED`, `### Changed`:
 
 ## Done when
 
-- The review's `parity.py` `nested-repo` case prints `OK`.
+- A recursive parity view (git run inside the outer repo and inside each nested repo, like `_git_view()` in the tests; `scratchpad/impl010p2/parity_recursive.py`) prints `OK` for every case. *(Amended after the phase 2 review: the review's original `parity.py` runs git only in the outer repo, which lists a nested repo as the single entry `sub/`, so it can never match while nested repos are counted, per decision 1.)*
 - A scan of a folder of checkouts (no repo at the scan root) applies each checkout's own `.gitignore` and `info/exclude`. Check by hand on a copy of a real layout in the scratchpad, for example a few clones under one directory.
 - Timing on a large tree (`../commandbookapp`, or this repo with a populated `venv/`) is within noise of before. Report the numbers in the phase review.
 - Repos without nested repositories produce identical output: the existing tests pass unchanged.

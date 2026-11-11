@@ -573,3 +573,34 @@ class TestSpecialFiles:
             sock.close()
             (tmp_path / 's.py').unlink(missing_ok=True)  # no socket files left in pytest's tmp dirs
         assert found == {'a.py'}
+
+
+class TestNestedReposKeepConfigSemantics:
+    """Tallyman's own settings are not git rules, so they apply inside a nested repository as anywhere else."""
+
+    @staticmethod
+    def _repos(root: Path, files: dict[str, str]) -> None:
+        for repo in (root, root / 'sub'):
+            (repo / '.git').mkdir(parents=True)
+        _tree(root, files)
+
+    def test_patterns_apply_inside_nested_repo(self, tmp_path: Path) -> None:
+        self._repos(tmp_path, {'sub/a.md': '# a\n', 'sub/b.py': 'x = 1\n'})
+        assert _walk_with_patterns(tmp_path, ['*.md']) == {'sub/b.py'}
+
+    def test_excluded_directory_inside_nested_repo(self, tmp_path: Path) -> None:
+        self._repos(tmp_path, {'sub/vendor/x.py': 'x = 1\n', 'sub/y.py': 'x = 1\n'})
+        found = {p.relative_to(tmp_path).as_posix() for p, _ in walk_project(tmp_path, {'sub/vendor'})}
+        assert found == {'sub/y.py'}
+
+    def test_nested_config_inside_nested_repo(self, tmp_path: Path) -> None:
+        self._repos(tmp_path, {'sub/gen/x.py': 'x = 1\n', 'sub/y.py': 'x = 1\n'})
+        save_config(tmp_path / 'sub' / '.tally-config.toml', {'gen'}, set())
+        found = {p.relative_to(tmp_path).as_posix() for p, _ in walk_project(tmp_path, set())}
+        assert found == {'sub/y.py'}
+
+    def test_spec_detection_crosses_repo_boundaries(self, tmp_path: Path) -> None:
+        (tmp_path / '.git').mkdir()
+        (tmp_path / 'plans' / 'sub' / '.git').mkdir(parents=True)
+        _tree(tmp_path, {'plans/sub/a.md': '# a\n'})
+        assert [lang.category for _, lang in walk_project(tmp_path, set())] == ['specs']

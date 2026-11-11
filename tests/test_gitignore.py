@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Optional
 
 import pytest
+from textual.widgets.tree import TreeNode
 
 from tallyman.gitignore import GitIgnoreSpec, _read_path_file, find_git_root, load_gitignore
-from tallyman.tui.setup_app import SetupApp, SetupTree
+from tallyman.tui.setup_app import NodeInfo, SetupApp, SetupTree
 from tallyman.walker import walk_project
 
 X = 'x = 1\n'
@@ -391,28 +392,167 @@ class TestNegation:
         assert _walked(tmp_path / 'build') == set()
 
 
+class TestNestedRepos:
+    """A git repository below the scan root is walked with its own rules, as if git were run inside it."""
+
+    def test_outer_gitignore_stops_at_nested_repo(self, tmp_path: Path) -> None:
+        (tmp_path / '.git').mkdir()
+        (tmp_path / 'sub' / '.git').mkdir(parents=True)
+        _make(tmp_path, {'.gitignore': '*.md\n', 'top.md': X, 'top.py': X, 'sub/a.md': X, 'sub/b.py': X})
+        assert _walked(tmp_path) == {'top.py', 'sub/a.md', 'sub/b.py'}
+
+    def test_outer_subdirectory_gitignore_stops_too(self, tmp_path: Path) -> None:
+        (tmp_path / '.git').mkdir()
+        (tmp_path / 'a' / 'sub' / '.git').mkdir(parents=True)
+        _make(tmp_path, {'a/.gitignore': '*.py\n', 'a/y.py': X, 'a/sub/x.py': X})
+        assert _walked(tmp_path) == {'a/sub/x.py'}
+
+    def test_outer_info_exclude_stops_at_nested_repo(self, tmp_path: Path) -> None:
+        (tmp_path / 'sub' / '.git').mkdir(parents=True)
+        _make(tmp_path, {'.git/info/exclude': '*.md\n', 'top.md': X, 'sub/a.md': X})
+        assert _walked(tmp_path) == {'sub/a.md'}
+
+    def test_nested_repo_reads_its_own_info_exclude(self, tmp_path: Path) -> None:
+        (tmp_path / '.git').mkdir()
+        _make(tmp_path, {'sub/.git/info/exclude': 'b.py\n', 'sub/b.py': X, 'sub/c.py': X, 'b.py': X})
+        assert _walked(tmp_path) == {'b.py', 'sub/c.py'}
+
+    def test_nested_repo_gitignore_outranks_its_info_exclude(self, tmp_path: Path) -> None:
+        (tmp_path / '.git').mkdir()
+        _make(tmp_path, {'sub/.git/info/exclude': '*.py\n', 'sub/.gitignore': '!b.py\n', 'sub/b.py': X, 'sub/c.py': X})
+        assert _walked(tmp_path) == {'sub/b.py'}
+
+    def test_nested_repo_gitignore_stack_is_scoped_to_it(self, tmp_path: Path) -> None:
+        (tmp_path / '.git').mkdir()
+        (tmp_path / 'sub' / '.git').mkdir(parents=True)
+        _make(
+            tmp_path,
+            {
+                'sub/.gitignore': '/gen/\n',
+                'sub/lib/.gitignore': '*.md\n',
+                'sub/gen/a.py': X,
+                'sub/lib/b.md': X,
+                'sub/lib/c.py': X,
+                'sub/d.md': X,
+                'gen/e.py': X,
+            },
+        )
+        assert _walked(tmp_path) == {'sub/lib/c.py', 'sub/d.md', 'gen/e.py'}
+
+    def test_outer_negation_cannot_reach_into_nested_repo(self, tmp_path: Path) -> None:
+        """Guards against over-filtering, not a regression: the deeper ``*.py`` wins either way."""
+        (tmp_path / '.git').mkdir()
+        (tmp_path / 'sub' / '.git').mkdir(parents=True)
+        _make(tmp_path, {'.gitignore': '!sub/keep.py\n', 'sub/.gitignore': '*.py\n', 'sub/keep.py': X})
+        assert _walked(tmp_path) == set()
+
+    @pytest.mark.parametrize(
+        ('ignore_file', 'rule'),
+        [('.gitignore', 'sub/\n'), ('.gitignore', 'sub\n'), ('.git/info/exclude', 'sub/\n')],
+    )
+    def test_nested_repo_ignored_by_outer_stays_out(self, tmp_path: Path, ignore_file: str, rule: str) -> None:
+        """The nested repo's own entry lives in the outer tree, so the outer rules judge it."""
+        (tmp_path / '.git').mkdir()
+        (tmp_path / 'sub' / '.git').mkdir(parents=True)
+        _make(tmp_path, {ignore_file: rule, 'sub/.gitignore': '!*\n', 'sub/a.py': X, 'top.py': X})
+        assert _walked(tmp_path) == {'top.py'}
+
+    def test_repo_inside_nested_repo(self, tmp_path: Path) -> None:
+        (tmp_path / '.git').mkdir()
+        (tmp_path / 'deep' / 'inner' / '.git').mkdir(parents=True)
+        (tmp_path / 'deep' / '.git').mkdir()
+        _make(tmp_path, {'deep/.gitignore': '*.py\n', 'deep/d.py': X, 'deep/inner/e.py': X})
+        assert _walked(tmp_path) == {'deep/inner/e.py'}
+
+    def test_submodule_style_git_file(self, tmp_path: Path) -> None:
+        _make(
+            tmp_path,
+            {
+                '.gitignore': '*.md\n',
+                '.git/modules/sub/HEAD': _HEAD,
+                '.git/modules/sub/info/exclude': 'secret.py\n',
+                'sub/.git': 'gitdir: ../.git/modules/sub\n',
+                'sub/secret.py': X,
+                'sub/a.md': X,
+            },
+        )
+        assert _walked(tmp_path) == {'sub/a.md'}
+
+    def test_child_repos_of_a_plain_directory(self, tmp_path: Path) -> None:
+        """A folder of checkouts: no repo at the scan root, and each child repo keeps its own rules."""
+        (tmp_path / 'proj' / '.git').mkdir(parents=True)
+        _make(tmp_path, {'.gitignore': '*.md\n', 'proj/a.md': X, 'notes/b.md': X})
+        assert _walked(tmp_path) == {'proj/a.md'}
+
+    def test_scan_inside_ignored_directory_skips_nested_repo(self, tmp_path: Path) -> None:
+        (tmp_path / '.git').mkdir()
+        (tmp_path / 'build' / 'sub' / '.git').mkdir(parents=True)
+        _make(tmp_path, {'.gitignore': 'build/\n', 'build/sub/x.py': X})
+        assert _walked(tmp_path / 'build') == set()
+
+    def test_nested_repo_registration_is_idempotent(self, tmp_path: Path) -> None:
+        (tmp_path / '.git').mkdir()
+        _make(
+            tmp_path,
+            {'.gitignore': '*.md\nsub/\n', 'sub/.git/info/exclude': 'b.py\n', 'sub/.gitignore': '!keep.py\n'},
+        )
+        spec = load_gitignore(tmp_path)
+        for _ in range(2):
+            spec.add_directory('sub', tmp_path / 'sub')
+            assert spec.match_file('sub/b.py')
+            assert not spec.match_file('sub/a.md')
+            assert spec.match_file('top.md')
+            assert spec.match_file('sub/')  # the repo's own entry is strictly outside it: the outer rules judge it
+
+
+def _tui_labels(root: Path) -> dict[str, str]:
+    """Every directory label the setup TUI shows for *root*, by path."""
+
+    async def labels() -> dict[str, str]:
+        app = SetupApp(root, load_gitignore(root), set(), set())
+        async with app.run_test(size=(100, 30)):
+            found: dict[str, str] = {}
+
+            def collect(node: TreeNode[NodeInfo]) -> None:
+                if node.data:
+                    found[node.data.path] = str(node.label)
+                for child in node.children:
+                    collect(child)
+
+            collect(app.query_one(SetupTree).root)
+            return found
+
+    return asyncio.run(labels())
+
+
 class TestSetupTuiAgrees:
-    def test_tui_marks_nested_gitignored_directory(self, tmp_path: Path):
+    def test_tui_marks_nested_gitignored_directory(self, tmp_path: Path) -> None:
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {'sub/.gitignore': 'generated/\n', 'sub/generated/a.py': X, 'sub/src/b.py': X})
-
-        async def labels() -> dict[str, str]:
-            app = SetupApp(tmp_path, load_gitignore(tmp_path), set(), set())
-            async with app.run_test(size=(100, 30)):
-                found: dict[str, str] = {}
-
-                def collect(node) -> None:
-                    if node.data:
-                        found[node.data.path] = str(node.label)
-                    for child in node.children:
-                        collect(child)
-
-                collect(app.query_one(SetupTree).root)
-                return found
-
-        result = asyncio.run(labels())
+        result = _tui_labels(tmp_path)
         assert result['sub/generated'].endswith('(gitignored)')
         assert not result['sub/src'].endswith('(gitignored)')
+
+    def test_tui_applies_nested_repo_rules(self, tmp_path: Path) -> None:
+        for repo in ('', 'sub', 'skipped'):
+            (tmp_path / repo / '.git').mkdir(parents=True)
+        _make(
+            tmp_path,
+            {
+                '.gitignore': 'gen/\nskipped/\n',
+                'sub/.gitignore': 'out/\n',
+                'gen/x.py': X,
+                'sub/gen/x.py': X,
+                'sub/out/x.py': X,
+                'skipped/inner/x.py': X,
+            },
+        )
+        result = _tui_labels(tmp_path)
+        assert result['gen'].endswith('(gitignored)')
+        assert not result['sub/gen'].endswith('(gitignored)')
+        assert result['sub/out'].endswith('(gitignored)')
+        assert result['skipped'].endswith('(gitignored)')
+        assert 'skipped/inner' not in result  # never populated, as the walker never enters it
 
 
 # (pattern, entry, ignored). Entries ending in '/' are directories. Every row was checked against git.
@@ -728,6 +868,168 @@ def test_submodule_matches_git(tmp_path: Path) -> None:
     _make(sub, {'secret.py': X, 'b.py': X, 'a.md': X})
     assert (sub / '.git').is_file()
     assert _walked(sub) == _git_view(sub, env) == {'kept.py', 'b.py', 'a.md'}
+
+
+_OUTER_RULES_STOP = {'.gitignore': '*.md\n', 'top.md': X, 'top.py': X, 'sub/a.md': X, 'sub/b.py': X}
+_OUTER_SUBDIR_GITIGNORE = {'a/.gitignore': '*.py\n', 'a/y.py': X, 'a/sub/x.py': X, 'a/sub/z.md': X}
+
+# (files, repos to `git init` below the outer repo, shallowest first, scan, {repo: info/exclude text})
+_NESTED_GIT_CASES = [
+    pytest.param(_OUTER_RULES_STOP, ['sub'], '', {}, id='outer-rules-stop'),
+    pytest.param(_OUTER_SUBDIR_GITIGNORE, ['a/sub'], '', {}, id='outer-subdir-gitignore-stops'),
+    pytest.param({'top.md': X, 'sub/a.md': X}, ['sub'], '', {'': '*.md\n'}, id='outer-info-exclude-stops'),
+    pytest.param({'b.py': X, 'sub/b.py': X, 'sub/c.py': X}, ['sub'], '', {'sub': 'b.py\n'}, id='inner-info-exclude'),
+    pytest.param(
+        {'.gitignore': 'sub/\n', 'sub/a.py': X, 'top.py': X}, ['sub'], '', {}, id='ignored-by-outer-gitignore'
+    ),
+    pytest.param({'sub/a.py': X, 'top.py': X}, ['sub'], '', {'': 'sub/\n'}, id='ignored-by-outer-info-exclude'),
+    pytest.param(
+        {'sub/.gitignore': '!b.py\n', 'sub/b.py': X, 'sub/c.py': X},
+        ['sub'],
+        '',
+        {'sub': '*.py\n'},
+        id='inner-gitignore-outranks-inner-info-exclude',
+    ),
+    # Guards against over-filtering, not a regression: the deeper *.py wins either way
+    pytest.param(
+        {'.gitignore': '!sub/keep.py\n', 'sub/.gitignore': '*.py\n', 'sub/keep.py': X, 'sub/n.md': X},
+        ['sub'],
+        '',
+        {},
+        id='outer-negation-cannot-reach-in',
+    ),
+    pytest.param(
+        {
+            '.gitignore': '*.md\n',
+            'deep/.gitignore': '*.py\n',
+            'deep/d.py': X,
+            'deep/inner/e.py': X,
+            'deep/inner/f.md': X,
+        },
+        ['deep', 'deep/inner'],
+        '',
+        {},
+        id='repo-in-repo',
+    ),
+    pytest.param(_OUTER_RULES_STOP, ['sub'], 'sub', {}, id='scan-from-inside'),
+    pytest.param(_OUTER_SUBDIR_GITIGNORE, ['a/sub'], 'a', {}, id='scan-subdir-holding-repo'),
+    pytest.param(
+        {'.gitignore': 'sub/\n', 'sub/a.py': X, 'top.py': X},
+        ['sub'],
+        'sub',
+        {},
+        id='scan-inside-repo-the-outer-ignores',
+    ),
+    pytest.param(
+        {
+            '.gitignore': '*.md\n',
+            'proj/.gitignore': '*.py\n',
+            'proj/a.md': X,
+            'proj/b.py': X,
+            'proj/sub/c.py': X,
+            'proj/sub/d.py': X,
+        },
+        ['proj', 'proj/sub'],
+        'proj',
+        {'proj/sub': 'c.py\n'},
+        id='scan-repo-holding-repo',
+    ),
+]
+
+
+@needs_git
+@pytest.mark.parametrize(('files', 'repos', 'scan', 'excludes'), _NESTED_GIT_CASES)
+def test_nested_repos_match_git(
+    tmp_path: Path, files: dict[str, str], repos: list[str], scan: str, excludes: dict[str, str]
+) -> None:
+    """Inside a nested repository only its own rules apply, exactly as git run in each repository reports."""
+    env = _git_env(tmp_path)
+    outer = tmp_path / 'repo'
+    _make(outer, files)
+    for repo in ['', *repos]:
+        _git(env, 'init', '-q', str(outer / repo))
+    for repo, text in excludes.items():
+        _write_exclude(outer / repo, env, text)
+    assert _walked(outer / scan) == _git_view(outer / scan, env)
+
+
+def _commit_all(env: dict[str, str], repo: Path) -> None:
+    _git(env, '-C', str(repo), 'add', '.')
+    _git(env, '-C', str(repo), 'commit', '-q', '-m', 'init')
+
+
+def _add_submodule(env: dict[str, str], repo: Path, source: Path, path: str) -> None:
+    # Local-path submodules need protocol.file.allow since git 2.38.1; older gits ignore the unknown key
+    _git(env, '-C', str(repo), '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', str(source), path)
+
+
+@needs_git
+def test_submodule_from_outer_matches_git(tmp_path: Path) -> None:
+    """Scanned from the superproject, a submodule keeps its own info/exclude and the outer ``*.md`` stops at it."""
+    env = _git_env(tmp_path)
+    subsrc, outer = tmp_path / 'subsrc', tmp_path / 'outer'
+    _make(subsrc, {'.gitignore': '*.log\n', 'kept.py': X})
+    _make(outer, {'.gitignore': '*.md\n', 'top.py': X})
+    for repo in (subsrc, outer):
+        _git(env, 'init', '-q', str(repo))
+        _commit_all(env, repo)
+    _add_submodule(env, outer, subsrc, 'sub')
+    sub = outer / 'sub'
+    _write_exclude(sub, env, 'secret.py\n')
+    _make(sub, {'secret.py': X, 'b.py': X, 'a.md': X})
+    expected = {'top.py', 'sub/kept.py', 'sub/b.py', 'sub/a.md'}
+    assert _git_view(outer, env) == expected  # literal too, so a _git_view bug can't hide a regression
+    assert _walked(outer) == expected
+
+
+@needs_git
+def test_submodule_inside_submodule_matches_git(tmp_path: Path) -> None:
+    """``mid/leaf``'s git dir is ``../../.git/modules/mid/modules/leaf``; each repo reads only its own info/exclude."""
+    env = _git_env(tmp_path)
+    leafsrc, midsrc, outer = tmp_path / 'leaf', tmp_path / 'mid', tmp_path / 'outer'
+    _make(leafsrc, {'l.py': X})
+    _make(midsrc, {'m.py': X})
+    _make(outer, {'.gitignore': '*.md\n', 'top.py': X})
+    for repo in (leafsrc, midsrc, outer):
+        _git(env, 'init', '-q', str(repo))
+        _commit_all(env, repo)
+    _add_submodule(env, midsrc, leafsrc, 'leaf')
+    _commit_all(env, midsrc)
+    _add_submodule(env, outer, midsrc, 'mid')
+    _git(env, '-C', str(outer), '-c', 'protocol.file.allow=always', 'submodule', 'update', '--init', '--recursive')
+    mid, leaf = outer / 'mid', outer / 'mid' / 'leaf'
+    assert (leaf / '.git').read_text().strip() == 'gitdir: ../../.git/modules/mid/modules/leaf'
+    _write_exclude(mid, env, 'secret.py\n')
+    _write_exclude(leaf, env, 'deep.py\n')
+    _make(mid, {'secret.py': X, 'a.md': X})
+    _make(leaf, {'deep.py': X, 'secret.py': X})
+    from_mid = {'m.py', 'a.md', 'leaf/l.py', 'leaf/secret.py'}
+    assert _git_view(mid, env) == from_mid
+    assert _walked(mid) == from_mid
+    from_outer = {'top.py', 'mid/m.py', 'mid/a.md', 'mid/leaf/l.py', 'mid/leaf/secret.py'}
+    assert _git_view(outer, env) == from_outer
+    assert _walked(outer) == from_outer
+
+
+@needs_git
+def test_worktree_inside_repo_matches_git(tmp_path: Path) -> None:
+    """A worktree placed inside its main repo is a nested repo that shares the main repo's info/exclude.
+
+    The anchored ``/secret.py`` reaches ``wt/secret.py`` only as the worktree's own rule, and the uncommitted
+    ``ok.py`` in main's .gitignore must not reach ``wt/ok.py``: outer rules alone would get both wrong.
+    """
+    env = _git_env(tmp_path)
+    main = tmp_path / 'main'
+    _make(main, {'.gitignore': '*.md\n', 'kept.py': X})
+    _git(env, 'init', '-q', str(main))
+    _commit_all(env, main)
+    _write_exclude(main, env, '/secret.py\n')
+    _git(env, '-C', str(main), 'worktree', 'add', '-q', str(main / 'wt'))
+    with (main / '.gitignore').open('a') as f:
+        f.write('ok.py\n')  # after the commit, so the worktree's checked-out .gitignore doesn't have it
+    _make(main, {'wt/secret.py': X, 'wt/ok.py': X, 'wt/a.md': X, 'top.py': X})
+    assert (main / 'wt' / '.git').is_file()
+    assert _walked(main) == _git_view(main, env) == {'kept.py', 'top.py', 'wt/kept.py', 'wt/ok.py'}
 
 
 def test_tui_shows_every_directory_as_spec_when_root_is_spec(tmp_path: Path):

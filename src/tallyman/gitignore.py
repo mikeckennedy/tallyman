@@ -8,6 +8,9 @@ paths blur that distinction, which matters once several ``.gitignore`` files
 and ``!`` negations combine, so the patterns are compiled here following
 gitignore(5).
 
+Nested repositories, submodules and worktrees inside the tree are walked with
+their own rules, as if git were run inside each.
+
 Known differences from git:
 
 - Matching is always case-sensitive; git on a case-insensitive filesystem
@@ -20,6 +23,10 @@ Known differences from git:
   to one) is treated as absent; git opens it, and blocks on a FIFO.
 - A worktree whose ``commondir`` file can't be read uses the ``info/exclude``
   in its own git directory; git refuses to run there.
+- Any ``.git`` (directory or file) marks a repository root, the same test
+  :func:`find_git_root` uses. Git requires a valid repository, so to git an
+  empty ``.git`` directory or a ``.git`` file pointing nowhere is an ordinary
+  directory and the enclosing rules continue inside it; here they stop.
 - Only the repo's own ignore files are read: ``info/exclude`` and the
   ``.gitignore`` files. The global excludes file (``core.excludesFile``,
   by default ``~/.config/git/ignore``) is not, so counts don't depend on the
@@ -337,6 +344,15 @@ class GitIgnoreSpec:
     descend into an ignored directory. ``.gitignore`` files below the analysis
     root are registered with :meth:`add_directory` as the tree is walked, so an
     instance is bound to one analysis root and must not be reused for another.
+
+    Repository boundaries: :meth:`add_directory` also notices nested git
+    repositories (submodules and worktrees included). Inside one, only its own
+    ``info/exclude`` and ``.gitignore`` files apply, so the enclosing repo's
+    rules, its ``!`` negations included, stop at its root. The nested repo's own
+    directory entry belongs to the enclosing tree and is judged by the enclosing
+    rules, so an ignored nested repo is never entered. ``[exclude] patterns``
+    specs (:meth:`for_patterns`) never call :meth:`add_directory`, so they never
+    see repository boundaries: they are tallyman settings, not git rules.
     """
 
     def __init__(self, prefix: str = '', anchor: Optional[Path] = None) -> None:
@@ -347,6 +363,9 @@ class GitIgnoreSpec:
         self._files: list[tuple[str, _IgnoreFile]] = []
         self._loaded: set[tuple[str, str]] = set()
         self._ignore_all = False
+        # Bases (relative to the anchor) of nested repositories found below the analysis root. The repo
+        # for_root() found, or the analysis root outside a repo, owns everything else and isn't listed.
+        self._repo_roots: set[str] = set()
 
     @classmethod
     def for_root(cls, root: Path) -> GitIgnoreSpec:
@@ -408,6 +427,8 @@ class GitIgnoreSpec:
         analysis root, a directory above it inside the repo, or one below it.
         Registering the same directory twice is a no-op, and a directory outside
         the repo (or, outside a repo, outside the analysis root) is ignored.
+        Pattern layers apply across nested repositories, since they are tallyman
+        settings, not git rules.
         """
         if self._anchor is None:
             raise ValueError('add_rules() needs a spec from GitIgnoreSpec.for_patterns() or for_root()')
@@ -419,9 +440,18 @@ class GitIgnoreSpec:
     def add_directory(self, rel_dir: str, dir_path: Path) -> None:
         """Register ``dir_path/.gitignore``, where *rel_dir* is its path relative to the analysis root.
 
+        If *dir_path* is the root of a nested git repository (it has a ``.git`` directory or file), it
+        starts a new set of rules: inside it, only its own ``info/exclude`` and ``.gitignore`` files apply,
+        as if git were run there. The directory's own entry was already judged by the enclosing rules.
+
         Missing or unreadable files are skipped, and registering the same directory twice is a no-op.
         """
         base = '/'.join(part for part in (self._prefix, rel_dir) if part)
+        # The analysis root's own repo is set up by for_root(); only directories below it can start a new one
+        if rel_dir and base not in self._repo_roots and _has_git(dir_path):
+            self._repo_roots.add(base)
+            if (exclude := _info_exclude(dir_path)) is not None:
+                self._add_file(base, exclude)
         self._add_file(base, dir_path / '.gitignore')
 
     def match_file(self, path: str) -> bool:
@@ -458,15 +488,29 @@ class GitIgnoreSpec:
             return
         self._loaded.add(key)
         self._files.append((base, _IgnoreFile(lines)))
-        # Shallowest first; the sort is stable, so info/exclude stays ahead of the root .gitignore.
+        # Shallowest first; the sort is stable, so info/exclude stays ahead of the root .gitignore. That holds
+        # for a nested repo too: add_directory() registers its info/exclude before its .gitignore, at one base.
         self._files.sort(key=lambda item: item[0].count('/') + 1 if item[0] else 0)
+
+    def _owner(self, full: str) -> str:
+        """The deepest nested repository root strictly above *full*, or ``''`` for the analysis root's repo."""
+        end = full.rfind('/')
+        while end > 0:
+            if (prefix := full[:end]) in self._repo_roots:
+                return prefix
+            end = full.rfind('/', 0, end)
+        return ''
 
     def _is_ignored(self, full: str, is_dir: bool) -> bool:
         """Judge one entry, given as a path relative to the git root."""
         if self._ignore_all:
             return True
+        # Inside a nested repository only its own layers count: those based at its root or below it
+        owner = self._owner(full) if self._repo_roots else ''
         ignored = False
         for base, ignore_file in self._files:
+            if owner and base != owner and not base.startswith(owner + '/'):
+                continue
             if base:
                 if not full.startswith(base + '/'):
                     continue

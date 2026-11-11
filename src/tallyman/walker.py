@@ -142,7 +142,9 @@ def walk_project(
         root: Project root directory.
         excluded_dirs: Relative directory paths to skip (e.g. {'static/external'}).
         gitignore_spec: Pre-loaded gitignore patterns. Loaded from root if None. ``.gitignore``
-            files found while walking are registered on it as each directory is entered.
+            files found while walking are registered on it as each directory is entered. A nested
+            git repository found while walking starts its own rules (see
+            :meth:`GitIgnoreSpec.add_directory`).
         spec_dirs: Relative directory paths designated as spec directories. ``'.'`` marks *root*
             itself, so docs files at every level count as specs.
         non_spec_dirs: Relative directory paths that are never specs (``[specs] ignore``).
@@ -163,7 +165,8 @@ def walk_project(
         dirpath = Path(dirpath_str)
         rel_dir_str = relative_posix(dirpath, root)
 
-        # This directory's own .gitignore governs its children, so load it before filtering them
+        # This directory's own .gitignore governs its children, so load it before filtering them. If the
+        # directory is a nested git repo, this is also where its own rules start and the outer ones stop.
         gitignore_spec.add_directory(rel_dir_str, dirpath)
 
         # Discover nested config files in subdirectories
