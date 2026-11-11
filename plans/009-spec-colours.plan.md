@@ -81,8 +81,8 @@ Lands after plan 008. It assumes 008's `aggregator.bar_segments()` exists and th
 - `Language` gets a last field, `spec_color: Optional[str] = field(default=None, kw_only=True)`. Keyword-only, so every positional `Language(...)` call in `src/` and `tests/` (the `_lang()` helpers in `test_aggregator.py`, `test_image.py` and `test_counter.py`) keeps working unchanged. Comment: `# docs languages only: the colour of their as_spec() variant`.
 - The two docs rows (keep the `# fmt: off` alignment as far as it goes):
   ```python
-  Language('Markdown',     'docs',   'white',           None, ('.md', '.mdx'), spec_color='violet'),
-  Language('reStructuredText', 'docs', 'grey70',        None, ('.rst',), spec_color='dark_sea_green4'),
+  (Language('Markdown', 'docs', 'white', None, ('.md', '.mdx'), spec_color='violet'),)
+  (Language('reStructuredText', 'docs', 'grey70', None, ('.rst',), spec_color='dark_sea_green4'),)
   ```
 - `as_spec()`:
   - Keep the category check and `@functools.cache`.

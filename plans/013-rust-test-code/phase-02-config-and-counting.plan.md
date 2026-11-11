@@ -9,7 +9,7 @@ Covers decisions 1, 5 and 7 from `00-plan-introduction.plan.md`. After this phas
 Add one field:
 
 ```python
-rust_exclude_test_modules: Optional[bool] = None   # [rust] exclude_test_modules; None = this config doesn't say
+rust_exclude_test_modules: Optional[bool] = None  # [rust] exclude_test_modules; None = this config doesn't say
 ```
 
 Document it in the class docstring next to `patterns`: like patterns, it belongs to the file it came from (its value covers that file's directory and everything below), so `merge_configs()`, `prefixed()`, `rebase_config()` and `without_copies()` return `None` for it. Check each of those functions builds `TallyConfig` positionally today; adding the field last with a default keeps them correct, but say so in their docstrings where they already mention patterns.
@@ -52,7 +52,7 @@ Write `false` too: an explicit `false` overrides a parent config that turned it 
 The setting can change in any nested config, so the walker must say, for each file, whether it applies. Keep the value per directory, like `states`:
 
 ```python
-rust_tests: dict[str, bool] = {}   # rel_dir -> exclude_test_modules for files in that directory
+rust_tests: dict[str, bool] = {}  # rel_dir -> exclude_test_modules for files in that directory
 ```
 
 - The scan root starts from a new `walk_project()` argument, `exclude_rust_tests: bool = False` (the CLI passes `chain.rust_exclude_test_modules`).

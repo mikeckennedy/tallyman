@@ -85,6 +85,7 @@ Extract the gitignore-loading logic into a reusable function so the TUI can also
 ```python
 import pathspec
 
+
 def load_gitignore(root: Path) -> pathspec.PathSpec:
     """
     Load gitignore patterns from .gitignore and .git/info/exclude.
@@ -133,6 +134,7 @@ We use Textual's `Tree` widget (not `DirectoryTree`) because we need full contro
 from textual.widgets import Tree, Header, Footer
 from textual.app import App, ComposeResult
 
+
 class SetupApp(App):
     """First-run setup: choose which directories to include."""
 
@@ -167,9 +169,9 @@ class SetupApp(App):
 Each tree node's `data` dict holds:
 ```python
 {
-    'path': str,          # Relative path from project root (e.g. 'static/external')
-    'gitignored': bool,   # True if matched by .gitignore
-    'excluded': bool,     # True if user has toggled it off
+    'path': str,  # Relative path from project root (e.g. 'static/external')
+    'gitignored': bool,  # True if matched by .gitignore
+    'excluded': bool,  # True if user has toggled it off
 }
 ```
 
@@ -232,6 +234,7 @@ def action_toggle_node(self) -> None:
     new_state = not node.data['excluded']
     self._set_excluded(node, new_state)
 
+
 def _set_excluded(self, node, excluded: bool) -> None:
     """Set excluded state on a node and cascade to all children."""
     node.data['excluded'] = excluded
@@ -268,6 +271,7 @@ def action_save_and_exit(self) -> None:
     self.result = cleaned  # Return to caller via app.run()
     self.exit(cleaned)
 
+
 def _clean_exclusions(self, excluded: set[str]) -> set[str]:
     """
     Remove redundant child paths when a parent is already excluded.
@@ -279,6 +283,7 @@ def _clean_exclusions(self, excluded: set[str]) -> set[str]:
         if not any(path.startswith(p + '/') for p in cleaned):
             cleaned.add(path)
     return cleaned
+
 
 def action_quit_no_save(self) -> None:
     """Exit without saving."""

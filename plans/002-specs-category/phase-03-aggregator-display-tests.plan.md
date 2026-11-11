@@ -131,10 +131,7 @@ def language_percentages(result: TallyResult) -> list[tuple[Language, float]]:
     """Return [(Language, percentage), ...] sorted by percentage descending."""
     if result.grand_total_lines == 0:
         return []
-    return [
-        (s.language, s.total_lines / result.grand_total_lines * 100)
-        for s in result.by_language
-    ]
+    return [(s.language, s.total_lines / result.grand_total_lines * 100) for s in result.by_language]
 ```
 
 Update `_display_percentage_bar` in `display.py` to use `Language` objects and resolve display names:
@@ -197,14 +194,17 @@ def test_as_spec_creates_spec_category():
     assert spec_md.color == md.color
     assert spec_md.extensions == md.extensions
 
+
 def test_as_spec_caching():
     md = identify_language(Path('test.md'))
     assert as_spec(md) is as_spec(md)  # Same object
+
 
 def test_as_spec_rejects_non_docs():
     py = identify_language(Path('test.py'))
     with pytest.raises(ValueError):
         as_spec(py)
+
 
 def test_as_spec_rst():
     rst = identify_language(Path('test.rst'))
@@ -223,6 +223,7 @@ def test_save_load_with_specs(tmp_path):
     assert config.excluded_dirs == {'vendor'}
     assert config.spec_dirs == {'plans', 'docs/arch'}
 
+
 def test_load_config_without_specs_section(tmp_path):
     """Backward compatibility: configs without [specs] return empty spec_dirs."""
     config_path = tmp_path / '.tally-config.toml'
@@ -230,6 +231,7 @@ def test_load_config_without_specs_section(tmp_path):
     config = load_config(config_path)
     assert config.excluded_dirs == {'vendor'}
     assert config.spec_dirs == set()
+
 
 def test_save_config_no_specs_omits_section(tmp_path):
     """When spec_dirs is empty, [specs] section is not written."""
@@ -256,6 +258,7 @@ def test_auto_detect_specs_dir(tmp_path):
     assert readme_lang.category == 'docs'
     assert spec_lang.category == 'specs'
 
+
 def test_auto_detect_plans_dir(tmp_path):
     """Directory named 'plans' auto-detects as spec directory."""
     plans = tmp_path / 'plans'
@@ -265,6 +268,7 @@ def test_auto_detect_plans_dir(tmp_path):
     results = list(walk_project(tmp_path, set()))
     lang = next(lang for _, lang in results if True)
     assert lang.category == 'specs'
+
 
 def test_user_designated_spec_dir(tmp_path):
     """User-designated spec dirs via spec_dirs parameter."""
@@ -276,6 +280,7 @@ def test_user_designated_spec_dir(tmp_path):
     lang = next(lang for _, lang in results if True)
     assert lang.category == 'specs'
 
+
 def test_spec_cascades_to_subdirs(tmp_path):
     """Spec status cascades to child directories."""
     sub = tmp_path / 'specs' / 'api'
@@ -285,6 +290,7 @@ def test_spec_cascades_to_subdirs(tmp_path):
     results = list(walk_project(tmp_path, set()))
     lang = next(lang for _, lang in results if True)
     assert lang.category == 'specs'
+
 
 def test_non_docs_in_spec_dir_unchanged(tmp_path):
     """Python files in spec dirs keep their 'code' category."""
@@ -296,6 +302,7 @@ def test_non_docs_in_spec_dir_unchanged(tmp_path):
     lang = next(lang for _, lang in results if True)
     assert lang.category == 'code'
 
+
 def test_spec_dir_name_case_insensitive(tmp_path):
     """Auto-detection is case-insensitive."""
     specs = tmp_path / 'Specs'
@@ -305,6 +312,7 @@ def test_spec_dir_name_case_insensitive(tmp_path):
     results = list(walk_project(tmp_path, set()))
     lang = next(lang for _, lang in results if True)
     assert lang.category == 'specs'
+
 
 def test_excluded_spec_dir_not_walked(tmp_path):
     """An excluded spec dir is not walked at all."""
@@ -341,8 +349,9 @@ def test_specs_category_in_output():
 
     docs_cat = next(c for c in tally.by_category if c.name == 'Docs')
     specs_cat = next(c for c in tally.by_category if c.name == 'Specs')
-    assert docs_cat.effective_lines == 80   # 100 - 20 blank
+    assert docs_cat.effective_lines == 80  # 100 - 20 blank
     assert specs_cat.effective_lines == 450  # 500 - 50 blank
+
 
 def test_aggregation_groups_by_language_object():
     """Two Language objects with same name but different categories stay separate."""

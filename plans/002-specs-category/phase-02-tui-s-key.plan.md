@@ -38,12 +38,12 @@ Auto-detected spec directories (named `specs`, `specifications`, `plans`) cannot
 Add a `'spec'` boolean and an `'auto_spec'` boolean to each tree node's data dict:
 
 ```python
-data={
+data = {
     'path': child_rel,
     'gitignored': is_gitignored,
     'excluded': is_excluded,
-    'spec': is_spec,           # User-designated spec directory
-    'auto_spec': is_auto_spec, # Auto-detected by directory name
+    'spec': is_spec,  # User-designated spec directory
+    'auto_spec': is_auto_spec,  # Auto-detected by directory name
 }
 ```
 

@@ -28,7 +28,11 @@ def as_spec(lang: Language) -> Language:
         raise ValueError(f'as_spec() only applies to docs languages, got {lang.category!r}')
     if lang not in _SPEC_CACHE:
         _SPEC_CACHE[lang] = Language(
-            lang.name, 'specs', lang.color, lang.single_line_comment, lang.extensions,
+            lang.name,
+            'specs',
+            lang.color,
+            lang.single_line_comment,
+            lang.extensions,
         )
     return _SPEC_CACHE[lang]
 ```
@@ -49,6 +53,7 @@ Change the return type from `set[str]` to a structured result containing both ex
 @dataclass
 class TallyConfig:
     """Parsed contents of .tally-config.toml."""
+
     excluded_dirs: set[str]
     spec_dirs: set[str]
 

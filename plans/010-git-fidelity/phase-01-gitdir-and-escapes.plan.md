@@ -65,15 +65,15 @@ Phase 2 adds the nested-repo note, and phase 3 audits the whole list.
 New rows in `_PATTERN_CASES`. Every row was checked against git 2.54 with `git check-ignore --no-index` while planning. Python literals:
 
 ```python
-    ('a\\', 'a\\', False),  # a trailing lone backslash matches nothing
-    ('\\', '\\', False),
-    ('*.py\\', 'x.py\\', False),
-    ('a\\/', 'a\\/', False),
-    ('a\\\\\\', 'a\\\\', False),  # escaped backslash, then a lone one
-    ('a\\\\', 'a\\', True),  # an escaped backslash is fine
-    ('c\\\\ ', 'c\\', True),  # escaped backslash: the space after it is trailing and stripped
-    ('c\\\\ ', 'c\\ ', False),
-    ('c\\\\\\ ', 'c\\ ', True),  # escaped backslash, escaped space
+(('a\\', 'a\\', False),)  # a trailing lone backslash matches nothing
+(('\\', '\\', False),)
+(('*.py\\', 'x.py\\', False),)
+(('a\\/', 'a\\/', False),)
+(('a\\\\\\', 'a\\\\', False),)  # escaped backslash, then a lone one
+(('a\\\\', 'a\\', True),)  # an escaped backslash is fine
+(('c\\\\ ', 'c\\', True),)  # escaped backslash: the space after it is trailing and stripped
+(('c\\\\ ', 'c\\ ', False),)
+(('c\\\\\\ ', 'c\\ ', True),)  # escaped backslash, escaped space
 ```
 
 `test_negated_trailing_backslash_reincludes_nothing() -> None`: `.gitignore` is `'*\n!a\\\n'`; `load_gitignore(tmp_path).match_file('a\\')` is True.

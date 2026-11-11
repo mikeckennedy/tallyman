@@ -48,8 +48,9 @@ code = (
     'import sys; from tallyman import cli; sys.argv = ["tallyman", sys.argv[1]]; cli.main(); '
     'print(sorted({m.split(".")[0] for m in sys.modules} & {"textual", "PIL"}), file=sys.stderr)'
 )
-result = subprocess.run([sys.executable, '-c', code, str(tmp_path)], stdin=subprocess.DEVNULL,
-                        capture_output=True, text=True, timeout=60)
+result = subprocess.run(
+    [sys.executable, '-c', code, str(tmp_path)], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60
+)
 ```
 
 Assert `result.returncode == 0` and that the last stderr line is `[]`. It has to be a subprocess, because pytest has already imported Textual for the pilot tests. The `PIL` half covers the lazy-Pillow rule in `CLAUDE.md`, which no test checks today.

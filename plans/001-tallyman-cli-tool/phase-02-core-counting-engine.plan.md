@@ -17,10 +17,10 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class Language:
     name: str
-    category: str            # 'code', 'design', 'docs', 'data'
-    color: str               # Rich color name for terminal output
-    single_line_comment: str | None   # e.g. '#', '//', '--'
-    extensions: tuple[str, ...]       # e.g. ('.py',)
+    category: str  # 'code', 'design', 'docs', 'data'
+    color: str  # Rich color name for terminal output
+    single_line_comment: str | None  # e.g. '#', '//', '--'
+    extensions: tuple[str, ...]  # e.g. ('.py',)
 ```
 
 **Fields explained:**
@@ -93,6 +93,7 @@ Walk a project directory tree and yield files that should be counted.
 ```python
 from pathlib import Path
 from collections.abc import Iterator
+
 
 def walk_project(
     root: Path,
@@ -203,15 +204,15 @@ class LanguageStats:
 
 @dataclass
 class CategoryStats:
-    name: str          # 'Code', 'Design', 'Docs', 'Data'
+    name: str  # 'Code', 'Design', 'Docs', 'Data'
     total_lines: int = 0
     languages: list[str] = field(default_factory=list)
 
 
 @dataclass
 class TallyResult:
-    by_language: list[LanguageStats]    # Sorted by total_lines descending
-    by_category: list[CategoryStats]    # Code, Design, Docs, Data
+    by_language: list[LanguageStats]  # Sorted by total_lines descending
+    by_category: list[CategoryStats]  # Code, Design, Docs, Data
     grand_total_lines: int = 0
 ```
 
@@ -267,8 +268,10 @@ def main() -> None:
 
     # Display (Phase 4  -  for now, plain text)
     for stats in result.by_language:
-        print(f'{stats.language.name}: {stats.total_lines:,} lines, '
-              f'{stats.non_blank_non_comment:,} excluding comments and blank lines')
+        print(
+            f'{stats.language.name}: {stats.total_lines:,} lines, '
+            f'{stats.non_blank_non_comment:,} excluding comments and blank lines'
+        )
 ```
 
 This gives us a working tool with plain-text output. Phases 3 and 4 layer config and formatting on top.

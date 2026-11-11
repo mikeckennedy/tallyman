@@ -93,23 +93,23 @@ cli.main()
 ```python
 # Dataclasses use slots=True (TallyConfig and ConfigChain are plain dataclasses; SpecState is a NamedTuple)
 
-Language(frozen=True)         # name, category, color, single_line_comment, extensions; spec_color (docs only, keyword-only)
-FileCount                     # total_lines, code_lines, comment_lines, blank_lines; test_lines (Rust test code left out, in no other count)
-LanguageStats                 # language, file_count, total_lines, code_lines, comment_lines, blank_lines;
-                              # .effective_lines is the one definition (code lines, or non-blank without a comment marker)
-CategoryStats                 # name, total_lines, effective_lines, languages
-BarSegment(frozen=True)       # language (None for Other), label, color, percent: one bar block and its legend entry
-TallyResult                   # by_language, by_category, grand_total_lines; rust_test_lines, rust_test_files
-TallyConfig                   # excluded_dirs, spec_dirs, non_spec_dirs ([specs] ignore): set[str]; '.' = this dir;
-                              # patterns: list[str], raw, in file order, relative to the config's own directory
-                              # rust_exclude_test_modules: Optional[bool], None = this file doesn't say
-ConfigChain                   # inherited (configs above the scan root, merged + rebased), local, paths, pattern_layers;
-                              # .effective is inherited overridden by local, what the walker applies
-                              # rust_exclude_test_modules: bool, at the scan root (deepest config that sets it)
-NestedConfig(NamedTuple)      # config (prefixed), patterns, rust_exclude_test_modules: one config below the scan root
-SourceFile(NamedTuple)        # path, language, exclude_rust_tests: what walk_files() yields
-WalkStats                     # pattern_files, pattern_dirs: what [exclude] patterns removed, for the report
-SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's spec status (walker.spec_state)
+Language(frozen=True)  # name, category, color, single_line_comment, extensions; spec_color (docs only, keyword-only)
+FileCount  # total_lines, code_lines, comment_lines, blank_lines; test_lines (Rust test code left out, in no other count)
+LanguageStats  # language, file_count, total_lines, code_lines, comment_lines, blank_lines;
+# .effective_lines is the one definition (code lines, or non-blank without a comment marker)
+CategoryStats  # name, total_lines, effective_lines, languages
+BarSegment(frozen=True)  # language (None for Other), label, color, percent: one bar block and its legend entry
+TallyResult  # by_language, by_category, grand_total_lines; rust_test_lines, rust_test_files
+TallyConfig  # excluded_dirs, spec_dirs, non_spec_dirs ([specs] ignore): set[str]; '.' = this dir;
+# patterns: list[str], raw, in file order, relative to the config's own directory
+# rust_exclude_test_modules: Optional[bool], None = this file doesn't say
+ConfigChain  # inherited (configs above the scan root, merged + rebased), local, paths, pattern_layers;
+# .effective is inherited overridden by local, what the walker applies
+# rust_exclude_test_modules: bool, at the scan root (deepest config that sets it)
+NestedConfig(NamedTuple)  # config (prefixed), patterns, rust_exclude_test_modules: one config below the scan root
+SourceFile(NamedTuple)  # path, language, exclude_rust_tests: what walk_files() yields
+WalkStats  # pattern_files, pattern_dirs: what [exclude] patterns removed, for the report
+SpecState(NamedTuple)  # is_spec, detection_suppressed: one directory's spec status (walker.spec_state)
 ```
 
 ## Key Design Decisions

@@ -144,6 +144,7 @@ def _display_separator(console: Console) -> None:
 ```python
 CATEGORY_DISPLAY_ORDER = ['Code', 'Design', 'Docs', 'Data']
 
+
 def _display_category_totals(console: Console, result: TallyResult) -> None:
     console.print('  [bold]Totals:[/bold]')
 
@@ -161,9 +162,7 @@ def _display_category_totals(console: Console, result: TallyResult) -> None:
             lang_list = ' + '.join(cat.languages[:3]) + ', etc'
 
         padded_name = f'{cat.name}:'
-        console.print(
-            f'  {padded_name:<{max_name_len + 1}} {cat.total_lines:>7,} lines ({lang_list})'
-        )
+        console.print(f'  {padded_name:<{max_name_len + 1}} {cat.total_lines:>7,} lines ({lang_list})')
 ```
 
 ### 4.5  -  GitHub-Style Percentage Bar
@@ -286,6 +285,7 @@ Testing Rich output can be done by capturing to a string buffer:
 ```python
 from io import StringIO
 from rich.console import Console
+
 
 def test_display_produces_output():
     """display_results writes to the console without errors."""

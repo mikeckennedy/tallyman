@@ -150,7 +150,9 @@ for new in sorted(new_root.rglob('*.py')):
     assert len(fa) == len(fb), new
     for x, y in zip(fa, fb):
         if x.returns is None and y.returns is not None:
-            assert isinstance(y.returns, ast.Constant) and y.returns.value is None, f'{new}:{y.lineno} got a non-None type'
+            assert isinstance(y.returns, ast.Constant) and y.returns.value is None, (
+                f'{new}:{y.lineno} got a non-None type'
+            )
             y.returns = None
             added += 1
     assert ast.dump(a) == ast.dump(b), f'{new}: more than -> None changed'

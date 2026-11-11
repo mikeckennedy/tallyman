@@ -30,8 +30,8 @@ Do it in two steps. **Step A changes no output**, so the existing display and im
   @dataclass(frozen=True, slots=True)
   class BarSegment:
       language: Optional[Language]  # None for the Other segment
-      label: str                    # display name, e.g. 'Markdown (specs)', or OTHER_LABEL
-      color: str                    # a Rich colour name: language.color, or OTHER_COLOR
+      label: str  # display name, e.g. 'Markdown (specs)', or OTHER_LABEL
+      color: str  # a Rich colour name: language.color, or OTHER_COLOR
       percent: float
   ```
 
