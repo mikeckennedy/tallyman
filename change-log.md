@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and never resets (see `CLAUDE.md`).
 
+## 0.6.5 - UNRELEASED
+
+### Added
+- New `--exclude PATTERN` leaves files out of one run without editing `.tally-config.toml` (issue #10), for example `tallyman --exclude 'tests/' --exclude 'tests.rs'` to see a project's size without its tests. Each value is one gitignore-style pattern, matched from the scanned directory, and the flag can be repeated. The patterns are the last word over every config's `[exclude] patterns`, nested configs included, and a `!` brings back what a config pattern left out (never a gitignored, hidden or `[exclude] directories` entry). They are never saved, setup doesn't show them, and what they remove is counted in the `Excluded by [exclude] patterns` line. A pattern that can never match (blank, a comment such as `#gen`, a lone `!` or `/`, one spanning lines, a `./src/gen/`-style path, or an absolute path into the scanned directory) stops the run with exit code 2, suggesting the fix where there is one.
+- Files: `src/tallyman/cli.py`, `src/tallyman/gitignore.py`, `src/tallyman/walker.py`, `tests/test_cli.py`, `tests/test_gitignore.py`, `tests/test_walker.py`, `README.md`, `CLAUDE.md`, `.cursor/rules/coding-guidelines.mdc`, `.cursor/rules/project-rules.mdc`, `plans/006-tallyman-architect.plan.md`, `pyproject.toml`, `uv.lock`
+- Plan: `plans/014-one-off-overrides/phase-01-exclude-flag.plan.md`
+- New `--exclude-rust-tests` and `--no-exclude-rust-tests` leave Rust test code out of one run, or count it, whatever `[rust] exclude_test_modules` says in any config, nested crate configs included. Neither is saved, and setup shows and saves the config's value; the count after setup uses the flag. Given both, the last one wins.
+- Files: `src/tallyman/cli.py`, `src/tallyman/walker.py`, `tests/test_cli.py`, `tests/test_walker.py`, `README.md`, `CLAUDE.md`, `.cursor/rules/coding-guidelines.mdc`, `.cursor/rules/project-rules.mdc`, `plans/006-tallyman-architect.plan.md`
+- Plan: `plans/014-one-off-overrides/phase-02-rust-flag.plan.md`
+
+### Changed
+- `--no` no longer abbreviates `--no-color`: it could now also mean `--no-exclude-rust-tests`, so it is an error. Write `--no-color` (or `--no-c`). Likewise `--excl` no longer abbreviates `--exclude`.
+
 ## 0.5.4 - UNRELEASED
 
 ### Added

@@ -5,6 +5,7 @@ import codecs
 import inspect
 import os
 import re
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -17,6 +18,7 @@ from tallyman import __version__, cli
 from tallyman.aggregator import TallyResult
 from tallyman.config import CONFIG_FILENAME, TallyConfig, load_config
 from tallyman.gitignore import GitIgnoreSpec
+from tallyman.walker import WalkStats
 
 
 def _make(root: Path, files: dict[str, str]) -> None:
@@ -38,18 +40,26 @@ def _run(
     inherited_calls: Optional[list[TallyConfig]] = None,
     pattern_calls: Optional[list[GitIgnoreSpec]] = None,
     setup: Optional[Callable[..., object]] = None,
+    stats: Optional[list[WalkStats]] = None,
 ) -> Optional[TallyResult]:
     """Run tallyman's main() with *argv*; return the result it would have displayed (None if it exited first).
 
     The setup TUI is replaced by *setup* if given (see _real_setup). Otherwise a fake records the
     (excluded, specs, non-specs) it was pre-filled with in *setup_calls*, and the locked parent settings it
     was given in *inherited_calls*, then returns *setup_result*: such a tuple, ECHO to save the pre-fill
-    unchanged, or None to fail the test because setup should not have launched.
+    unchanged, or None to fail the test because setup should not have launched. The WalkStats the report
+    was given go in *stats*.
     """
     captured: list[TallyResult] = []
     monkeypatch.setattr(sys, 'argv', ['tallyman', *argv])
     monkeypatch.setattr(cli, '_is_interactive', lambda: interactive)
-    monkeypatch.setattr(cli, 'display_results', lambda tally, **_: captured.append(tally))
+
+    def display(tally: TallyResult, **kwargs: object) -> None:
+        captured.append(tally)
+        if stats is not None:
+            stats.append(cast(WalkStats, kwargs['stats']))
+
+    monkeypatch.setattr(cli, 'display_results', display)
 
     def fake_setup(
         _root: Path,
@@ -763,6 +773,253 @@ class TestExcludePatterns:
         assert 'exclude.patterns must be a list of strings' in capsys.readouterr().err
 
 
+_DEAD = "'.', '..' and empty path segments never match"
+
+
+class TestExcludeFlag:
+    """--exclude PATTERN: one-off patterns, anchored at the scan root, the last word over every config, never saved."""
+
+    def test_removes_matching_files_and_counts_them(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make(tmp_path, {'a.py': 'x = 1\n', 'tests.rs': 'fn t() {}\n', 'src/tests.rs': 'fn t() {}\n', 'b.md': '# b\n'})
+        stats: list[WalkStats] = []
+        tally = _run(monkeypatch, str(tmp_path), '--exclude', 'tests.rs', '--exclude', '*.md', stats=stats)
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+        assert (stats[0].pattern_files, stats[0].pattern_dirs) == (3, 0)
+
+    def test_directory_pattern(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make(tmp_path, {'a.py': 'x = 1\n', 'tests/t.py': 'y = 2\n', 'src/tests/u.py': 'z = 3\n', 'src/tests.py': ''})
+        stats: list[WalkStats] = []
+        tally = _run(monkeypatch, str(tmp_path), '--exclude', 'tests/', stats=stats)
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 2}  # a.py and the file src/tests.py
+        assert (stats[0].pattern_files, stats[0].pattern_dirs) == (0, 2)
+
+    def test_anchored_at_the_scan_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make(
+            tmp_path,
+            {
+                'proj/src/gen/g.py': 'x = 1\n',
+                'proj/lib/src/gen/kept.py': 'x = 1\n',
+                'proj/main.py': 'x = 1\n',
+                'src/gen/.keep': '',
+                'elsewhere/.keep': '',
+            },
+        )
+        monkeypatch.chdir(tmp_path / 'elsewhere')  # the current directory plays no part
+        tally = _run(monkeypatch, str(tmp_path / 'proj'), '--exclude', 'src/gen/')
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 2}  # main.py and lib/src/gen/kept.py
+
+    def test_anchored_at_a_subdirectory_scan_inside_a_repo(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / '.git').mkdir()
+        _make(tmp_path, {'app/gen/g.py': 'x = 1\n', 'app/main.py': 'x = 1\n', 'gen/root.py': 'x = 1\n'})
+        tally = _run(monkeypatch, str(tmp_path / 'app'), '--exclude', '/gen/')
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+
+    def test_negation_brings_back_a_config_pattern(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: '[exclude]\npatterns = ["*.rs"]\n',
+                'crate/.tally-config.toml': '[exclude]\npatterns = ["lib.py"]\n',
+                'main.rs': '',
+                'crate/lib.py': 'x = 1\n',
+            },
+        )
+        tally = _run(monkeypatch, str(tmp_path), '--exclude', '!main.rs', '--exclude', '!lib.py')
+        assert tally is not None
+        assert _files_by_category(tally) == {'Rust/code': 1, 'Python/code': 1}
+
+    def test_a_nested_negation_cannot_undo_it(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make(
+            tmp_path,
+            {
+                'crate/.tally-config.toml': '[exclude]\npatterns = ["!tests/"]\n',
+                'crate/tests/t.py': 'x = 1\n',
+                'crate/lib.py': 'x = 1\n',
+            },
+        )
+        tally = _run(monkeypatch, str(tmp_path), '--exclude', 'tests/')
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+
+    def test_negation_brings_back_only_patterns(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """[exclude] directories, gitignore, hidden directories and generated files are checked before patterns."""
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: '[exclude]\ndirectories = ["vendor"]\n',
+                '.gitignore': 'build/\n',
+                'vendor/v.py': 'x = 1\n',
+                'build/b.py': 'x = 1\n',
+                '.hidden/h.py': 'x = 1\n',
+                'app.min.js': 'x\n',
+                'main.py': 'x = 1\n',
+            },
+        )
+        argv = ['--exclude', '!vendor/', '--exclude', '!build/', '--exclude', '!.hidden/', '--exclude', '!app.min.js']
+        tally = _run(monkeypatch, str(tmp_path), *argv)
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+
+    def test_never_saved(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        config = '[exclude]\ndirectories = ["vendor"]\npatterns = ["tests.rs"]\n'
+        _make(tmp_path, {CONFIG_FILENAME: config, 'a.py': 'x = 1\n'})
+        _run(monkeypatch, str(tmp_path), '--exclude', '*.py')
+        assert (tmp_path / CONFIG_FILENAME).read_text() == config
+
+    @pytest.mark.parametrize('first_run', [False, True])
+    def test_setup_ignores_it(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, first_run: bool) -> None:
+        """Setup shows and saves what the configs do; the count after it still leaves the pattern out."""
+        _make(tmp_path, {'tests/t.py': 'x = 1\n', 'main.py': 'x = 1\n'})
+        if not first_run:
+            (tmp_path / CONFIG_FILENAME).write_text('[exclude]\npatterns = ["*.md"]\n')
+        real = _real_setup()  # before _run() replaces cli.run_setup, whose signature it checks
+        seen: list[bool] = []
+
+        def setup(*args: object, exclude_patterns: GitIgnoreSpec, **kwargs: object) -> object:
+            seen.append(exclude_patterns.match_file('tests/'))
+            return real(*args, exclude_patterns=exclude_patterns, **kwargs)
+
+        argv = [str(tmp_path), '--exclude', 'tests/'] + ([] if first_run else ['--setup'])
+        tally = _run(monkeypatch, *argv, interactive=True, setup=setup)
+        assert seen == [False]
+        saved = load_config(tmp_path / CONFIG_FILENAME)
+        assert saved.patterns == ([] if first_run else ['*.md'])
+        assert 'tests' not in (tmp_path / CONFIG_FILENAME).read_text()
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+
+    def test_applies_with_no_config_and_no_terminal(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make(tmp_path, {'tests/t.py': 'x = 1\n', 'main.py': 'x = 1\n'})
+        tally = _run(monkeypatch, str(tmp_path), '--exclude', 'tests/')
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+        assert not (tmp_path / CONFIG_FILENAME).exists()
+
+    @pytest.mark.parametrize(
+        ('pattern', 'message'),
+        [
+            ('', "--exclude '' is blank."),
+            ('   ', "--exclude '   ' is blank."),
+            (
+                '#gen',
+                "--exclude '#gen' is a comment in gitignore syntax; write '\\#gen' to match a name starting with #.",
+            ),
+            ('!', "--exclude '!' can never match anything."),
+            ('/', '--exclude / can never match anything.'),
+            ('a\\', "--exclude 'a\\' can never match anything."),
+            ('a\nb', "--exclude takes one pattern per flag; 'a\\nb' spans lines."),
+            ('a\rb', "--exclude takes one pattern per flag; 'a\\rb' spans lines."),
+            ('./src/gen/', f'--exclude ./src/gen/ can never match anything: {_DEAD}; write /src/gen/.'),
+            ('!./keep.rs', f"--exclude '!./keep.rs' can never match anything: {_DEAD}; write '!/keep.rs'."),
+            ('./a/../b', f'--exclude ./a/../b can never match anything: {_DEAD}.'),
+            ('../x', f'--exclude ../x can never match anything: {_DEAD}.'),
+            ('a//b', f'--exclude a//b can never match anything: {_DEAD}.'),
+            ('//', f'--exclude // can never match anything: {_DEAD}.'),
+            ('src/.', f'--exclude src/. can never match anything: {_DEAD}.'),
+        ],
+    )
+    @pytest.mark.parametrize('with_setup', [False, True])
+    def test_a_pattern_that_cannot_match_exits_2(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        pattern: str,
+        message: str,
+        with_setup: bool,
+    ) -> None:
+        _make(tmp_path, {'a.py': 'x = 1\n'})
+        argv = [str(tmp_path), '--exclude', 'ok.py', '--exclude', pattern] + (['--setup'] if with_setup else [])
+        with pytest.raises(SystemExit) as exc:
+            _run(monkeypatch, *argv, interactive=True)  # setup_result=None: the TUI must not open
+        assert exc.value.code == 2
+        assert capsys.readouterr().err == f'Error: {message}\n'
+        assert not (tmp_path / CONFIG_FILENAME).exists()
+
+    @pytest.mark.parametrize(
+        ('suffix', 'message'),
+        [
+            ('/src/gen/', 'is an absolute path; patterns are relative to the scanned directory: write /src/gen/.'),
+            ('', 'names the scanned directory itself, which a pattern never excludes.'),
+            ('/', 'names the scanned directory itself, which a pattern never excludes.'),
+        ],
+    )
+    @pytest.mark.parametrize('negation', ['', '!'])
+    def test_an_absolute_path_into_the_scan_root_exits_2(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        suffix: str,
+        message: str,
+        negation: str,
+    ) -> None:
+        root = tmp_path.resolve()
+        pattern = negation + root.as_posix() + suffix
+        if negation and 'write' in message:
+            message = message.replace('write /src/gen/', "write '!/src/gen/'")
+        with pytest.raises(SystemExit) as exc:
+            _run(monkeypatch, str(root), '--exclude', pattern)
+        assert exc.value.code == 2
+        assert capsys.readouterr().err == f'Error: --exclude {shlex.quote(pattern)} {message}\n'
+
+    @pytest.mark.skipif(sys.platform == 'win32', reason='symlinks need privileges on Windows')
+    def test_an_absolute_path_as_typed_through_a_link_exits_2(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """On macOS /tmp is a link to /private/tmp: the path as typed is caught too, not only the resolved one."""
+        (tmp_path / 'real').mkdir()
+        (tmp_path / 'link').symlink_to(tmp_path / 'real', target_is_directory=True)
+        typed = (tmp_path / 'link').absolute()
+        with pytest.raises(SystemExit) as exc:
+            _run(monkeypatch, str(typed), '--exclude', f'{typed.as_posix()}/gen/')
+        assert exc.value.code == 2
+        assert 'is an absolute path' in capsys.readouterr().err
+
+    def test_an_anchored_pattern_outside_the_scan_root_is_fine(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """'/etc/' is a pattern for an etc/ beside the config, not a path on disk."""
+        _make(tmp_path, {'proj/etc/e.py': 'x = 1\n', 'proj/main.py': 'x = 1\n'})
+        tally = _run(monkeypatch, str(tmp_path / 'proj'), '--exclude', '/etc/')
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+
+    @pytest.mark.parametrize('nested', [False, True])
+    def test_negation_re_includes_a_pruned_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool
+    ) -> None:
+        """The walker then descends into it: nothing is left out, so the footer has nothing to report."""
+        where = 'crate/' if nested else ''
+        _make(
+            tmp_path,
+            {f'{where}{CONFIG_FILENAME}': '[exclude]\npatterns = ["vendor/"]\n', f'{where}vendor/v.py': 'x = 1\n'},
+        )
+        stats: list[WalkStats] = []
+        tally = _run(monkeypatch, str(tmp_path), '--exclude', '!vendor/', stats=stats)
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+        assert stats == [WalkStats()]
+
+    def test_escaped_hash_is_a_pattern(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make(tmp_path, {'#gen.py': 'x = 1\n', 'gen.py': 'x = 1\n'})
+        tally = _run(monkeypatch, str(tmp_path), '--exclude', '\\#gen.py')
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+
+    def test_help_lists_it(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+        monkeypatch.setattr(sys, 'argv', ['tallyman', '--help'])
+        with pytest.raises(SystemExit):
+            cli.main()
+        assert '--exclude PATTERN' in capsys.readouterr().out
+
+
 class TestFlags:
     def test_version(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         monkeypatch.setattr(sys, 'argv', ['tallyman', '--version'])
@@ -919,6 +1176,112 @@ class TestRustTestCode:
         tally = _run(monkeypatch, '--setup', crate, interactive=True, setup=_real_setup([('', 'r')]))
         assert _rust_lines(tally) == 11
         assert load_config(tmp_path / 'crate' / CONFIG_FILENAME).rust_exclude_test_modules is False
+
+    def test_flag_turns_it_on_for_one_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        config = '[exclude]\ndirectories = []\n'
+        _make(tmp_path, {CONFIG_FILENAME: config, 'src/lib.rs': RUST_LIB})
+        tally = _run(monkeypatch, str(tmp_path), '--exclude-rust-tests')
+        assert _rust_lines(tally) == 4
+        assert tally is not None
+        assert (tally.rust_test_lines, tally.rust_test_files) == (7, 1)
+        assert (tmp_path / CONFIG_FILENAME).read_text() == config  # never saved
+        assert _rust_lines(_run(monkeypatch, str(tmp_path))) == 11
+
+    def test_no_flag_turns_it_off_for_one_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make(tmp_path, {CONFIG_FILENAME: RUST_ON, 'src/lib.rs': RUST_LIB})
+        tally = _run(monkeypatch, str(tmp_path), '--no-exclude-rust-tests')
+        assert _rust_lines(tally) == 11
+        assert tally is not None
+        assert tally.rust_test_lines == 0  # so the report has no Rust note
+        assert (tmp_path / CONFIG_FILENAME).read_text() == RUST_ON
+        assert _rust_lines(_run(monkeypatch, str(tmp_path))) == 4
+
+    @pytest.mark.parametrize(('flag', 'lines'), [('--exclude-rust-tests', 4 + 4), ('--no-exclude-rust-tests', 11 + 11)])
+    def test_flag_beats_a_nested_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str, lines: int
+    ) -> None:
+        """A parent's true and a crate's false: the flag decides for both."""
+        (tmp_path / '.git').mkdir()
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: RUST_ON,
+                'crate/.tally-config.toml': '[rust]\nexclude_test_modules = false\n',
+                'crate/lib.rs': RUST_LIB,
+                'lib.rs': RUST_LIB,
+            },
+        )
+        assert _rust_lines(_run(monkeypatch, str(tmp_path))) == 4 + 11
+        assert _rust_lines(_run(monkeypatch, str(tmp_path), flag)) == lines
+
+    def test_the_last_flag_wins(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """argparse's usual rule, pinned so it stays deliberate."""
+        _make(tmp_path, {'lib.rs': RUST_LIB})
+        assert _rust_lines(_run(monkeypatch, str(tmp_path), '--exclude-rust-tests', '--no-exclude-rust-tests')) == 11
+        assert _rust_lines(_run(monkeypatch, str(tmp_path), '--no-exclude-rust-tests', '--exclude-rust-tests')) == 4
+
+    @pytest.mark.parametrize(
+        ('config', 'flag', 'press', 'saved', 'lines'),
+        [
+            (False, '--exclude-rust-tests', False, False, 4),
+            (True, '--no-exclude-rust-tests', False, True, 11),
+            (False, '--no-exclude-rust-tests', True, True, 11),  # 'r' toggles the config's false, not the flag's
+            (None, '--exclude-rust-tests', False, None, 4),  # first-run setup: nothing to show, nothing saved
+            (None, '--no-exclude-rust-tests', True, True, 11),  # first-run setup, 'r' pressed
+        ],
+    )
+    def test_setup_ignores_the_flag(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        config: Optional[bool],
+        flag: str,
+        press: bool,
+        saved: Optional[bool],
+        lines: int,
+    ) -> None:
+        """Setup shows and saves the config's value ('r' toggles that); the count after setup uses the flag.
+
+        Each case's flag disagrees with what setup should see, so a setup handed the flag's value fails it.
+        """
+        _make(tmp_path, {'lib.rs': RUST_LIB})
+        if config is not None:
+            (tmp_path / CONFIG_FILENAME).write_text(f'[rust]\nexclude_test_modules = {str(config).lower()}\n')
+        real = _real_setup([('', 'r')] if press else [])  # before _run() replaces cli.run_setup
+        seen: list[Optional[bool]] = []
+
+        def setup(*args: object, existing_rust: Optional[bool] = None, **kwargs: object) -> object:
+            seen.append(existing_rust)
+            return real(*args, existing_rust=existing_rust, **kwargs)
+
+        argv = (['--setup'] if config is not None else []) + [str(tmp_path), flag]
+        tally = _run(monkeypatch, *argv, interactive=True, setup=setup)
+        assert seen == [config]  # the config's value, which setup's line shows
+        assert load_config(tmp_path / CONFIG_FILENAME).rust_exclude_test_modules is saved
+        assert _rust_lines(tally) == lines
+
+    @pytest.mark.parametrize(
+        ('argv', 'exclude', 'rust'),
+        [
+            (['--exclude', 'x'], ['x'], None),
+            (['--exclude=x'], ['x'], None),
+            (['--exclude-rust-tests'], [], True),
+            (['--exclude-rust', '--exclude', 'x'], ['x'], True),  # abbreviations stay on (allow_abbrev)
+            (['--no-exclude-rust-tests'], [], False),
+        ],
+    )
+    def test_exclude_and_the_rust_flag_parse_apart(
+        self, argv: list[str], exclude: list[str], rust: Optional[bool]
+    ) -> None:
+        """--exclude is a prefix of --exclude-rust-tests: an exact match must still win."""
+        args = cli.build_parser().parse_args(argv)
+        assert (args.exclude, args.exclude_rust_tests) == (exclude, rust)
+
+    def test_help_lists_the_flags(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+        monkeypatch.setattr(sys, 'argv', ['tallyman', '--help'])
+        with pytest.raises(SystemExit):
+            cli.main()
+        assert '--exclude-rust-tests, --no-exclude-rust-tests' in capsys.readouterr().out
 
     def test_malformed_rust_table_exits_naming_the_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

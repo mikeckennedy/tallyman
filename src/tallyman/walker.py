@@ -116,7 +116,7 @@ def _is_regular_file(path: Path) -> bool:
 
 @dataclass(slots=True)
 class WalkStats:
-    """What ``[exclude] patterns`` removed from a walk, for the report.
+    """What ``[exclude] patterns`` and ``--exclude`` removed from a walk, for the report.
 
     ``pattern_files`` counts only files that would otherwise have been counted
     (a recognised language, not binary). ``pattern_dirs`` counts directories
@@ -173,6 +173,7 @@ def walk_files(
     exclude_patterns: Optional[GitIgnoreSpec] = None,
     stats: Optional[WalkStats] = None,
     exclude_rust_tests: bool = False,
+    rust_tests_override: Optional[bool] = None,
 ) -> Iterator[SourceFile]:
     """Yield a :class:`SourceFile` for every countable source file under root.
 
@@ -187,12 +188,16 @@ def walk_files(
             itself, so docs files at every level count as specs.
         non_spec_dirs: Relative directory paths that are never specs (``[specs] ignore``).
         exclude_patterns: ``[exclude] patterns`` from the configs that apply at *root*
-            (:meth:`GitIgnoreSpec.for_patterns`). An empty one is made if None. Patterns from
-            nested configs found while walking are registered on it as each directory is entered.
+            (:meth:`GitIgnoreSpec.for_patterns`), plus ``--exclude``'s final layer. An empty one
+            is made if None. Patterns from nested configs found while walking are registered on it
+            as each directory is entered; a final layer still beats them.
         stats: Filled with what the patterns excluded, if given.
         exclude_rust_tests: ``[rust] exclude_test_modules`` at *root*
             (``ConfigChain.rust_exclude_test_modules``). A nested config found while walking
             that sets it changes it for its directory and everything below.
+        rust_tests_override: ``--exclude-rust-tests`` (True) or ``--no-exclude-rust-tests``
+            (False): every file gets this value, and nested configs' ``[rust]`` values are not
+            read, so the command line beats them all. None (no flag) leaves both as above.
     """
     if gitignore_spec is None:
         gitignore_spec = load_gitignore(root)
@@ -213,16 +218,18 @@ def walk_files(
         # directory is a nested git repo, this is also where its own rules start and the outer ones stop.
         gitignore_spec.add_directory(rel_dir_str, dirpath)
 
-        # Discover nested config files in subdirectories
-        dir_rust_tests = rust_tests[rel_dir_str.rpartition('/')[0]] if rel_dir_str else exclude_rust_tests
-        if rel_dir_str:
+        if not rel_dir_str:
+            dir_rust_tests = exclude_rust_tests if rust_tests_override is None else rust_tests_override
+        else:
+            dir_rust_tests = rust_tests[rel_dir_str.rpartition('/')[0]]
+            # Discover nested config files in subdirectories
             config_file = dirpath / CONFIG_FILENAME
             if config_file.is_file() and (loaded := load_nested_config(config_file, rel_dir_str)) is not None:
                 # os.walk is top-down, so an ancestor's config is merged first and the deeper config wins
                 active = merge_configs(active, loaded.config)
                 # Like a .gitignore, its patterns govern this directory's children, so register them first
                 exclude_patterns.add_rules(dirpath, loaded.patterns)
-                if loaded.rust_exclude_test_modules is not None:
+                if loaded.rust_exclude_test_modules is not None and rust_tests_override is None:
                     dir_rust_tests = loaded.rust_exclude_test_modules
         rust_tests[rel_dir_str] = dir_rust_tests
 

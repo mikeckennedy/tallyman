@@ -12,7 +12,7 @@ from typing import Optional
 import pytest
 from textual.widgets.tree import TreeNode
 
-from tallyman.gitignore import GitIgnoreSpec, _read_path_file, find_git_root, load_gitignore
+from tallyman.gitignore import GitIgnoreSpec, _read_path_file, find_git_root, is_live_pattern, load_gitignore
 from tallyman.tui.setup_app import NodeInfo, SetupApp, SetupTree
 from tallyman.walker import walk_project
 
@@ -1104,3 +1104,99 @@ class TestConfigPatterns:
     def test_add_rules_needs_an_anchored_spec(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError):
             GitIgnoreSpec().add_rules(tmp_path, ['a.rs'])
+
+
+class TestFinalLayer:
+    """--exclude: a final pattern layer, judged after every config layer whatever their depth or order."""
+
+    def test_beats_a_deeper_negation_added_before_it(self, tmp_path: Path) -> None:
+        (tmp_path / 'crate').mkdir()
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path / 'crate', ['!tests/'])
+        spec.add_rules(tmp_path, ['tests/'], final=True)
+        assert spec.match_file('crate/tests/')
+
+    def test_beats_a_deeper_negation_added_after_it(self, tmp_path: Path) -> None:
+        """The walker adds nested configs' layers as it descends, after the CLI added its own."""
+        (tmp_path / 'crate').mkdir()
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path, ['tests/'], final=True)
+        spec.add_rules(tmp_path / 'crate', ['!tests/'])
+        assert spec.match_file('crate/tests/')
+
+    def test_its_negation_undoes_any_config_layer(self, tmp_path: Path) -> None:
+        (tmp_path / 'crate').mkdir()
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path, ['*.rs'])
+        spec.add_rules(tmp_path, ['!lib.rs'], final=True)
+        spec.add_rules(tmp_path / 'crate', ['lib.rs'])
+        assert not spec.match_file('lib.rs')
+        assert not spec.match_file('crate/lib.rs')
+        assert spec.match_file('crate/main.rs')
+
+    def test_last_matching_pattern_wins_within_it(self, tmp_path: Path) -> None:
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path, ['*.rs', '!keep.rs'], final=True)
+        assert spec.match_file('a.rs')
+        assert not spec.match_file('keep.rs')
+
+    def test_registers_beside_the_scan_roots_config_layer(self, tmp_path: Path) -> None:
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path, ['a.rs'])
+        spec.add_rules(tmp_path, ['b.rs'], final=True)
+        assert spec.match_file('a.rs')
+        assert spec.match_file('b.rs')
+
+    def test_alone_it_still_matches(self, tmp_path: Path) -> None:
+        """match_file()'s fast path for an empty spec must see a final layer."""
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path, ['a.rs'], final=True)
+        assert spec.match_file('a.rs')
+
+    @pytest.mark.parametrize(
+        ('pattern', 'entry', 'ignored'),
+        [
+            ('tests/', 'src/tests/', True),
+            ('tests/', 'src/tests', False),
+            ('/src/gen', 'src/gen/', True),
+            ('/src/gen', 'lib/src/gen/', False),
+            ('src/gen/', 'src/gen/', True),
+            ('src/gen/', 'lib/src/gen/', False),
+            ('**/fixtures/*.json', 'a/b/fixtures/x.json', True),
+            ('**/fixtures/*.json', 'a/b/fixtures/sub/x.json', False),
+        ],
+    )
+    def test_matches_like_a_config_layer(self, tmp_path: Path, pattern: str, entry: str, ignored: bool) -> None:
+        final = GitIgnoreSpec.for_patterns(tmp_path)
+        final.add_rules(tmp_path, [pattern], final=True)
+        config = GitIgnoreSpec.for_patterns(tmp_path)
+        config.add_rules(tmp_path, [pattern])
+        assert final.match_file(entry) is config.match_file(entry) is ignored
+
+    def test_anchored_at_the_scan_root_inside_a_repo(self, tmp_path: Path) -> None:
+        (tmp_path / '.git').mkdir()
+        (tmp_path / 'app').mkdir()
+        spec = GitIgnoreSpec.for_patterns(tmp_path / 'app')
+        spec.add_rules(tmp_path / 'app', ['/gen/'], final=True)
+        assert spec.match_file('gen/')
+        assert not spec.match_file('src/gen/')
+
+
+@pytest.mark.parametrize(
+    ('line', 'live'),
+    [
+        ('a.rs', True),
+        ('tests/', True),
+        ('!keep.rs', True),
+        ('\\#gen', True),
+        ('', False),
+        ('   ', False),
+        ('#gen', False),
+        ('!', False),
+        ('/', False),
+        ('!/', False),
+        ('a\\', False),
+    ],
+)
+def test_is_live_pattern(line: str, live: bool) -> None:
+    assert is_live_pattern(line) is live

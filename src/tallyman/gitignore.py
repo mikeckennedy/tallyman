@@ -318,6 +318,11 @@ def _parse_line(line: str) -> Optional[_Pattern]:
     return _Pattern(compiled, negate, dir_only, anchored)
 
 
+def is_live_pattern(line: str) -> bool:
+    """False for a line the parser drops: blank, a comment, a lone ``!`` or ``/``, or one it can't compile."""
+    return _parse_line(line) is not None
+
+
 def _split_lines(text: str) -> list[str]:
     """Split like git: on '\\n' only, dropping one trailing '\\r' (str.splitlines() also splits on form feeds)."""
     return [line.removesuffix('\r') for line in text.split('\n')]
@@ -371,6 +376,10 @@ class GitIgnoreSpec:
         # The directory layer bases are relative to: the git root, or the analysis root outside a repo
         self._anchor = anchor
         self._files: list[tuple[str, _IgnoreFile]] = []
+        # Final layers (--exclude) are judged after every layer in _files, whatever their depth
+        self._final: list[tuple[str, _IgnoreFile]] = []
+        # _files then _final, the order _is_ignored() judges them in, rebuilt whenever a layer is added
+        self._layers: list[tuple[str, _IgnoreFile]] = []
         self._loaded: set[tuple[str, str]] = set()
         self._ignore_all = False
         # Bases (relative to the anchor) of nested repositories found below the analysis root. The repo
@@ -421,8 +430,9 @@ class GitIgnoreSpec:
         """An empty spec for ``[exclude] patterns`` at *root*, filled with :meth:`add_rules`.
 
         It is kept apart from the gitignore spec, so a ``!pattern`` can only undo
-        another config pattern. Nothing above *root* is ever checked, so a parent
-        config's pattern can't exclude the directory the user asked to scan.
+        another pattern (a config's or ``--exclude``'s). Nothing above *root* is ever
+        checked, so a parent config's pattern can't exclude the directory the user
+        asked to scan.
         """
         resolved_root = root.resolve()
         git_root = find_git_root(resolved_root)
@@ -430,7 +440,7 @@ class GitIgnoreSpec:
             return cls(anchor=resolved_root)
         return cls(relative_posix(resolved_root, git_root), git_root)
 
-    def add_rules(self, config_dir: Path, lines: list[str]) -> None:
+    def add_rules(self, config_dir: Path, lines: list[str], *, final: bool = False) -> None:
         """Register *lines* as one layer of rules scoped to *config_dir*, the way a .gitignore there would be.
 
         *config_dir* is the directory of the config that declares them: the
@@ -439,13 +449,19 @@ class GitIgnoreSpec:
         the repo (or, outside a repo, outside the analysis root) is ignored.
         Pattern layers apply across nested repositories, since they are tallyman
         settings, not git rules.
+
+        A *final* layer (``--exclude``) is the last word: it is judged after every
+        other layer, deeper ones and ones added later included, so a nested
+        config's ``!pattern`` can't undo it. It is kept apart from the config
+        layer of the same directory.
         """
         if self._anchor is None:
             raise ValueError('add_rules() needs a spec from GitIgnoreSpec.for_patterns() or for_root()')
         resolved = config_dir.resolve()
         if not resolved.is_relative_to(self._anchor):
             return
-        self._add_lines(relative_posix(resolved, self._anchor), '<config>', lines)
+        source = '<command line>' if final else '<config>'
+        self._add_lines(relative_posix(resolved, self._anchor), source, lines, final=final)
 
     def add_directory(self, rel_dir: str, dir_path: Path) -> None:
         """Register ``dir_path/.gitignore``, where *rel_dir* is its path relative to the analysis root.
@@ -466,7 +482,7 @@ class GitIgnoreSpec:
 
     def match_file(self, path: str) -> bool:
         """Return True if the entry at *path* (relative to the analysis root) is ignored."""
-        if not self._files and not self._ignore_all:
+        if not self._layers and not self._ignore_all:
             return False  # nothing registered, the usual case for [exclude] patterns
         is_dir = path.endswith('/')
         rel = path.rstrip('/')
@@ -491,16 +507,20 @@ class GitIgnoreSpec:
             return  # missing or unreadable: git treats it as absent too
         self._add_lines(base, ignore_file.name, lines)
 
-    def _add_lines(self, base: str, source: str, lines: list[str]) -> None:
+    def _add_lines(self, base: str, source: str, lines: list[str], *, final: bool = False) -> None:
         """Register *lines* from *source* as one layer scoped to *base* (relative to the git root)."""
         key = (base, source)
         if key in self._loaded:
             return
         self._loaded.add(key)
-        self._files.append((base, _IgnoreFile(lines)))
-        # Shallowest first; the sort is stable, so info/exclude stays ahead of the root .gitignore. That holds
-        # for a nested repo too: add_directory() registers its info/exclude before its .gitignore, at one base.
-        self._files.sort(key=lambda item: item[0].count('/') + 1 if item[0] else 0)
+        if final:
+            self._final.append((base, _IgnoreFile(lines)))
+        else:
+            self._files.append((base, _IgnoreFile(lines)))
+            # Shallowest first; the sort is stable, so info/exclude stays ahead of the root .gitignore. That holds
+            # for a nested repo too: add_directory() registers its info/exclude before its .gitignore, at one base.
+            self._files.sort(key=lambda item: item[0].count('/') + 1 if item[0] else 0)
+        self._layers = self._files + self._final
 
     def _owner(self, full: str) -> str:
         """The deepest nested repository root strictly above *full*, or ``''`` for the analysis root's repo."""
@@ -518,7 +538,7 @@ class GitIgnoreSpec:
         # Inside a nested repository only its own layers count: those based at its root or below it
         owner = self._owner(full) if self._repo_roots else ''
         ignored = False
-        for base, ignore_file in self._files:
+        for base, ignore_file in self._layers:
             if owner and base != owner and not base.startswith(owner + '/'):
                 continue
             if base:

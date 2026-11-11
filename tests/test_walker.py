@@ -527,6 +527,26 @@ class TestExcludePatterns:
         assert walked == {'k.rs'}
         assert stats == WalkStats(pattern_files=2, pattern_dirs=1)  # not the .xyz, the binary, or fixtures/f.py
 
+    def test_final_layer_beats_a_nested_negation_met_during_the_walk(self, tmp_path: Path) -> None:
+        """--exclude: the CLI adds its layer before the walk, and the crate's '!' is added after it."""
+        _tree(
+            tmp_path,
+            {
+                'crate/.tally-config.toml': '[exclude]\npatterns = ["!tests.rs"]\n',
+                'crate/src/tests.rs': 'fn t() {}\n',
+                'crate/src/lib.rs': '',
+            },
+        )
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path, ['tests.rs'], final=True)
+        stats = WalkStats()
+        walked = {
+            s.path.relative_to(tmp_path).as_posix()
+            for s in walk_files(tmp_path, set(), exclude_patterns=spec, stats=stats)
+        }
+        assert walked == {'crate/src/lib.rs'}
+        assert stats == WalkStats(pattern_files=1)
+
     @pytest.mark.skipif(sys.platform == 'win32', reason='symlinks need privileges on Windows')
     def test_stats_skip_a_linked_directory(self, tmp_path: Path) -> None:
         _tree(tmp_path, {'real/f.py': '', 'a.py': ''})
@@ -606,11 +626,9 @@ class TestNestedReposKeepConfigSemantics:
         assert [lang.category for _, lang in walk_project(tmp_path, set())] == ['specs']
 
 
-def _rust_flags(root: Path, exclude_rust_tests: bool = False) -> dict[str, bool]:
-    return {
-        f.path.relative_to(root).as_posix(): f.exclude_rust_tests
-        for f in walk_files(root, set(), exclude_rust_tests=exclude_rust_tests)
-    }
+def _rust_flags(root: Path, exclude_rust_tests: bool = False, override: Optional[bool] = None) -> dict[str, bool]:
+    walked = walk_files(root, set(), exclude_rust_tests=exclude_rust_tests, rust_tests_override=override)
+    return {f.path.relative_to(root).as_posix(): f.exclude_rust_tests for f in walked}
 
 
 class TestRustTestSetting:
@@ -679,3 +697,51 @@ class TestRustTestSetting:
         pairs = list(walk_project(tmp_path, set()))
         assert pairs == [(f.path, f.language) for f in walk_files(tmp_path, set())]
         assert all(len(pair) == 2 for pair in pairs)
+
+
+class TestRustTestsOverride:
+    """--exclude-rust-tests / --no-exclude-rust-tests: one value for every file, beating every config."""
+
+    @pytest.mark.parametrize('override', [True, False])
+    def test_every_file_gets_it(self, tmp_path: Path, override: bool) -> None:
+        _tree(tmp_path, {'src/lib.rs': '', 'main.rs': ''})
+        assert _rust_flags(tmp_path, not override, override) == {'main.rs': override, 'src/lib.rs': override}
+
+    @pytest.mark.parametrize('override', [True, False])
+    def test_beats_nested_configs(self, tmp_path: Path, override: bool) -> None:
+        _tree(
+            tmp_path,
+            {
+                'on/.tally-config.toml': '[rust]\nexclude_test_modules = true\n',
+                'on/deeper/.tally-config.toml': '[rust]\nexclude_test_modules = false\n',
+                'off/.tally-config.toml': '[rust]\nexclude_test_modules = false\n',
+                'on/a.rs': '',
+                'on/deeper/d.rs': '',
+                'off/b.rs': '',
+                'c.rs': '',
+            },
+        )
+        (tmp_path / 'off' / '.git').mkdir()  # a nested repo: settings cross into it, the override too
+        flags = _rust_flags(tmp_path, override=override)
+        assert set(flags) == {'on/a.rs', 'on/deeper/d.rs', 'off/b.rs', 'c.rs'}
+        assert set(flags.values()) == {override}
+
+    def test_none_keeps_the_per_directory_values(self, tmp_path: Path) -> None:
+        _tree(
+            tmp_path,
+            {'a/.tally-config.toml': '[rust]\nexclude_test_modules = true\n', 'a/x.rs': '', 'b/y.rs': ''},
+        )
+        assert _rust_flags(tmp_path, override=None) == {'a/x.rs': True, 'b/y.rs': False}
+
+    def test_nested_configs_other_settings_still_apply(self, tmp_path: Path) -> None:
+        _tree(
+            tmp_path,
+            {
+                'a/.tally-config.toml': '[exclude]\ndirectories = ["gen"]\npatterns = ["t.rs"]\n'
+                '[rust]\nexclude_test_modules = false\n',
+                'a/gen/g.rs': '',
+                'a/t.rs': '',
+                'a/x.rs': '',
+            },
+        )
+        assert _rust_flags(tmp_path, override=True) == {'a/x.rs': True}
