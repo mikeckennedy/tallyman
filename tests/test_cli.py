@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import codecs
+import inspect
 import os
 import re
 import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 import pytest
 
@@ -331,7 +332,69 @@ def _run_process(
     )
 
 
+class TestLazySetup:
+    def test_run_setup_hands_every_argument_to_the_tui(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """cli.run_setup() only defers the Textual import: same parameters as the TUI's, each passed through."""
+        from tallyman.tui import setup_app
+
+        signature = inspect.signature(setup_app.run_setup)
+        assert inspect.signature(cli.run_setup) == signature
+        received: dict[str, object] = {}
+
+        def fake(*args: object, **kwargs: object) -> object:
+            received.update(zip(signature.parameters, args), **kwargs)
+            return 'result'
+
+        monkeypatch.setattr(setup_app, 'run_setup', fake)
+        sent = {name: object() for name in signature.parameters}  # a distinct value for each parameter
+        run = cast('Callable[..., object]', cli.run_setup)  # the sentinels aren't the declared types
+        assert run(**sent) == 'result'
+        assert received == sent
+
+
+# Run in a fresh interpreter: main(), then which heavy packages it loaded, then the same after importing the setup TUI
+# and what image.py imports lazily, which shows the check can see them. argv[1] is the directory to count.
+_IMPORT_PROBE = """
+import sys
+from tallyman import cli
+
+def heavy():
+    return sorted({name.split('.')[0] for name in sys.modules} & {'textual', 'PIL'})
+
+sys.argv = ['tallyman', sys.argv[1]]
+try:
+    cli.main()
+finally:
+    print('plain run:', heavy(), file=sys.stderr)
+import PIL.Image, tallyman.tui.setup_app
+print('after import:', heavy(), file=sys.stderr)
+"""
+
+
 class TestRealProcess:
+    @pytest.mark.parametrize('with_config', [True, False], ids=['config', 'no-config'])
+    def test_plain_run_imports_neither_textual_nor_pillow(self, tmp_path: Path, with_config: bool) -> None:
+        """Textual loads only when setup runs and Pillow only for --image, on the normal path and the no-terminal one.
+
+        A subprocess, because this pytest process has already imported both.
+        """
+        (tmp_path / 'a.py').write_text('x = 1\n')
+        if with_config:
+            (tmp_path / CONFIG_FILENAME).write_text('[exclude]\ndirectories = []\n')
+        result = subprocess.run(
+            [sys.executable, '-P', '-c', _IMPORT_PROBE, str(tmp_path)],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            timeout=60,
+            env={**os.environ, 'PYTHONPATH': _SRC, 'NO_COLOR': '1'},
+        )
+        assert result.returncode == 0, result.stderr
+        assert 'Python' in result.stdout  # it really counted
+        assert result.stderr.splitlines()[-2:] == ['plain run: []', "after import: ['PIL', 'textual']"]
+
     def test_no_terminal_returns_promptly(self, tmp_path: Path):
         (tmp_path / 'a.py').write_text('x = 1\n')
         result = _run_process(tmp_path)

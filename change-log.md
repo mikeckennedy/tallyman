@@ -22,6 +22,9 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - Plan: `plans/005-hardening/phase-03-spec-overrides-and-tui.plan.md`
 
 ### Changed
+- A plain run no longer imports Textual; only setup loads it. That roughly halves start-up: importing `tallyman.cli` went from about 75 ms to about 33 ms. A test checks that a plain run, with or without a config, loads neither Textual nor Pillow.
+- Files: `src/tallyman/cli.py`, `tests/test_cli.py`, `CLAUDE.md`
+- Plan: `plans/011-setup-tui/phase-01-lazy-textual-and-text-labels.plan.md`
 - Nested git repositories, including submodules and worktrees inside the tree, are still counted, but now with their own rules: inside one, only its own `.gitignore` files and `info/exclude` apply, as if git were run there, and the outer repository's patterns stop at its root. A nested repository the outer one ignores stays out. When the scanned folder isn't itself a repository, its .gitignore likewise stops at each repository inside it. `[exclude]` and `[specs]` settings apply across repository boundaries as before.
 - Files: `src/tallyman/gitignore.py`, `src/tallyman/walker.py`, `src/tallyman/tui/setup_app.py`, `tests/test_gitignore.py`, `tests/test_walker.py`, `tests/test_setup_app.py`, `tests/test_cli.py`, `CLAUDE.md`
 - Plan: `plans/010-git-fidelity/phase-02-nested-repos.plan.md`
@@ -46,6 +49,9 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - Plan: `plans/007-exclude-patterns/phase-01-merge-config-chain.plan.md`
 
 ### Fixed
+- Setup shows directory names exactly as they are on disk. A directory named `:rocket:` no longer turns into an emoji, and a name ending in a backslash is no longer doubled, in the tree and on the root. The labels are built as Rich `Text`, never markup.
+- Files: `src/tallyman/tui/setup_app.py`, `tests/test_setup_app.py`
+- Plan: `plans/011-setup-tui/phase-01-lazy-textual-and-text-labels.plan.md`
 - A project with no effective lines (only comments and blanks) no longer prints an empty bar and legend under the totals, and the image no longer leaves a blank band where the bar would be. The totals still say `0 lines`. With `--with-spaces` the bar is drawn as before.
 - A small "Other" always gets at least one cell of the terminal bar. Python 496, Rust 496 and Go 8 lines used to give Python and Rust 30 cells each and leave Other, still listed in the legend, with none. Bar widths are now split by largest remainder, in both outputs, and always fill the bar exactly.
 - `--image` no longer crashes with `ValueError: x1 must be greater than or equal to x0` when "Other" is under about 0.1% of the lines; every image segment is at least 4 px wide.

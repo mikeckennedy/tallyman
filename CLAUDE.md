@@ -29,7 +29,7 @@ tallyman --with-spaces      # totals and bar use total lines, not effective line
 tallyman --image            # PNG summary card on the Desktop (--image-light for the light theme)
 
 # Tests
-pytest                      # all 637 tests (about 20 s, mostly the Textual pilot tests)
+pytest                      # all 646 tests (about 20 s, mostly the Textual pilot tests)
 pytest -v                   # verbose
 pytest tests/test_walker.py # single module
 
@@ -43,7 +43,7 @@ uvx pyrefly check           # pyrefly.toml, kept consistent with ty.toml
 ## Tech Stack
 
 - **Python 3.14+** (uses match statements, dataclass slots, `tomllib`)
-- **textual**  -  TUI framework for first-run setup wizard
+- **textual**  -  TUI framework for the setup wizard, imported only when setup runs (`cli.run_setup()`)
 - **rich**  -  colored terminal output
 - **Pillow**  -  PNG export, imported lazily so a plain run never loads it
 - Gitignore matching is in-house (`gitignore.py`); there is no pathspec dependency
@@ -68,7 +68,7 @@ cli.main()
 
 | Module | Role |
 |---|---|
-| `src/tallyman/cli.py` | Entry point. Sets stdout to replace characters it can't encode, arg parsing, config loading and errors, no-terminal handling, orchestrates the pipeline |
+| `src/tallyman/cli.py` | Entry point. Sets stdout to replace characters it can't encode, arg parsing, config loading and errors, no-terminal handling, imports the setup TUI only when it runs, orchestrates the pipeline |
 | `src/tallyman/languages.py` | Language registry (40+ languages). Frozen dataclasses with name, category, color, comment marker, extensions, and `spec_color` on docs languages. `EXTENSION_MAP` for O(1) lookup. `OTHER_COLOR` for the bar's "Other" segment |
 | `src/tallyman/walker.py` | Directory traversal. Respects gitignore, config exclusions and `[exclude] patterns`. Detects spec dirs. Yields `(Path, Language)`; fills `WalkStats` |
 | `src/tallyman/gitignore.py` | Gitignore rules (`GitIgnoreSpec`, `load_gitignore`, `find_git_root`). Own pattern compiler that follows gitignore(5). Finds `info/exclude` through `gitdir:`/`commondir`. `add_directory()` notices nested repos, whose own rules replace the outer ones inside them. `GitIgnoreSpec.for_patterns()` + `add_rules()` hold `[exclude] patterns` |
@@ -136,8 +136,8 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 | `tests/test_paths.py` | 6 | POSIX relative paths, canonical case |
 | `tests/test_aggregator.py` | 56 | Stats aggregation, categories, percentages, effective lines, the report model: bar segments, widths, labels |
 | `tests/test_config.py` | 90 | Config find/load/save, `[specs] ignore`, `[exclude] patterns`, normalisation, rebasing, chain merging, escaping, directory cleanup, BOMs |
-| `tests/test_setup_app.py` | 53 | Setup TUI via Textual pilot: toggles, labels, parent/nested locks, patterns, agreement with the walker (also across nested repos) |
-| `tests/test_cli.py` | 43 | End-to-end CLI: config chain, errors, no-terminal runs, setup pre-fill and pattern preservation, flags, colour, narrow stdout encodings, BOM config |
+| `tests/test_setup_app.py` | 59 | Setup TUI via Textual pilot: toggles, labels (shown literally, with their styles), parent/nested locks, patterns, agreement with the walker (also across nested repos) |
+| `tests/test_cli.py` | 46 | End-to-end CLI: config chain, errors, no-terminal runs, setup pre-fill and pattern preservation, flags, colour, narrow stdout encodings, BOM config, the lazy setup import (no Textual or Pillow on a plain run) |
 
 Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` create test Language instances. `tests/conftest.py` holds the `make_fifo` fixture: it creates a FIFO and, if a reader blocks on it, writes to it after 2 s, so a regression fails instead of hanging the suite (skip FIFO tests where `os.mkfifo` is missing).
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Optional
 
 import pytest
+from rich.text import Text
 from textual.widgets.tree import TreeNode
 
 from tallyman.config import TallyConfig, discover_nested_configs, merge_configs
@@ -64,9 +66,11 @@ class Session:
             exclude_patterns,
         )
         self.labels: dict[str, str] = {}
+        self.texts: dict[str, Text] = {}  # the label objects, to check their styles
         self.flags: dict[str, bool] = {}
         self.excluded: dict[str, bool] = {}
         self.root_label = ''
+        self.root_text = Text()
 
     def run(self, actions: list[tuple[str, str]], save: bool = True) -> Optional[SetupResult]:
         """*actions* are (directory path, key); '' is the root. Records labels just before saving."""
@@ -86,11 +90,15 @@ class Session:
         return self.app.return_value
 
     def _record(self, node: TreeNode[NodeInfo]) -> None:
+        label = node.label
+        assert isinstance(label, Text)  # typed str | Text; setup always passes Text
         if node.data and not node.data.path:
-            self.root_label = str(node.label)
+            self.root_label = str(label)
+            self.root_text = label
         if node.data and node.data.path:
             path = str(node.data.path)
-            self.labels[path] = str(node.label)
+            self.labels[path] = str(label)
+            self.texts[path] = label
             self.flags[path] = bool(node.data.spec)
             self.excluded[path] = node.data.excluded
         for child in node.children:
@@ -196,6 +204,51 @@ class TestLabels:
         session.run([])
         assert session.labels['[bold]x'] == '✓ [bold]x'
         assert session.labels['a[red]'] == '✓ a[red]'
+
+    def test_emoji_codes_are_shown_literally(self, tmp_path: Path) -> None:
+        _make_tree(tmp_path, [':rocket:'])
+        session = Session(tmp_path)
+        session.run([])
+        assert session.labels[':rocket:'] == '✓ :rocket:'
+
+    @pytest.mark.skipif(os.name == 'nt', reason='a backslash is a path separator on Windows')
+    def test_trailing_backslash_is_not_doubled(self, tmp_path: Path) -> None:
+        _make_tree(tmp_path, ['foo\\', 'baz\\'])
+        session = Session(tmp_path, inherited=TallyConfig(spec_dirs={'baz\\'}))
+        session.run([])
+        assert session.labels['foo\\'] == '✓ foo\\'
+        # Text after the name is where markup used to double the backslash
+        assert session.labels['baz\\'] == 'S baz\\ (set in a parent config)'
+
+    def test_markup_like_names_are_shown_literally(self, tmp_path: Path) -> None:
+        names = ['[b]x', 'a\\[b]', 'x[', ']']
+        if os.name == 'nt':
+            names.remove('a\\[b]')
+        _make_tree(tmp_path, names)
+        session = Session(tmp_path)
+        session.run([])
+        for name in names:
+            assert session.labels[name] == f'✓ {name}', name
+
+    @pytest.mark.parametrize('name', [':rocket:', '[bold]x'])
+    def test_root_name_is_shown_literally(self, tmp_path: Path, name: str) -> None:
+        root = tmp_path / name
+        root.mkdir()
+        _make_tree(root, ['docs'])
+        session = Session(root)
+        session.run([])
+        assert session.root_label == name
+
+    def test_label_styles(self, tmp_path: Path) -> None:
+        """Labels keep their colours: a plain string would lose them, and markup would bring back the bugs above."""
+        _make_tree(tmp_path, ['gone', 'lib'])
+        session = Session(tmp_path, excluded={'gone'}, specs={'lib'})
+        session.run([])
+        styles = {
+            path: [(t.plain[s.start : s.end], str(s.style)) for s in t.spans] for path, t in session.texts.items()
+        }
+        assert ('✗', 'red') in styles['gone']
+        assert ('S', 'bright_cyan') in styles['lib']
 
 
 _CONFIGS: list[tuple[set[str], set[str], set[str]]] = [

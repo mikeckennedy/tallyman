@@ -9,6 +9,7 @@ import shlex
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
 from tallyman import __version__
 from tallyman.aggregator import aggregate
@@ -30,8 +31,10 @@ from tallyman.counter import count_lines
 from tallyman.display import display_results
 from tallyman.gitignore import GitIgnoreSpec, load_gitignore
 from tallyman.paths import canonical_case, relative_posix
-from tallyman.tui.setup_app import run_setup
 from tallyman.walker import WalkStats, inside_auto_spec_dir, walk_project
+
+if TYPE_CHECKING:  # Textual is imported only when setup runs: see run_setup()
+    from tallyman.tui.setup_app import SetupResult
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -115,6 +118,33 @@ def _pattern_spec(root: Path, layers: list[PatternLayer]) -> GitIgnoreSpec:
     for config_dir, patterns in layers:
         spec.add_rules(config_dir, patterns)
     return spec
+
+
+def run_setup(
+    root: Path,
+    gitignore_spec: GitIgnoreSpec,
+    existing_exclusions: set[str],
+    existing_specs: set[str],
+    existing_non_specs: Optional[set[str]] = None,
+    nested: Optional[TallyConfig] = None,
+    root_auto_spec: bool = False,
+    inherited: Optional[TallyConfig] = None,
+    exclude_patterns: Optional[GitIgnoreSpec] = None,
+) -> Optional[SetupResult]:
+    """Launch the setup TUI (tui.setup_app.run_setup). Textual is imported here, so a plain run never loads it."""
+    from tallyman.tui.setup_app import run_setup as launch
+
+    return launch(
+        root,
+        gitignore_spec,
+        existing_exclusions,
+        existing_specs,
+        existing_non_specs=existing_non_specs,
+        nested=nested,
+        root_auto_spec=root_auto_spec,
+        inherited=inherited,
+        exclude_patterns=exclude_patterns,
+    )
 
 
 def _tolerate_unencodable_stdout() -> None:

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 
-from rich.markup import escape
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -118,7 +118,7 @@ class SetupApp(App[Optional[SetupResult]]):
             '[bold]s[/bold] to toggle spec directory.',
             id='instructions',
         )
-        tree: SetupTree = SetupTree(escape(self.root.name))
+        tree: SetupTree = SetupTree(Text(self.root.name))
         tree.root.data = NodeInfo('')
         self._populate(tree.root, self.root, '')
         self._refresh(tree.root)
@@ -149,7 +149,7 @@ class SetupApp(App[Optional[SetupResult]]):
             # The walker checks patterns only for entries gitignore lets through
             by_pattern = not is_gitignored and self.exclude_patterns.match_file(child_rel + '/')
             info = NodeInfo(child_rel, gitignored=is_gitignored, pattern_excluded=by_pattern)
-            node = parent_node.add(escape(entry.name), data=info)
+            node = parent_node.add(Text(entry.name), data=info)
             # Don't recurse into gitignored or pattern-excluded dirs: the walker never enters them
             if not is_gitignored and not by_pattern:
                 self._populate(node, entry, child_rel)
@@ -210,12 +210,17 @@ class SetupApp(App[Optional[SetupResult]]):
         for child in node.children:
             self._refresh(child)
 
-    def _label_for(self, info: NodeInfo) -> str:
+    def _label_for(self, info: NodeInfo) -> Text:
+        """*info*'s label. Labels are Text, never markup, so a directory name always shows exactly as it is on disk.
+
+        Known limit: Textual's Tree shows only a label's first line, so a name containing a newline is cut short.
+        """
         if not info.path:
-            name = escape(self.root.name)
-            label = f'{name} [dim](specs)[/dim]' if info.spec else name
+            label = Text(self.root.name)
+            if info.spec:
+                label.append(' (specs)', style='dim')
             if info.locked_by is not None:
-                label += f' [dim](set in a {info.locked_by} config)[/dim]'
+                label.append(f' (set in a {info.locked_by} config)', style='dim')
             return label
         specs, non_specs = self._spec_sets()
         explicit_spec = info.path in specs
@@ -231,7 +236,7 @@ class SetupApp(App[Optional[SetupResult]]):
         # Once excluded here, a spec setting from another config no longer matters, so don't credit it
         unchangeable = info.gitignored or info.pattern_excluded
         if info.locked_by is not None and not unchangeable and (info.exclude_locked or not info.excluded):
-            label += f' [dim](set in a {info.locked_by} config)[/dim]'
+            label.append(f' (set in a {info.locked_by} config)', style='dim')
         return label
 
     @staticmethod
@@ -252,21 +257,21 @@ class SetupApp(App[Optional[SetupResult]]):
         auto_spec: bool = False,
         not_spec: bool = False,
         pattern_excluded: bool = False,
-    ) -> str:
-        name = escape(name)  # directory names can contain Rich markup such as [bold]
+    ) -> Text:
+        # The name is always plain text: it may look like markup ([bold]) or an emoji code (:rocket:), or end in '\'
         if gitignored:
-            return f'[dim]{name} (gitignored)[/dim]'
+            return Text(f'{name} (gitignored)', style='dim')
         if pattern_excluded:
-            return f'[dim]{name} (excluded by pattern)[/dim]'
+            return Text(f'{name} (excluded by pattern)', style='dim')
         if excluded:
-            return f'[red]✗[/red] [dim]{name}[/dim]'
+            return Text.assemble(('✗', 'red'), ' ', (name, 'dim'))
         if auto_spec:
-            return f'[bright_cyan]S[/bright_cyan] [dim]{name} (specs)[/dim]'
+            return Text.assemble(('S', 'bright_cyan'), ' ', (f'{name} (specs)', 'dim'))
         if spec:
-            return f'[bright_cyan]S[/bright_cyan] {name}'
+            return Text.assemble(('S', 'bright_cyan'), ' ', name)
         if not_spec:
-            return f'[green]✓[/green] {name} [dim](not specs)[/dim]'
-        return f'[green]✓[/green] {name}'
+            return Text.assemble(('✓', 'green'), ' ', name, ' ', ('(not specs)', 'dim'))
+        return Text.assemble(('✓', 'green'), ' ', name)
 
     # --- toggles --------------------------------------------------------------------------------------------------
 
