@@ -23,6 +23,7 @@ from tallyman.config import (
     find_configs,
     load_config_chain,
     merge_configs,
+    rust_setting,
     save_config,
 )
 from tallyman.counter import count_lines
@@ -128,6 +129,7 @@ def run_setup(
     root_auto_spec: bool = False,
     inherited: Optional[TallyConfig] = None,
     exclude_patterns: Optional[GitIgnoreSpec] = None,
+    existing_rust: Optional[bool] = None,
 ) -> Optional[SetupResult]:
     """Launch the setup TUI (tui.setup_app.run_setup). Textual is imported here, so a plain run never loads it."""
     from tallyman.tui.setup_app import run_setup as launch
@@ -141,6 +143,7 @@ def run_setup(
         root_auto_spec=root_auto_spec,
         inherited=inherited,
         exclude_patterns=exclude_patterns,
+        existing_rust=existing_rust,
     )
 
 
@@ -208,26 +211,30 @@ def main() -> None:
             inherited=chain.inherited,
             root_auto_spec=root_auto_spec,
             exclude_patterns=exclude_patterns,
+            existing_rust=chain.local.rust_exclude_test_modules,
         )
         if result is None:
             print('Setup cancelled.')
             sys.exit(0)
-        local = TallyConfig(*result)  # only the scan root's own settings: setup drops copies of the others
+        # Only the scan root's own settings: setup drops copies of the others
+        local = TallyConfig(result.excluded_dirs, result.spec_dirs, result.non_spec_dirs)
+        local_rust = result.rust_exclude_test_modules
         try:
-            # Setup doesn't edit patterns or [rust]: keep the scan-root config's own, patterns as written and in order
+            # Setup doesn't edit patterns: keep the scan-root config's own, as written and in order
             save_config(
                 config_path,
                 local.excluded_dirs,
                 local.spec_dirs,
                 local.non_spec_dirs,
                 patterns=chain.local.patterns,
-                rust_exclude_test_modules=chain.local.rust_exclude_test_modules,
+                rust_exclude_test_modules=local_rust,
             )
         except (OSError, UnicodeEncodeError) as e:
             # Don't throw away the user's selections: warn, then count with them anyway
             print(f'Warning: could not save {config_path} ({e}); using this run only.', file=sys.stderr)
         config = merge_configs(chain.inherited, local)
-        exclude_rust_tests = chain.rust_exclude_test_modules  # setup doesn't change it
+        # The scan root's value from setup, else the parents'
+        exclude_rust_tests = rust_setting(local_rust, chain.inherited.rust_exclude_test_modules)
 
     excluded_dirs, spec_dirs, non_spec_dirs = config.excluded_dirs, config.spec_dirs, config.non_spec_dirs
 

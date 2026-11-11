@@ -43,7 +43,7 @@ exclude_test_modules = true
 4. **Test-only cfg forms:** `cfg(test)`, `cfg(all(.., test, ..))`, and an inner `#![cfg(test)]`, which makes the whole file (or the whole enclosing `mod { }`) test-only. `cfg(any(test, ..))` is **not** test-only, since that code also builds outside tests. Precisely: a predicate is test-only if it is `test`, an `all(...)` with at least one test-only argument, or an `any(...)` whose arguments are *all* test-only. `not(...)` never is.
 5. **The whole config chain applies, nested configs included.** Parent configs, the scan root's config and nested configs (one per crate, say) can each set it, `true` or `false`. The deepest config that sets it wins for its directory and everything below, like every other tallyman setting.
 6. **Report:** a dim terminal line after the patterns note, shown only when something was left out: `Excluded Rust test code: 2,412 lines in 37 files`. Terminal only; the image card is unchanged apart from its numbers.
-7. **Setup has no toggle.** The key is hand-edited like `[exclude] patterns`. `--setup` writes the scan root's own value back unchanged (including an explicit `false`, which overrides a parent).
+7. **Setup has no toggle.** *(Changed in phase 4: `r` toggles it when the project has Rust code; the rest stands.)* The key is hand-edited like `[exclude] patterns`. `--setup` writes the scan root's own value back unchanged (including an explicit `false`, which overrides a parent).
 8. **`#[cfg(test)] mod tests;` drops only that declaration.** The file it points at is left to `[exclude] patterns` (issue #6), or drops out on its own if it starts with `#![cfg(test)]`. Counting stays one file at a time.
 9. **When in doubt, count.** If the scanner can't make sense of a file (an unterminated string or comment, or unbalanced brackets around a test item), that file is counted in full, as it is today.
 
@@ -54,6 +54,7 @@ exclude_test_modules = true
 | 1 | `phase-01-scanner.plan.md` | Decisions 2, 3, 4, 8, 9: the pure scanner module and its table tests |
 | 2 | `phase-02-config-and-counting.plan.md` | Decisions 1, 5, 7: config, chain, walker, counter, CLI, save |
 | 3 | `phase-03-report-and-docs.plan.md` | Decision 6; README, `CLAUDE.md`, changelog, version |
+| 4 | `phase-04-setup-toggle.plan.md` | Added later: an `r` toggle in setup, shown only with Rust code |
 
 Phase 1 is a pure function with no config or I/O, so it can be built and tested exhaustively before anything calls it. Phase 2 wires it in. Phase 3 makes the result visible and documents it.
 

@@ -210,7 +210,7 @@ To re-run setup at any time:
 tallyman --setup
 ```
 
-In the TUI, `x` excludes or includes a directory, and `s` marks or unmarks it as specs. Pressing `s` on a directory Tallyman detected as specs (such as `plans/`) records that it isn't one.
+In the TUI, `x` excludes or includes a directory, and `s` marks or unmarks it as specs. Pressing `s` on a directory Tallyman detected as specs (such as `plans/`) records that it isn't one. In a project with Rust code, `r` switches Rust test code between counted and left out (see [Leaving out Rust test code](#leaving-out-rust-test-code)).
 
 The config is plain TOML, and you can edit it by hand:
 
@@ -303,7 +303,7 @@ mod tests {
   - `#[cfg(test)] mod tests;`: only that declaration drops. The file it points at counts as usual, unless it starts with `#![cfg(test)]`. Otherwise exclude it with a pattern such as `patterns = ["tests.rs"]`.
   - Integration tests in `tests/`, benches and examples: exclude those directories.
 - **Where it applies.** It applies by directory, like every other setting. A config in a crate's directory can turn it on or off for that crate, and `false` overrides a parent's `true`.
-- **Setup.** `--setup` has no toggle for it. It keeps the value when it rewrites the config, but, as with patterns, re-running setup to replace a broken config loses it.
+- **Setup.** When the project has Rust code, `--setup` shows a `Rust test code: counted` (or `excluded`) line under the tree, and `r` switches it. Pressing `r` saves the setting only when it differs from what parent configs give, so pressing it twice leaves the config as it was; untouched, the config's value is kept as written. Rust in a directory whose own config sets `[rust]` follows that config: the line says so, and `r` changes only the rest. Without Rust code the line and the key don't appear.
 - When something is left out, the report ends with a line such as `Excluded Rust test code: 2,412 lines in 37 files`. It counts every line left out, blank and comment lines included, so the totals, which leave those out by default, drop by less. A file that was all test code isn't counted as a Rust file.
 - If Tallyman can't follow a file (an unterminated string, brackets that don't balance), it counts the whole file. It may miss some test code, but it never leaves out real code.
 

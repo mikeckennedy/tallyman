@@ -58,6 +58,9 @@ class TallyConfig:
     when the file doesn't set it. Like patterns it belongs to its file, and
     covers that file's directory and everything below; the same functions
     return None for it. :class:`ConfigChain` and the walker carry it.
+    :func:`load_config_chain` sets it on ``ConfigChain.inherited`` after
+    rebasing, to the parents' value, so a comparison of ``inherited`` with
+    a ``TallyConfig`` includes it.
     """
 
     excluded_dirs: set[str] = field(default_factory=set)
@@ -299,7 +302,9 @@ class ConfigChain:
     ``rust_exclude_test_modules`` is the value at the scan root: the deepest
     config that sets ``[rust] exclude_test_modules`` wins (each one is the
     scan root or an ancestor of it, so each covers it), and it is False when
-    none does.
+    none does. ``inherited.rust_exclude_test_modules`` is the parents' part of
+    that: the deepest config above the scan root that sets it, or None. Setup
+    shows it, as it shows the parents' other settings.
     """
 
     inherited: TallyConfig = field(default_factory=TallyConfig)
@@ -331,6 +336,7 @@ def load_config_chain(
         return chain
     top = paths[0].parent.resolve()
     merged = TallyConfig()
+    parents_rust: Optional[bool] = None
     for path in paths:
         try:
             config = load_config(path)
@@ -343,14 +349,26 @@ def load_config_chain(
         config_dir = path.parent.resolve()
         if config.patterns:
             chain.pattern_layers.append((config_dir, config.patterns))
-        if config.rust_exclude_test_modules is not None:
-            chain.rust_exclude_test_modules = config.rust_exclude_test_modules  # shallowest first: deeper wins
         if config_dir == root:
             chain.local = config
         else:
             merged = merge_configs(merged, prefixed(config, relative_posix(config_dir, top)))
+            if config.rust_exclude_test_modules is not None:
+                parents_rust = config.rust_exclude_test_modules  # shallowest first: deeper wins
     chain.inherited = rebase_config(merged, top, root)
+    chain.inherited.rust_exclude_test_modules = parents_rust
+    chain.rust_exclude_test_modules = rust_setting(chain.local.rust_exclude_test_modules, parents_rust)
     return chain
+
+
+def rust_setting(local: Optional[bool], parents: Optional[bool]) -> bool:
+    """``[rust] exclude_test_modules`` at the scan root: its own config's value, else the parents', else off.
+
+    The one rule, shared by the config chain, the CLI after setup, and setup's status line.
+    """
+    if local is not None:
+        return local
+    return bool(parents)
 
 
 def _toml_string(value: str) -> str:

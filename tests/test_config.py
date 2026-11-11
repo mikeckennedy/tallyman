@@ -586,6 +586,24 @@ class TestRustOptionChain:
         configs = {'': '[rust]\nexclude_test_modules = false\n', 'a': '[rust]\nexclude_test_modules = true\n'}
         assert self._chain(tmp_path, configs, 'a/b') is True
 
+    def test_inherited_holds_only_the_parents_value(self, tmp_path: Path) -> None:
+        """Setup shows the parents' part: the deepest parent's value, ignoring the scan root's own."""
+        (tmp_path / '.git').mkdir()
+        _write(tmp_path / CONFIG_FILENAME, '[rust]\nexclude_test_modules = false\n')
+        _write(tmp_path / 'a' / CONFIG_FILENAME, '[rust]\nexclude_test_modules = true\n')
+        _write(tmp_path / 'a' / 'b' / CONFIG_FILENAME, '[rust]\nexclude_test_modules = false\n')
+        root = tmp_path / 'a' / 'b'
+        chain = load_config_chain(find_configs(root), root)
+        assert chain.inherited.rust_exclude_test_modules is True
+        assert chain.local.rust_exclude_test_modules is False
+        assert chain.rust_exclude_test_modules is False
+
+    def test_inherited_is_none_without_a_parent_value(self, tmp_path: Path) -> None:
+        _write(tmp_path / CONFIG_FILENAME, '[rust]\nexclude_test_modules = true\n')
+        chain = load_config_chain(find_configs(tmp_path), tmp_path)
+        assert chain.inherited.rust_exclude_test_modules is None
+        assert chain.rust_exclude_test_modules is True
+
     def test_parent_that_does_not_say_keeps_the_shallower_value(self, tmp_path: Path) -> None:
         configs = {'': '[rust]\nexclude_test_modules = true\n', 'a': '[exclude]\ndirectories = ["x"]\n'}
         assert self._chain(tmp_path, configs, 'a') is True

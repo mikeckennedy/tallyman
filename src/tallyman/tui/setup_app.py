@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, NamedTuple, Optional
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -13,12 +13,28 @@ from textual.containers import Horizontal
 from textual.widgets import Button, Footer, Header, Static, Tree
 from textual.widgets.tree import TreeNode
 
-from tallyman.config import CONFIG_FILENAME, SELF, TallyConfig, load_nested_config, merge_configs, without_copies
+from tallyman.config import (
+    CONFIG_FILENAME,
+    SELF,
+    TallyConfig,
+    load_nested_config,
+    merge_configs,
+    rust_setting,
+    without_copies,
+)
 from tallyman.gitignore import GitIgnoreSpec
+from tallyman.languages import RUST, identify_language
 from tallyman.walker import SpecState, root_spec_state, spec_state
 
-# (excluded_dirs, spec_dirs, non_spec_dirs) chosen in setup
-SetupResult = tuple[set[str], set[str], set[str]]
+
+class SetupResult(NamedTuple):
+    """The scan root's own settings, chosen in setup, to save in its config."""
+
+    excluded_dirs: set[str]
+    spec_dirs: set[str]
+    non_spec_dirs: set[str]
+    rust_exclude_test_modules: Optional[bool]  # [rust] exclude_test_modules; None writes no [rust] table
+
 
 # Spec and ignore entries as the walker will see them (see SetupApp._spec_sets)
 _SpecSets = tuple[set[str], set[str]]
@@ -70,6 +86,10 @@ class SetupApp(App[Optional[SetupResult]]):
         margin: 0 2;
     }
 
+    #rust {
+        margin: 1 2 0 2;
+    }
+
     #buttons {
         margin: 1 2;
         height: auto;
@@ -83,6 +103,7 @@ class SetupApp(App[Optional[SetupResult]]):
     BINDINGS = [
         Binding('x', 'toggle_node', 'Toggle include/exclude', show=True),
         Binding('s', 'toggle_spec', 'Toggle spec directory', show=True),
+        Binding('r', 'toggle_rust_tests', 'Toggle Rust test code', show=True),  # only with Rust: check_action()
         Binding('left', 'collapse_node', 'Collapse', show=False),
         Binding('right', 'expand_node', 'Expand', show=False),
     ]
@@ -98,12 +119,15 @@ class SetupApp(App[Optional[SetupResult]]):
         root_auto_spec: bool = False,
         inherited: Optional[TallyConfig] = None,
         exclude_patterns: Optional[GitIgnoreSpec] = None,
+        existing_rust: Optional[bool] = None,
     ) -> None:
-        """*existing_** are the editable settings saved at the scan root. *inherited* holds the merged settings
-        of the .tally-config.toml files above it, rebased onto the scan root. The configs below it (nested
-        configs) are read while the tree is built, wherever the walker would read them, and also beneath the scan
-        root's own exclusions, which the user can lift here. Tallyman reads all those files on every run, so their
-        settings are shown but can't be changed here, and are not saved. *root_auto_spec* says the scan root is
+        """*existing_** are the editable settings saved at the scan root (*existing_rust* is its
+        ``[rust] exclude_test_modules``, offered with 'r' only when the tree holds Rust code). *inherited* holds
+        the merged settings of the .tally-config.toml files above it, rebased onto the scan root, and their
+        ``[rust]`` value in ``inherited.rust_exclude_test_modules``. The configs below it (nested configs) are read
+        while the tree is built, wherever the walker would read them, and also beneath the scan root's own
+        exclusions, which the user can lift here. Tallyman reads all those files on every run, so their settings
+        are shown but can't be changed here, and are not saved. *root_auto_spec* says the scan root is
         inside an auto-detected spec directory (see walker.inside_auto_spec_dir). *exclude_patterns* holds the
         ``[exclude] patterns`` of the configs at and above the scan root (see GitIgnoreSpec.for_patterns); nested
         configs' patterns are added to it as the tree is built. Directories they match are shown excluded and
@@ -121,15 +145,15 @@ class SetupApp(App[Optional[SetupResult]]):
         self.root_auto_spec = root_auto_spec
         # Each directory's entry when setup opened, so toggling twice restores it exactly (see _drop_copies())
         self._original_entry: dict[str, str] = {}
+        self.user_rust: Optional[bool] = existing_rust
+        self._original_rust = existing_rust
+        # Set by _populate(): a countable Rust file the scan root's [rust] value governs, and one a nested
+        # config's own [rust] value governs instead ('r' can't change that one; it is edited in that file)
+        self.has_rust = False
+        self.has_nested_rust = False
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        yield Static(
-            'Use [bold]←/→[/bold] to expand/collapse, '
-            '[bold]x[/bold] to toggle include/exclude, '
-            '[bold]s[/bold] to toggle spec directory.',
-            id='instructions',
-        )
+        # The tree is built first: whether it holds Rust code decides what the instructions offer
         tree: SetupTree = SetupTree(Text(self.root.name))
         tree.root.data = NodeInfo('')
         self._populate(tree.root, self.root, '')
@@ -138,15 +162,28 @@ class SetupApp(App[Optional[SetupResult]]):
         tree.root.expand_all()
         self._collapse_excluded(tree.root)
         tree.show_root = True
+        yield Header()
+        rust_key = ', [bold]r[/bold] to count or leave out Rust test code' if self.has_rust else ''
+        yield Static(
+            'Use [bold]←/→[/bold] to expand/collapse, '
+            '[bold]x[/bold] to toggle include/exclude, '
+            f'[bold]s[/bold] to toggle spec directory{rust_key}.',
+            id='instructions',
+        )
         yield tree
+        if self.has_rust or self.has_nested_rust:
+            yield Static(self._rust_label(), id='rust')
         with Horizontal(id='buttons'):
             yield Button('Save & Run', id='save', variant='primary')
             yield Button('Cancel', id='cancel')
         yield Footer()
 
-    def _populate(self, parent_node: TreeNode[NodeInfo], dir_path: Path, rel_path: str) -> None:
+    def _populate(
+        self, parent_node: TreeNode[NodeInfo], dir_path: Path, rel_path: str, nested_rust: Optional[bool] = None
+    ) -> None:
         """Recursively add subdirectories to the tree, reading nested configs on the way, in walk_project()'s order.
-        Labels and states are filled in by _refresh()."""
+        Labels and states are filled in by _refresh(). *nested_rust* is the ``[rust]`` value a nested config sets
+        for *dir_path*, None while the scan root's value governs it, as in the walker's per-directory map."""
         # This directory's own .gitignore governs its children, matching walk_project(). It is also where a
         # nested git repository's own rules start, so this must run before its children are judged.
         self.gitignore_spec.add_directory(rel_path, dir_path)
@@ -159,11 +196,19 @@ class SetupApp(App[Optional[SetupResult]]):
         # config that can name a child is merged before the child is judged, and a deeper one merges later and wins.
         config_file = dir_path / CONFIG_FILENAME
         if rel_path and config_file.is_file() and (loaded := load_nested_config(config_file, rel_path)) is not None:
-            # A malformed config is None: skipped silently, as in the walker. [rust] doesn't change what setup shows.
+            # A malformed config is None: skipped silently, as in the walker
             self.nested = merge_configs(self.nested, loaded.config)
             self.exclude_patterns.add_rules(dir_path, loaded.patterns)
+            if loaded.rust_exclude_test_modules is not None:
+                nested_rust = loaded.rust_exclude_test_modules  # this directory and below follow that config
 
         for entry in entries:
+            if identify_language(entry) is RUST and not self._rust_seen(nested_rust):
+                if self._counted_file(entry, rel_path):
+                    if nested_rust is None:
+                        self.has_rust = True
+                    else:
+                        self.has_nested_rust = True
             if not entry.is_dir(follow_symlinks=False) or entry.name.startswith('.'):
                 continue
             child_rel = f'{rel_path}/{entry.name}'.lstrip('/')
@@ -177,7 +222,22 @@ class SetupApp(App[Optional[SetupResult]]):
             # Don't recurse where the walker never goes. The scan root's own exclusions are entered: the user
             # can lift them here, and then the walker enters them and reads their configs.
             if not is_gitignored and not by_pattern and not locked_out:
-                self._populate(node, entry, child_rel)
+                self._populate(node, entry, child_rel, nested_rust)
+
+    def _rust_seen(self, nested_rust: Optional[bool]) -> bool:
+        """Whether a Rust file governed like this one was already found, so another needn't be checked."""
+        return self.has_rust if nested_rust is None else self.has_nested_rust
+
+    def _counted_file(self, entry: Path, rel_path: str) -> bool:
+        """Whether the walker would count the file *entry* in *rel_path*, as far as its rules go: a regular file
+        (not a symlink), not gitignored, not matched by a pattern. Its content isn't read, so a binary ``.rs``
+        file the walker skips still counts here: harmless, and rare."""
+        file_rel = f'{rel_path}/{entry.name}'.lstrip('/')
+        return (
+            entry.is_file(follow_symlinks=False)
+            and not self.gitignore_spec.match_file(file_rel)
+            and not self.exclude_patterns.match_file(file_rel)
+        )
 
     def _drop_copies(self) -> None:
         """Drop the scan-root entries that a parent or nested config already has (see config.without_copies).
@@ -377,6 +437,45 @@ class SetupApp(App[Optional[SetupResult]]):
         self._derive(probe, node.parent.data if node.parent is not None else None, self._spec_sets())
         return probe.spec
 
+    # --- Rust test code -------------------------------------------------------------------------------------------
+
+    def _rust_effective(self) -> bool:
+        """[rust] exclude_test_modules at the scan root with the current choice, as the CLI will count."""
+        return rust_setting(self.user_rust, self.inherited.rust_exclude_test_modules)
+
+    def _rust_label(self) -> Text:
+        if not self.has_rust:
+            # Every Rust file is under a nested config that sets [rust]: 'r' can't change them
+            return Text.assemble('Rust test code: ', ('set in a nested config', 'dim'))
+        if self._rust_effective():
+            label = Text.assemble('Rust test code: ', ('excluded', 'bold'), (' (#[cfg(test)] items left out)', 'dim'))
+        else:
+            label = Text.assemble('Rust test code: ', ('counted', 'bold'))
+        if self.user_rust is None and self.inherited.rust_exclude_test_modules is not None:
+            label.append(' (set in a parent config)', style='dim')
+        if self.has_nested_rust:
+            label.append(' (some directories set their own in a nested config)', style='dim')
+        return label
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> Optional[bool]:
+        """'r' exists only when the tree holds Rust code the scan root's value governs."""
+        if action == 'toggle_rust_tests' and not self.has_rust:
+            return False
+        return True
+
+    def action_toggle_rust_tests(self) -> None:
+        """Flip Rust test code between counted and left out, with the smallest change to the config."""
+        if not self.has_rust:
+            return
+        wanted = not self._rust_effective()
+        # As with 's': the value setup opened with, then no entry (the parents' value), then an explicit one,
+        # so pressing 'r' twice returns to where it started and a value that only repeats the parents' isn't saved
+        for value in (self._original_rust, None, wanted):
+            self.user_rust = value
+            if self._rust_effective() == wanted:
+                break
+        self.query_one('#rust', Static).update(self._rust_label())
+
     # --- navigation and buttons -----------------------------------------------------------------------------------
 
     def action_collapse_node(self) -> None:
@@ -405,7 +504,7 @@ class SetupApp(App[Optional[SetupResult]]):
             user = TallyConfig(self._clean_exclusions(self.user_excluded), self.user_spec_dirs, self.user_non_spec_dirs)
             # Dropped when setup opened; again here, so no toggle can ever save another config's setting
             local = without_copies(user, self.inherited, self.nested)
-            self.exit((local.excluded_dirs, local.spec_dirs, local.non_spec_dirs))
+            self.exit(SetupResult(local.excluded_dirs, local.spec_dirs, local.non_spec_dirs, self.user_rust))
         elif event.button.id == 'cancel':
             self.exit(None)
 
@@ -435,10 +534,11 @@ def run_setup(
     root_auto_spec: bool = False,
     inherited: Optional[TallyConfig] = None,
     exclude_patterns: Optional[GitIgnoreSpec] = None,
+    existing_rust: Optional[bool] = None,
 ) -> Optional[SetupResult]:
     """Launch the TUI setup app.
 
-    Returns the (excluded_dirs, spec_dirs, non_spec_dirs) to save at the scan root, or None if the user
+    Returns the settings to save at the scan root (a :class:`SetupResult`), or None if the user
     quit without saving. Settings from parent and nested configs are never included, not even as copies an
     earlier version wrote into the scan root's config: those files keep them. Nested configs are read by the
     TUI itself (see SetupApp).
@@ -452,5 +552,6 @@ def run_setup(
         root_auto_spec=root_auto_spec,
         inherited=inherited,
         exclude_patterns=exclude_patterns,
+        existing_rust=existing_rust,
     )
     return app.run()

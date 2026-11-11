@@ -9,11 +9,13 @@ from typing import Optional
 
 import pytest
 from rich.text import Text
+from textual.widgets import Static
 from textual.widgets.tree import TreeNode
 
 from tallyman import walker
 from tallyman.config import NestedConfig, TallyConfig, load_nested_config, merge_configs
 from tallyman.gitignore import GitIgnoreSpec, load_gitignore
+from tallyman.languages import RUST
 from tallyman.tui import setup_app
 from tallyman.tui.setup_app import NodeInfo, SetupApp, SetupResult, SetupTree
 from tallyman.walker import SpecState, WalkStats, root_spec_state, spec_state, walk_project
@@ -42,6 +44,9 @@ def _find(node: TreeNode[NodeInfo], path: str) -> TreeNode[NodeInfo]:
     raise LookupError(path)
 
 
+_Dirs = tuple[set[str], set[str], set[str]]  # (excluded, specs, non-specs): what Session.run() returns
+
+
 class Session:
     """Drives SetupApp headlessly: press keys on named directories, then save."""
 
@@ -54,6 +59,7 @@ class Session:
         root_auto_spec: bool = False,
         inherited: Optional[TallyConfig] = None,
         patterns: Optional[list[str]] = None,
+        rust: Optional[bool] = None,
     ) -> None:
         exclude_patterns = GitIgnoreSpec.for_patterns(root)
         exclude_patterns.add_rules(root, patterns or [])
@@ -66,7 +72,12 @@ class Session:
             root_auto_spec=root_auto_spec,
             inherited=inherited,
             exclude_patterns=exclude_patterns,
+            existing_rust=rust,
         )
+        self.result: Optional[SetupResult] = None
+        self.rust_line: Optional[str] = None  # the 'Rust test code' line just before saving; None if not shown
+        self.instructions = ''
+        self.footer_keys: list[str] = []
         self.labels: dict[str, str] = {}
         self.texts: dict[str, Text] = {}  # the label objects, to check their styles
         self.flags: dict[str, bool] = {}
@@ -74,8 +85,11 @@ class Session:
         self.root_label = ''
         self.root_text = Text()
 
-    def run(self, actions: list[tuple[str, str]], save: bool = True) -> Optional[SetupResult]:
-        """*actions* are (directory path, key); '' is the root. Records labels just before saving."""
+    def run(self, actions: list[tuple[str, str]], save: bool = True) -> Optional[_Dirs]:
+        """*actions* are (directory path, key); '' is the root. Records labels just before saving.
+
+        Returns the directory settings saved; the whole :class:`SetupResult` is ``self.result``.
+        """
 
         async def go() -> None:
             async with self.app.run_test(size=(100, 50)) as pilot:
@@ -86,10 +100,17 @@ class Session:
                     await pilot.press(key)
                 await pilot.pause()
                 self._record(tree.root)
+                self.instructions = str(self.app.query_one('#instructions', Static).render())
+                rust = self.app.query('#rust')
+                self.rust_line = str(rust.first(Static).render()) if rust else None
+                self.footer_keys = [str(getattr(key, 'description', '')) for key in self.app.query('FooterKey')]
                 await pilot.click('#save' if save else '#cancel')
 
         asyncio.run(go())
-        return self.app.return_value
+        self.result = self.app.return_value
+        if self.result is None:
+            return None
+        return self.result.excluded_dirs, self.result.spec_dirs, self.result.non_spec_dirs
 
     def _record(self, node: TreeNode[NodeInfo]) -> None:
         label = node.label
@@ -107,7 +128,7 @@ class Session:
             self._record(child)
 
 
-def _walk_categories(root: Path, result: SetupResult) -> dict[str, str]:
+def _walk_categories(root: Path, result: _Dirs) -> dict[str, str]:
     excluded, specs, non_specs = result
     found = walk_project(root, excluded, load_gitignore(root), spec_dirs=specs, non_spec_dirs=non_specs)
     return {p.parent.relative_to(root).as_posix(): lang.category for p, lang in found if p.suffix == '.md'}
@@ -443,7 +464,7 @@ def _write_configs(root: Path, configs: dict[str, str]) -> None:
         (root / directory / '.tally-config.toml').write_text(content)
 
 
-_NOTHING: SetupResult = (set(), set(), set())
+_NOTHING: _Dirs = (set(), set(), set())
 
 # (tree, nested configs on disk, excluded, specs, non-specs, inherited, what setup saves)
 _COPY_CASES = [
@@ -537,7 +558,7 @@ class TestCopies:
         specs: set[str],
         non_specs: set[str],
         inherited: Optional[TallyConfig],
-        saved: SetupResult,
+        saved: _Dirs,
     ) -> None:
         """Dropping a copy never changes a count: the walk with the saved settings matches the original one."""
         _make_tree(tmp_path, dirs)
@@ -865,3 +886,181 @@ class TestNestedRepos:
         specs = {p.parent.relative_to(tmp_path).as_posix() for p, lang in found if lang.category == 'specs'}
         assert specs == {'sub'}
         assert {d for d, spec in session.flags.items() if spec} == {d for d in entered if d.partition('/')[0] == 'sub'}
+
+
+class TestRustToggle:
+    """'r' sets [rust] exclude_test_modules, and only shows when the tree holds Rust code (plan 013 phase 4)."""
+
+    def _crate(self, root: Path, files: Optional[dict[str, str]] = None) -> None:
+        for rel, text in (files if files is not None else {'src/lib.rs': 'fn a() {}\n'}).items():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(text)
+
+    def test_hidden_without_rust(self, tmp_path: Path) -> None:
+        self._crate(tmp_path, {'src/app.py': 'x = 1\n'})
+        session = Session(tmp_path)
+        session.run([('', 'r')])
+        assert session.rust_line is None
+        assert 'Rust' not in session.instructions
+        assert session.result is not None and session.result.rust_exclude_test_modules is None
+
+    def test_hidden_without_rust_keeps_a_loaded_value(self, tmp_path: Path) -> None:
+        self._crate(tmp_path, {'app.py': 'x = 1\n'})
+        session = Session(tmp_path, rust=True)
+        session.run([('', 'r')])
+        assert session.result is not None and session.result.rust_exclude_test_modules is True
+
+    @pytest.mark.parametrize('path', ['lib.rs', 'src/deep/lib.rs', 'vendor/v.rs', 'src/MAIN.RS'])
+    def test_shown_with_rust(self, tmp_path: Path, path: str) -> None:
+        """Also in a directory the scan root's config excludes, since it can be lifted here."""
+        self._crate(tmp_path, {path: 'fn a() {}\n'})
+        session = Session(tmp_path, excluded={'vendor'})
+        session.run([])
+        assert session.rust_line == 'Rust test code: counted'
+        assert 'r to count or leave out Rust test code' in session.instructions
+
+    @pytest.mark.parametrize(
+        'files',
+        [
+            {'.gitignore': 'target/\n', 'target/gen.rs': ''},  # under a gitignored directory
+            {'.gitignore': '*.rs\n', 'src/lib.rs': ''},  # a gitignored file
+            {'.tally-config.toml': '[exclude]\npatterns = ["*.rs"]\n', 'lib.rs': ''},  # excluded by a pattern
+        ],
+    )
+    def test_rust_the_walker_never_counts_doesnt_show_it(self, tmp_path: Path, files: dict[str, str]) -> None:
+        (tmp_path / '.git').mkdir()
+        self._crate(tmp_path, files)
+        patterns = ['*.rs'] if '.tally-config.toml' in files else None
+        session = Session(tmp_path, patterns=patterns)
+        session.run([])
+        assert session.rust_line is None
+
+    def test_symlinked_rust_file_doesnt_show_it(self, tmp_path: Path) -> None:
+        outside = tmp_path / 'outside'
+        outside.mkdir()
+        (outside / 'lib.rs').write_text('fn a() {}\n')
+        project = tmp_path / 'project'
+        project.mkdir()
+        try:
+            (project / 'lib.rs').symlink_to(outside / 'lib.rs')
+        except OSError:
+            pytest.skip('symlinks not available')
+        session = Session(project)
+        session.run([])
+        assert session.rust_line is None
+
+    def test_toggle_without_a_parent(self, tmp_path: Path) -> None:
+        self._crate(tmp_path)
+        session = Session(tmp_path)
+        session.run([('', 'r')])
+        assert session.rust_line == 'Rust test code: excluded (#[cfg(test)] items left out)'
+        assert session.result is not None and session.result.rust_exclude_test_modules is True
+
+    def test_toggle_twice_writes_nothing(self, tmp_path: Path) -> None:
+        self._crate(tmp_path)
+        session = Session(tmp_path)
+        session.run([('', 'r'), ('', 'r')])
+        assert session.rust_line == 'Rust test code: counted'
+        assert session.result is not None and session.result.rust_exclude_test_modules is None
+
+    @pytest.mark.parametrize('loaded', [True, False])
+    def test_toggle_twice_returns_to_the_loaded_value(self, tmp_path: Path, loaded: bool) -> None:
+        self._crate(tmp_path)
+        session = Session(tmp_path, rust=loaded)
+        session.run([('', 'r'), ('', 'r')])
+        assert session.result is not None and session.result.rust_exclude_test_modules is loaded
+
+    @pytest.mark.parametrize('loaded', [True, False, None])
+    def test_untouched_keeps_the_loaded_value(self, tmp_path: Path, loaded: Optional[bool]) -> None:
+        self._crate(tmp_path)
+        session = Session(tmp_path, rust=loaded)
+        session.run([])
+        assert session.result is not None and session.result.rust_exclude_test_modules is loaded
+
+    def test_under_a_parent_value(self, tmp_path: Path) -> None:
+        self._crate(tmp_path)
+        parent = TallyConfig(rust_exclude_test_modules=True)
+        session = Session(tmp_path, inherited=parent)
+        session.run([])
+        assert session.rust_line == 'Rust test code: excluded (#[cfg(test)] items left out) (set in a parent config)'
+        session = Session(tmp_path, inherited=parent)
+        session.run([('', 'r')])
+        assert session.rust_line == 'Rust test code: counted'
+        assert session.result is not None and session.result.rust_exclude_test_modules is False
+        session = Session(tmp_path, inherited=parent)
+        session.run([('', 'r'), ('', 'r')])
+        assert session.result is not None and session.result.rust_exclude_test_modules is None  # no copy
+
+    @pytest.mark.parametrize(('files', 'offered'), [({'app.py': ''}, False), ({'lib.rs': ''}, True)])
+    def test_footer_offers_r_only_with_rust(self, tmp_path: Path, files: dict[str, str], offered: bool) -> None:
+        self._crate(tmp_path, files)
+        session = Session(tmp_path)
+        session.run([])
+        assert 'Toggle include/exclude' in session.footer_keys
+        assert ('Toggle Rust test code' in session.footer_keys) is offered
+
+    def test_only_nested_configs_set_it(self, tmp_path: Path) -> None:
+        """Every Rust file follows a crate's own [rust]: the line says so, and 'r' can't change it."""
+        self._crate(tmp_path, {'crate/.tally-config.toml': '[rust]\nexclude_test_modules = true\n', 'crate/lib.rs': ''})
+        session = Session(tmp_path)
+        session.run([('', 'r')])
+        assert session.rust_line == 'Rust test code: set in a nested config'
+        assert 'Toggle Rust test code' not in session.footer_keys
+        assert 'Rust' not in session.instructions
+        assert session.result is not None and session.result.rust_exclude_test_modules is None
+
+    def test_some_directories_set_their_own(self, tmp_path: Path) -> None:
+        self._crate(
+            tmp_path,
+            {'lib.rs': '', 'crate/.tally-config.toml': '[rust]\nexclude_test_modules = false\n', 'crate/c.rs': ''},
+        )
+        session = Session(tmp_path)
+        session.run([('', 'r')])
+        assert session.rust_line == (
+            'Rust test code: excluded (#[cfg(test)] items left out) (some directories set their own in a nested config)'
+        )
+        assert session.result is not None and session.result.rust_exclude_test_modules is True
+
+    def test_nested_config_without_rust_key_leaves_it_to_the_scan_root(self, tmp_path: Path) -> None:
+        self._crate(tmp_path, {'crate/.tally-config.toml': '[exclude]\ndirectories = []\n', 'crate/lib.rs': ''})
+        session = Session(tmp_path)
+        session.run([])
+        assert session.rust_line == 'Rust test code: counted'
+
+
+# Trees where setup must agree with the walker on whether there is countable Rust (it reads no file contents)
+_RUST_PARITY = {
+    'plain': {'src/lib.rs': ''},
+    'hidden directory': {'.cargo/x.rs': ''},
+    'hidden file': {'.x.rs': ''},
+    'gitignored directory': {'.gitignore': 'target/\n', 'target/gen.rs': ''},
+    'negated ignore': {'.gitignore': '*.rs\n!keep.rs\n', 'keep.rs': ''},
+    'nested config pattern': {'crate/.tally-config.toml': '[exclude]\npatterns = ["*.rs"]\n', 'crate/lib.rs': ''},
+    'nested config pattern on a directory': {
+        'crate/.tally-config.toml': '[exclude]\npatterns = ["gen/"]\n',
+        'crate/gen/x.rs': '',
+    },
+    'nested config excludes the directory': {
+        'crate/.tally-config.toml': '[exclude]\ndirectories = ["gen"]\n',
+        'crate/gen/x.rs': '',
+    },
+    'nested repo ignores its own rust': {'inner/.git/': '', 'inner/.gitignore': '*.rs\n', 'inner/lib.rs': ''},
+    'outer ignore stops at a nested repo': {'.gitignore': '*.rs\n', 'inner/.git/': '', 'inner/lib.rs': ''},
+    'outer repo ignores the nested repo': {'.gitignore': 'inner/\n', 'inner/.git/': '', 'inner/lib.rs': ''},
+}
+
+
+@pytest.mark.parametrize('files', _RUST_PARITY.values(), ids=_RUST_PARITY.keys())
+def test_rust_detection_agrees_with_the_walker(tmp_path: Path, files: dict[str, str]) -> None:
+    (tmp_path / '.git').mkdir()
+    for rel, text in files.items():
+        path = tmp_path / rel
+        if rel.endswith('/'):
+            path.mkdir(parents=True, exist_ok=True)
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    session = Session(tmp_path)
+    session.run([])
+    walked = any(lang is RUST for _, lang in walk_project(tmp_path, set(), load_gitignore(tmp_path)))
+    assert (session.app.has_rust or session.app.has_nested_rust) is walked

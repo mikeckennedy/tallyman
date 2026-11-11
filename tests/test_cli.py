@@ -60,6 +60,7 @@ def _run(
         existing_non_specs: Optional[set[str]] = None,
         inherited: Optional[TallyConfig] = None,
         exclude_patterns: Optional[GitIgnoreSpec] = None,
+        existing_rust: Optional[bool] = None,
         **_kwargs: object,
     ) -> object:
         prefill = (set(excluded), set(specs), set(existing_non_specs or ()))
@@ -71,7 +72,11 @@ def _run(
             pattern_calls.append(exclude_patterns)
         if setup_result is None:
             raise AssertionError('the setup TUI must not launch here')
-        return prefill if setup_result == ECHO else setup_result
+        dirs = prefill if setup_result == ECHO else setup_result
+        assert isinstance(dirs, tuple) and len(dirs) == 3
+        from tallyman.tui.setup_app import SetupResult
+
+        return SetupResult(*dirs, existing_rust)  # [rust] as loaded: what an untouched 'r' gives
 
     monkeypatch.setattr(cli, 'run_setup', setup or fake_setup)
     cli.main()
@@ -93,6 +98,7 @@ def _real_setup(actions: Sequence[tuple[str, str]] = ()) -> Callable[..., object
         root_auto_spec: bool = False,
         inherited: Optional[TallyConfig] = None,
         exclude_patterns: Optional[GitIgnoreSpec] = None,
+        existing_rust: Optional[bool] = None,
     ) -> object:
         from tallyman.tui.setup_app import SetupApp, SetupTree
 
@@ -105,6 +111,7 @@ def _real_setup(actions: Sequence[tuple[str, str]] = ()) -> Callable[..., object
             root_auto_spec=root_auto_spec,
             inherited=inherited,
             exclude_patterns=exclude_patterns,
+            existing_rust=existing_rust,
         )
 
         async def drive() -> None:
@@ -896,6 +903,22 @@ class TestRustTestCode:
         saved = tmp_path / 'crate' / CONFIG_FILENAME
         assert '[rust]' not in saved.read_text()
         assert load_config(saved).rust_exclude_test_modules is None
+
+    def test_setup_toggle_writes_and_applies_the_value(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The real setup TUI: 'r' turns it on, the config gets [rust], and this run already counts without tests."""
+        _make(tmp_path, {'lib.rs': RUST_LIB})
+        tally = _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup=_real_setup([('', 'r')]))
+        assert _rust_lines(tally) == 4
+        assert load_config(tmp_path / CONFIG_FILENAME).rust_exclude_test_modules is True
+        assert _rust_lines(_run(monkeypatch, str(tmp_path))) == 4
+
+    def test_setup_toggle_overrides_a_parent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        (tmp_path / '.git').mkdir()
+        _make(tmp_path, {CONFIG_FILENAME: RUST_ON, 'crate/lib.rs': RUST_LIB})
+        crate = str(tmp_path / 'crate')
+        tally = _run(monkeypatch, '--setup', crate, interactive=True, setup=_real_setup([('', 'r')]))
+        assert _rust_lines(tally) == 11
+        assert load_config(tmp_path / 'crate' / CONFIG_FILENAME).rust_exclude_test_modules is False
 
     def test_malformed_rust_table_exits_naming_the_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
