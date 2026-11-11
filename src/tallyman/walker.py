@@ -116,7 +116,7 @@ def _is_regular_file(path: Path) -> bool:
 
 @dataclass(slots=True)
 class WalkStats:
-    """What ``[exclude] patterns`` removed from a walk, for the report.
+    """What ``[exclude] patterns`` and ``--exclude`` removed from a walk, for the report.
 
     ``pattern_files`` counts only files that would otherwise have been counted
     (a recognised language, not binary). ``pattern_dirs`` counts directories
@@ -187,8 +187,9 @@ def walk_files(
             itself, so docs files at every level count as specs.
         non_spec_dirs: Relative directory paths that are never specs (``[specs] ignore``).
         exclude_patterns: ``[exclude] patterns`` from the configs that apply at *root*
-            (:meth:`GitIgnoreSpec.for_patterns`). An empty one is made if None. Patterns from
-            nested configs found while walking are registered on it as each directory is entered.
+            (:meth:`GitIgnoreSpec.for_patterns`), plus ``--exclude``'s final layer. An empty one
+            is made if None. Patterns from nested configs found while walking are registered on it
+            as each directory is entered; a final layer still beats them.
         stats: Filled with what the patterns excluded, if given.
         exclude_rust_tests: ``[rust] exclude_test_modules`` at *root*
             (``ConfigChain.rust_exclude_test_modules``). A nested config found while walking

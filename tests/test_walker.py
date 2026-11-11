@@ -527,6 +527,26 @@ class TestExcludePatterns:
         assert walked == {'k.rs'}
         assert stats == WalkStats(pattern_files=2, pattern_dirs=1)  # not the .xyz, the binary, or fixtures/f.py
 
+    def test_final_layer_beats_a_nested_negation_met_during_the_walk(self, tmp_path: Path) -> None:
+        """--exclude: the CLI adds its layer before the walk, and the crate's '!' is added after it."""
+        _tree(
+            tmp_path,
+            {
+                'crate/.tally-config.toml': '[exclude]\npatterns = ["!tests.rs"]\n',
+                'crate/src/tests.rs': 'fn t() {}\n',
+                'crate/src/lib.rs': '',
+            },
+        )
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path, ['tests.rs'], final=True)
+        stats = WalkStats()
+        walked = {
+            s.path.relative_to(tmp_path).as_posix()
+            for s in walk_files(tmp_path, set(), exclude_patterns=spec, stats=stats)
+        }
+        assert walked == {'crate/src/lib.rs'}
+        assert stats == WalkStats(pattern_files=1)
+
     @pytest.mark.skipif(sys.platform == 'win32', reason='symlinks need privileges on Windows')
     def test_stats_skip_a_linked_directory(self, tmp_path: Path) -> None:
         _tree(tmp_path, {'real/f.py': '', 'a.py': ''})

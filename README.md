@@ -26,6 +26,7 @@ tallyman --no-color         # disable colored output
 tallyman --image            # save a PNG summary card to Desktop
 tallyman --image-light      # light-themed PNG variant
 tallyman --with-spaces      # use total lines (incl. comments/blanks) for totals
+tallyman --exclude 'tests/' # leave out files matching a pattern, for this run only
 ```
 
 ## Why Tallyman?
@@ -53,7 +54,7 @@ A few things that set it apart:
 - **Beautiful output** - Colored, formatted results with a language composition bar, powered by [Rich](https://github.com/Textualize/rich)
 - **Realistic metrics** - Only counts files *you* wrote, not third-party dependencies or generated code
 - **Persistent config** - Your setup choices are saved to `.tally-config.toml` and reused on every run
-- **File patterns** - Gitignore-style `[exclude] patterns` for files a directory exclude can't reach, such as Rust tests beside the code they test
+- **File patterns** - Gitignore-style `[exclude] patterns` for files a directory exclude can't reach, such as Rust tests beside the code they test, and `--exclude PATTERN` to leave files out of one run without touching the config
 - **Rust test code** - Opt in with `[rust] exclude_test_modules` to leave inline `#[cfg(test)]` modules and helpers out of the count
 - **Image export** - Generate a shareable PNG summary card with `--image` (dark) or `--image-light` (light theme)
 - **Interactive TUI setup** - Visual directory tree for configuring exclusions and spec directories, powered by [Textual](https://github.com/Textualize/textual)
@@ -268,6 +269,21 @@ patterns = [
 - Setup shows directories a pattern excludes as "(excluded by pattern)", unless a config's `directories` list excludes them too: that is checked first, so they show as excluded by that config, and an entry in the scanned directory's config can still be toggled off. It doesn't edit patterns, but keeps them, in order, when it rewrites the config. Because setup can't re-create them, re-running `tallyman --setup` to replace a broken config loses its patterns. Fix the file by hand if it has any.
 - When patterns remove anything, the report ends with a line such as `Excluded by [exclude] patterns: 12 files, 1 directory`. It counts files Tallyman would otherwise have counted, plus the directories a pattern skipped. Files inside a skipped directory aren't looked at, so they aren't in the file count.
 
+#### For one run: `--exclude`
+
+To see how big a project is without some files, without editing the config, pass patterns on the command line:
+
+```bash
+tallyman --exclude 'tests/' --exclude 'tests.rs'
+```
+
+- Each `--exclude` is one pattern in the same `.gitignore` syntax, matched from the directory you scan, as if it were a line in that directory's config. The current directory plays no part: `tallyman ../proj --exclude 'src/gen/'` leaves out `../proj/src/gen`. Write `src/gen/` or `/src/gen/`, not `./src/gen/` or an absolute path. A value that starts with `-` needs the `=` form: `--exclude=-draft.py`.
+- They are the last word: they apply after every config's patterns, nested configs included, so a crate's `!tests/` doesn't bring back what `--exclude 'tests/'` left out. Among themselves, later ones win.
+- A `!` brings back what a config pattern excluded (`--exclude '!src/keep/tests.rs'`). Like any pattern, it never brings back gitignored files, excluded or hidden directories, or the files Tallyman always skips.
+- They are never saved. Setup, whether from `--setup` or a first run, doesn't show them and doesn't write them; the count after it leaves them out.
+- What they remove is counted in the same `Excluded by [exclude] patterns` line.
+- A pattern that can never match stops the run (exit code 2) before anything is counted: an empty one, a comment (`#gen`; write `\#gen` for a name starting with `#`), a lone `!` or `/`, a value spanning lines, a path with an empty, `.` or `..` segment (`./src/gen/`, `a//b`, `../x`), or an absolute path into the scanned directory. The error suggests the fix where there is one: `./src/gen/` becomes `/src/gen/`.
+
 Inline Rust test modules (`#[cfg(test)] mod tests { ... }`) share a file with the code they test, so no pattern can reach them. For those, see the next section.
 
 ### Leaving out Rust test code
@@ -300,7 +316,7 @@ mod tests {
 - A file or module that starts with `#![cfg(test)]` is test code from top to bottom.
 - **What it leaves alone.**
   - `#[cfg(test)]` on a statement inside a function, on a struct field, an enum variant or a match arm, and inside `macro_rules!` bodies.
-  - `#[cfg(test)] mod tests;`: only that declaration drops. The file it points at counts as usual, unless it starts with `#![cfg(test)]`. Otherwise exclude it with a pattern such as `patterns = ["tests.rs"]`.
+  - `#[cfg(test)] mod tests;`: only that declaration drops. The file it points at counts as usual, unless it starts with `#![cfg(test)]`. Otherwise exclude it with a pattern such as `patterns = ["tests.rs"]`, or for one run, `--exclude 'tests.rs'`.
   - Integration tests in `tests/`, benches and examples: exclude those directories.
 - **Where it applies.** It applies by directory, like every other setting. A config in a crate's directory can turn it on or off for that crate, and `false` overrides a parent's `true`.
 - **Setup.** When the project has Rust code, `--setup` shows a `Rust test code: counted` (or `excluded`) line under the tree, and `r` switches it. Pressing `r` saves the setting only when it differs from what parent configs give, so pressing it twice leaves the config as it was; untouched, the config's value is kept as written. Rust in a directory whose own config sets `[rust]` follows that config: the line says so, and `r` changes only the rest. Without Rust code the line and the key don't appear.

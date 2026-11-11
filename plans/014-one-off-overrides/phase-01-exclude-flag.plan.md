@@ -74,3 +74,16 @@ A new `TestExcludeFlag` class, end to end through `main()` like the existing CLI
 ## Done when
 
 All checks in "Rules for every phase" are clean, the architect review's valid findings are addressed and recorded below, and the phase is committed: `Plan 014 phase 1: --exclude PATTERN for one-off exclusions`.
+
+## Review findings (2026-11-11)
+
+No must-fix. The architect reproduced the final layer's scope (nested repos, a scan root inside a repo, the scan root never judged), `!` re-including a pruned directory and still unable to bring back gitignored, hidden, `[exclude] directories` or generated entries, `WalkStats` counting each entry once, and every `main()` path (the layer added once, after setup). By mutation, the tests catch a final layer sorted by depth (6 failures) and one added before setup (`test_setup_ignores_it`). A plain run gives byte-identical output to `HEAD`.
+
+Fixed:
+- **Dead patterns the check missed.** `./src`, `//`, `a//`, `../x` and an absolute path into the scan root passed and silently matched nothing; decision 7 says that is an error. `_exclude_problem()` now rejects a path segment that is empty, `.` or `..` (suggesting `/src/gen/` for `./src/gen/`, the form tab completion types) and an absolute path into the scan root, as resolved or as typed (`/tmp` is `/private/tmp` on macOS), suggesting the relative form. An anchored pattern such as `/etc/` that isn't a path into the scan root stays valid.
+- `--help` said "anchored" (gitignore's word for the opposite) and "beats every config"; now "relative to the scanned directory" and "overrides config patterns".
+- A test for `!` re-including a directory a config pattern pruned, at the scan root and in a nested config.
+- Docstrings (`WalkStats`, `walk_files()`'s `exclude_patterns`), the persona's "only undo another config pattern", the changelog's `Files:` line, and a README note that a value starting with `-` needs `--exclude=-x`.
+- `_is_ignored()` no longer builds a list per call: `_layers` is rebuilt when a layer is added.
+
+Left: a tab-only value is rejected as blank (gitignore would treat it as a name); Windows backslashes get no special hint, as in config patterns.

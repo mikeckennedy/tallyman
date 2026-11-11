@@ -28,7 +28,7 @@ from tallyman.config import (
 )
 from tallyman.counter import count_lines
 from tallyman.display import display_results
-from tallyman.gitignore import GitIgnoreSpec, load_gitignore
+from tallyman.gitignore import GitIgnoreSpec, is_live_pattern, load_gitignore
 from tallyman.paths import canonical_case, relative_posix
 from tallyman.walker import WalkStats, inside_auto_spec_dir, walk_files
 
@@ -73,6 +73,14 @@ def build_parser() -> argparse.ArgumentParser:
         help='Use total lines (including comments and blanks) for summary totals',
     )
     parser.add_argument(
+        '--exclude',
+        action='append',
+        default=[],
+        metavar='PATTERN',
+        help='Leave out files matching a gitignore-style PATTERN, relative to the scanned directory, '
+        'for this run only (repeatable; overrides config patterns; never saved)',
+    )
+    parser.add_argument(
         '--version',
         action='version',
         version=f'%(prog)s {__version__}',
@@ -109,6 +117,45 @@ def _warn_and_skip(root: Path) -> Callable[[ConfigError], None]:
         print(f'Warning: ignoring {e.path} ({e}); {consequence}.', file=sys.stderr)
 
     return warn
+
+
+def _exclude_problem(pattern: str, roots: tuple[Path, ...]) -> Optional[str]:
+    """Why an ``--exclude`` value can never match anything, or None when it is a usable pattern.
+
+    Beyond what the gitignore parser drops, a path segment that is empty, ``.`` or ``..`` never matches (the
+    walker's paths have none), and neither does an absolute path into the scan root: patterns are relative to
+    it. *roots* are the scan root's spellings: as resolved, and as typed (``/tmp/x`` is ``/private/tmp/x``).
+    """
+    if '\n' in pattern or '\r' in pattern:
+        return f'--exclude takes one pattern per flag; {pattern!r} spans lines'
+    shown = shlex.quote(pattern)
+    if not pattern.strip():
+        return f'--exclude {shown} is blank'
+    if pattern.startswith('#'):
+        return (
+            f'--exclude {shown} is a comment in gitignore syntax; '
+            f'write {shlex.quote("\\" + pattern)} to match a name starting with #'
+        )
+    if not is_live_pattern(pattern):
+        return f'--exclude {shown} can never match anything'
+    negation, body = ('!', pattern[1:]) if pattern.startswith('!') else ('', pattern)
+    for root in roots:
+        root_posix = root.as_posix().rstrip('/')  # '' when scanning /, where every anchored pattern is fine
+        if root_posix and body.rstrip('/') == root_posix:
+            return f'--exclude {shown} names the scanned directory itself, which a pattern never excludes'
+        if root_posix and body.startswith(root_posix + '/'):
+            relative = shlex.quote(negation + body[len(root_posix) :])
+            return (
+                f'--exclude {shown} is an absolute path; patterns are relative to the scanned directory: '
+                f'write {relative}'
+            )
+    segments = body.rstrip(' ').removeprefix('/').removesuffix('/').split('/')
+    if any(segment in ('', '.', '..') for segment in segments):
+        fixed = negation + '/' + body.removeprefix('./')
+        # './src/gen/' (what tab completion types) means '/src/gen/', anchored like it
+        hint = f'; write {shlex.quote(fixed)}' if body.startswith('./') and not _exclude_problem(fixed, roots) else ''
+        return f"--exclude {shown} can never match anything: '.', '..' and empty path segments never match{hint}"
+    return None
 
 
 def _pattern_spec(root: Path, layers: list[PatternLayer]) -> GitIgnoreSpec:
@@ -171,6 +218,11 @@ def main() -> None:
     if args.setup and not interactive:
         print('Error: --setup needs an interactive terminal.', file=sys.stderr)
         sys.exit(2)
+
+    for pattern in args.exclude:
+        if (problem := _exclude_problem(pattern, (root, Path(args.path).absolute()))) is not None:
+            print(f'Error: {problem}.', file=sys.stderr)
+            sys.exit(2)
 
     # Load gitignore
     gitignore_spec = load_gitignore(root)
@@ -235,6 +287,11 @@ def main() -> None:
         config = merge_configs(chain.inherited, local)
         # The scan root's value from setup, else the parents'
         exclude_rust_tests = rust_setting(local_rust, chain.inherited.rust_exclude_test_modules)
+
+    # --exclude is the last word over every config's patterns, nested ones included. Added only now, after
+    # setup: the TUI shares this spec, and it shows and saves what the configs do, never a one-off pattern.
+    if args.exclude:
+        exclude_patterns.add_rules(root, args.exclude, final=True)
 
     excluded_dirs, spec_dirs, non_spec_dirs = config.excluded_dirs, config.spec_dirs, config.non_spec_dirs
 
