@@ -24,6 +24,8 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 ### Changed
 - The image card's legend marks each entry with a square swatch in its bar segment's colour, so a language can be matched to its block by colour rather than by position. The `·` separators are gone; the terminal legend already coloured each label and is unchanged.
 - Files: `src/tallyman/image.py`, `tests/test_image.py`, `README.md`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
+- The language list on each category line (the first three, then `, etc`) comes from one function in the shared report model, `category_language_list()`, instead of a copy in each output. Output unchanged.
+- Files: `src/tallyman/aggregator.py`, `src/tallyman/display.py`, `src/tallyman/image.py`, `tests/test_aggregator.py`, `CLAUDE.md`, `.cursor/rules/coding-guidelines.mdc`, `plans/006-tallyman-architect.plan.md`
 - Every optional type hint is `Optional[X]`, and `tests/test_conventions.py` fails the suite on any `X | None`, `None | X` or `Union[..., None]` annotation, including quoted ones. Ruff's whole `ANN` rule set is on for `src/` and `tests/`, so every function, each test included, has full annotations, and Pyrefly treats `unnecessary-type-conversion` as an error. Annotations only; nothing a user sees changes.
 - Files: `ruff.toml`, `pyrefly.toml`, `src/tallyman/image.py`, `src/tallyman/languages.py`, `src/tallyman/walker.py`, `tests/`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
 - Plan: `plans/012-housekeeping/phase-01-type-hints.plan.md`
@@ -65,6 +67,7 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 
 ### Fixed
 - An image card legend too long for one row, such as five long names like `reStructuredText (specs)`, wraps onto more rows instead of running off the card's right edge, and the card grows to fit. A category line whose language list is too wide is shortened with an ellipsis, as the title already was.
+- The image card's bar is `BAR_HEIGHT` (28) px tall, not 29, with 2 px gaps between segments, not 1, and it now ends flush with the content's right edge instead of 2 px short of the legend and footer. The separator line above `Total:` no longer runs 1 px past that edge. Pillow's rectangle and line corners are inclusive, and the old coordinates weren't.
 - Files: `src/tallyman/image.py`, `tests/test_image.py`, `README.md`, `CLAUDE.md`
 - Setup shows directory names exactly as they are on disk. A directory named `:rocket:` no longer turns into an emoji, and a name ending in a backslash is no longer doubled, in the tree and on the root. The labels are built as Rich `Text`, never markup.
 - Files: `src/tallyman/tui/setup_app.py`, `tests/test_setup_app.py`

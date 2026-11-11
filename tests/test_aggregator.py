@@ -7,11 +7,13 @@ import pytest
 from tallyman.aggregator import (
     CATEGORY_ORDER,
     OTHER_LABEL,
+    CategoryStats,
     LanguageStats,
     TallyResult,
     active_categories,
     aggregate,
     bar_segments,
+    category_language_list,
     language_percentages,
     percent_label,
     segment_widths,
@@ -244,6 +246,22 @@ class TestActiveCategories:
         expected = [c.name for c in tally.by_category]
         assert [c.name for c in active_categories(tally)] == expected
         assert expected == ['Code', 'DevOps', 'Design', 'Docs', 'Data']
+
+
+class TestCategoryLanguageList:
+    """The parenthetical list on each category line, shared by the terminal and the image."""
+
+    @pytest.mark.parametrize(
+        ('languages', 'expected'),
+        [
+            ([], ''),
+            (['Python'], 'Python'),
+            (['Python', 'Rust', 'Go'], 'Python + Rust + Go'),
+            (['Python', 'Rust', 'Go', 'Java'], 'Python + Rust + Go, etc'),
+        ],
+    )
+    def test_names_at_most_three(self, languages: list[str], expected: str) -> None:
+        assert category_language_list(CategoryStats('Code', languages=languages)) == expected
 
 
 class TestBarSegments:

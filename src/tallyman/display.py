@@ -14,6 +14,7 @@ from tallyman.aggregator import (
     TallyResult,
     active_categories,
     bar_segments,
+    category_language_list,
     language_display_names,
     percent_label,
     segment_widths,
@@ -153,15 +154,9 @@ def _display_category_totals(console: Console, result: TallyResult, *, with_spac
     max_name_len = max(max(len(c.name) for c in categories), len('Combined'))
 
     for cat in categories:
-        # Build the parenthetical language list
-        if len(cat.languages) <= 3:
-            lang_list = ' + '.join(cat.languages)
-        else:
-            lang_list = ' + '.join(cat.languages[:3]) + ', etc'
-
         lines = cat.shown_lines(with_spaces=with_spaces)
         padded_name = f'{cat.name}:'
-        console.print(f'  {padded_name:<{max_name_len + 1}} {lines:>10,} lines ({lang_list})')
+        console.print(f'  {padded_name:<{max_name_len + 1}} {lines:>10,} lines ({category_language_list(cat)})')
 
     combined = sum(c.shown_lines(with_spaces=with_spaces) for c in categories)
     console.print(f'  [bold]{"Combined:":<{max_name_len + 1}} {combined:>10,} lines[/bold]')

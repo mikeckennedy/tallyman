@@ -169,6 +169,18 @@ def active_categories(result: TallyResult, *, with_spaces: bool = False) -> list
     )
 
 
+CATEGORY_LANGUAGES_SHOWN = 3  # a category line names this many of its languages
+
+
+def category_language_list(category: CategoryStats) -> str:
+    """The languages a category line names in parentheses: the first CATEGORY_LANGUAGES_SHOWN, then ', etc'.
+
+    *category.languages* is largest first, so the list names the category's biggest languages.
+    """
+    shown = ' + '.join(category.languages[:CATEGORY_LANGUAGES_SHOWN])
+    return f'{shown}, etc' if len(category.languages) > CATEGORY_LANGUAGES_SHOWN else shown
+
+
 @dataclass(frozen=True, slots=True)
 class BarSegment:
     """One coloured block of the percentage bar, and its legend entry."""

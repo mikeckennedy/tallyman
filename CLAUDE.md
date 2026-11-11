@@ -29,7 +29,7 @@ tallyman --with-spaces      # totals and bar use total lines, not effective line
 tallyman --image            # PNG summary card on the Desktop (--image-light for the light theme)
 
 # Tests
-pytest                      # all 681 tests (about 35 s, mostly the Textual pilot tests)
+pytest                      # all 686 tests (about 35 s, mostly the Textual pilot tests)
 pytest -v                   # verbose
 pytest tests/test_walker.py # single module
 
@@ -75,7 +75,7 @@ cli.main()
 | `src/tallyman/encoding.py` | BOM detection: `text_encoding()`, `has_wide_bom()`. Shared by walker (binary check), counter and config loading |
 | `src/tallyman/paths.py` | `relative_posix()`: `/`-separated relative paths, safe on Windows. `canonical_case()`: the scan root spelled as the filesystem stores it |
 | `src/tallyman/counter.py` | Reads files, classifies lines as code/comment/blank. Returns `FileCount` |
-| `src/tallyman/aggregator.py` | Accumulates FileCount into LanguageStats, groups by category. Produces `TallyResult`, and the report model both outputs draw: `active_categories()`, `bar_segments()`, `segment_widths()`, `percent_label()`, `language_display_names()` |
+| `src/tallyman/aggregator.py` | Accumulates FileCount into LanguageStats, groups by category. Produces `TallyResult`, and the report model both outputs draw: `active_categories()`, `category_language_list()`, `bar_segments()`, `segment_widths()`, `percent_label()`, `language_display_names()` |
 | `src/tallyman/display.py` | Rich-based rendering; draws the shared report model. Per-language stats, category totals, percentage bar, the "Excluded by [exclude] patterns" line |
 | `src/tallyman/config.py` | `.tally-config.toml` find (every one up to the git root), load with validation and normalisation, merge the chain and rebase onto the scan root (`ConfigChain`), save with TOML escaping (refusing a path that exists but isn't a regular file, such as a FIFO, rather than block on it). A config may start with a UTF-8/16/32 BOM (`text_encoding()`); save writes UTF-8 without one. `ConfigError` (with `.path`) for unreadable configs |
 | `src/tallyman/image.py` | Pillow PNG summary card; draws the shared report model (bar folded after five languages). Legend swatches in each segment's colour, wrapped onto more rows when needed (`_legend_rows()`); title and category lines shortened to fit. Themes, output path (Desktop or cwd, slug capped at 100 chars) |
@@ -122,7 +122,7 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 
 8. **`[exclude] patterns` are a second `GitIgnoreSpec`.** `GitIgnoreSpec.for_patterns(root)` holds one `add_rules()` layer per config, scoped to that config's directory, so patterns layer like nested `.gitignore` files and a deeper `!` wins. It is separate from the gitignore spec, and the walker checks it last, so `!` never brings back gitignored, hidden, excluded or generated entries. The scan root and its ancestors are never checked, so a parent's pattern can't exclude the scan root. Patterns are kept raw and never rebased, merged or sorted; they travel as `ConfigChain.pattern_layers`, and `--setup` writes `local.patterns` back verbatim. The TUI shows matched directories as "(excluded by pattern)" and locks them, unless a config excludes them: the walker checks config exclusions first, then gitignore, then patterns, and the TUI labels follow that order.
 
-9. **Terminal and image draw one report model.** `aggregator.py` decides what both outputs show: `active_categories()`, `bar_segments()` (labels, colours, the 2% threshold, Other; the image passes `max_languages=5`), `segment_widths()` (largest remainder, a minimum per segment, always the full width) and `percent_label()` (`<1%`, `>99%`). `LanguageStats.effective_lines` is the one definition of effective lines. `display.py` and `image.py` only lay this out, so they can't drift; `tests/test_image.py::TestMatchesTerminal` checks they agree.
+9. **Terminal and image draw one report model.** `aggregator.py` decides what both outputs show: `active_categories()`, `category_language_list()` (the first three languages, then `, etc`), `bar_segments()` (labels, colours, the 2% threshold, Other; the image passes `max_languages=5`), `segment_widths()` (largest remainder, a minimum per segment, always the full width) and `percent_label()` (`<1%`, `>99%`). `LanguageStats.effective_lines` is the one definition of effective lines. `display.py` and `image.py` only lay this out, so they can't drift; `tests/test_image.py::TestMatchesTerminal` checks they agree.
 
 ## Test Structure
 
@@ -131,11 +131,11 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 | `tests/test_counter.py` | 29 | Line counting, line endings, BOMs and wide encodings |
 | `tests/test_languages.py` | 67 | Language registry, extension map (lowercase extensions, any-case lookup), Docker/Compose variants, valid and unshared colours (languages, spec variants, Other), `as_spec` |
 | `tests/test_display.py` | 38 | Terminal rendering: header escaping, wording, labels, bar width and cells, bar colour runs, no bar for nothing, pattern note, Unicode probe |
-| `tests/test_image.py` | 32 | Slugs, image paths, themes, PNG generation, title and category-line fitting, bar segments, legend swatches and wrapping, agreement with the terminal |
+| `tests/test_image.py` | 33 | Slugs, image paths, themes, PNG generation, title and category-line fitting, bar segments and their pixels, legend swatches and wrapping, agreement with the terminal |
 | `tests/test_walker.py` | 59 | Walking, exclusions, spec detection, nested configs, exclude patterns, `WalkStats`, FIFOs and sockets, settings inside nested repos |
 | `tests/test_gitignore.py` | 171 | Git root, gitignore loading and scoping, `info/exclude` in worktrees and submodules, negation, line-end escapes, nested repos, TUI agreement, parity with `git`, config pattern layers, FIFO ignore files |
 | `tests/test_paths.py` | 6 | POSIX relative paths, canonical case |
-| `tests/test_aggregator.py` | 56 | Stats aggregation, categories, percentages, effective lines, the report model: bar segments, widths, labels |
+| `tests/test_aggregator.py` | 60 | Stats aggregation, categories, percentages, effective lines, the report model: category language lists, bar segments, widths, labels |
 | `tests/test_config.py` | 84 | Config find/load/save, `[specs] ignore`, `[exclude] patterns`, normalisation, rebasing, chain merging, dropping copies, escaping, directory cleanup, BOMs, saving over a FIFO |
 | `tests/test_setup_app.py` | 89 | Setup TUI via Textual pilot: toggles, saved exclusions, labels (shown literally, with their styles), parent/nested locks, dropped copies, exclusion precedence, patterns, nested configs read exactly where the walker reads them, leaves, agreement with the walker (also across nested repos) |
 | `tests/test_cli.py` | 49 | End-to-end CLI: config chain (a parent config alone skips first-run setup), errors, no-terminal runs, setup pre-fill and pattern preservation, the real setup TUI dropping copies and skipping configs under gitignored directories, flags, colour, narrow stdout encodings, BOM config, the lazy setup import (no Textual or Pillow on a plain run) |

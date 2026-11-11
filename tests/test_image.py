@@ -210,7 +210,7 @@ def _record_drawing(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         self: ImageDraw.ImageDraw, xy: tuple[float, float, float, float], fill: Optional[tuple[int, int, int]] = None
     ) -> None:
         height = xy[3] - xy[1]
-        assert height in (image.LEGEND_SWATCH_PX - 1, image.BAR_HEIGHT), f'unexpected rectangle {xy}'
+        assert height in (image.LEGEND_SWATCH_PX - 1, image.BAR_HEIGHT - 1), f'unexpected rectangle {xy}'
         is_swatch = height == image.LEGEND_SWATCH_PX - 1
         drawn['swatches' if is_swatch else 'rectangles'].append(tuple(xy))
         drawn['swatch_fills' if is_swatch else 'fills'].append(fill)
@@ -276,12 +276,36 @@ class TestBar:
     def test_segments_tile_the_bar(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         drawn = _record_drawing(monkeypatch)
         generate_image(_code_tally([496, 496, 8]), 'proj', tmp_path / 'out.png', DARK_THEME)
-        rects = drawn['rectangles']
+        rects = drawn['rectangles']  # Pillow's corners are inclusive: x0..x1 is x1 - x0 + 1 pixels
         assert rects[0][0] == image.PADDING
-        assert rects[-1][2] == image.IMAGE_WIDTH - image.PADDING - image.BAR_GAP
+        assert rects[-1][2] == image.IMAGE_WIDTH - image.PADDING - 1  # flush with the content's right edge
         for left, right in zip(rects, rects[1:]):
-            assert right[0] == left[2] + image.BAR_GAP  # each segment starts where the last one's gap ends
-        assert all(x1 - x0 >= image.MIN_SEGMENT_PX - image.BAR_GAP for x0, _, x1, _ in rects)
+            assert right[0] == left[2] + 1 + image.BAR_GAP  # BAR_GAP pixels of background between segments
+        assert all(x1 - x0 + 1 >= image.MIN_SEGMENT_PX - image.BAR_GAP for x0, _, x1, _ in rects)
+        assert all(y1 - y0 + 1 == image.BAR_HEIGHT for _, y0, _, y1 in rects)
+
+    def test_bar_pixels(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Read the PNG: the bar was BAR_HEIGHT + 1 px tall, its gaps 1 px, and it stopped 2 px short of the edge."""
+        from PIL import Image
+
+        drawn = _record_drawing(monkeypatch)
+        out = tmp_path / 'out.png'
+        generate_image(_code_tally([496, 496, 8]), 'proj', out, DARK_THEME)
+        (first_x0, top, first_x1, _), (second_x0, _, _, _) = drawn['rectangles'][:2]
+        background = _hex_to_rgb(DARK_THEME.background)
+        left, right = image.PADDING, image.IMAGE_WIDTH - image.PADDING  # the content area is [left, right)
+        with Image.open(out) as img:
+            px = img.convert('RGB').load()
+            assert px is not None
+            middle = top + image.BAR_HEIGHT // 2
+            column = [px[left + 10, y] for y in range(top - 1, top + image.BAR_HEIGHT + 1)]
+            assert column[0] == column[-1] == background
+            assert background not in column[1:-1]  # exactly BAR_HEIGHT coloured rows
+            gap = [px[x, middle] for x in range(first_x1 + 1, second_x0)]
+            assert gap == [background] * image.BAR_GAP
+            assert px[left, middle] != background and px[left - 1, middle] == background
+            assert px[right - 1, middle] != background and px[right, middle] == background
+        assert first_x0 == left
 
 
 def _long_name_tally(name: str = 'Some Quite Long Language') -> TallyResult:

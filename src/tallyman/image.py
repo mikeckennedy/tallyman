@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
 from tallyman import __version__
-from tallyman.aggregator import TallyResult, active_categories, bar_segments, percent_label, segment_widths
+from tallyman.aggregator import (
+    TallyResult,
+    active_categories,
+    bar_segments,
+    category_language_list,
+    percent_label,
+    segment_widths,
+)
 
 if TYPE_CHECKING:  # Pillow is imported lazily at runtime
     from PIL.ImageFont import FreeTypeFont, ImageFont
@@ -22,7 +29,7 @@ LEGEND_FONT_SIZE = 16
 LINE_HEIGHT = 36
 LEGEND_LINE_HEIGHT = 24
 BAR_HEIGHT = 28
-BAR_GAP = 2  # px gap between bar segments (filled with background)
+BAR_GAP = 2  # px of background between bar segments; none after the last, so the bar spans the content width
 MIN_SEGMENT_PX = 4  # the narrowest a bar segment gets; must stay above BAR_GAP or a segment would have no width
 MAX_LEGEND_ITEMS = 5  # name at most this many languages, in the bar and the legend; the rest are grouped as "Other"
 LEGEND_SWATCH_PX = 12  # the coloured square before each legend entry, in its bar segment's colour
@@ -188,12 +195,8 @@ def generate_image(
         max_name_len = max(max_name_len, len('Combined'))
 
         for cat in categories:
-            if len(cat.languages) <= 3:
-                lang_list = ' + '.join(cat.languages)
-            else:
-                lang_list = ' + '.join(cat.languages[:3]) + ', etc'
             lines = cat.shown_lines(with_spaces=with_spaces)
-            line = f'{cat.name}:'.ljust(max_name_len + 1) + f'{lines:>10,} lines ({lang_list})'
+            line = f'{cat.name}:'.ljust(max_name_len + 1) + f'{lines:>10,} lines ({category_language_list(cat)})'
             draw.text(
                 (PADDING, y), _fit_text(line, font_body, IMAGE_WIDTH - 2 * PADDING), font=font_body, fill=text_rgb
             )
@@ -202,7 +205,7 @@ def generate_image(
         if categories:
             # Separator line above total
             y += 4
-            draw.line((PADDING, y, IMAGE_WIDTH - PADDING, y), fill=dim_rgb, width=1)
+            draw.line((PADDING, y, IMAGE_WIDTH - PADDING - 1, y), fill=dim_rgb, width=1)  # inclusive, like the bar
             y += 10
 
             combined = sum(c.shown_lines(with_spaces=with_spaces) for c in categories)
@@ -217,8 +220,11 @@ def generate_image(
             bar_bottom = y + BAR_HEIGHT
             widths = segment_widths([s.percent for s in segments], IMAGE_WIDTH - 2 * PADDING, MIN_SEGMENT_PX)
             x = PADDING
-            for segment, width in zip(segments, widths):
-                draw.rectangle((x, bar_top, x + width - BAR_GAP, bar_bottom), fill=_rich_color_to_rgb(segment.color))
+            for index, (segment, width) in enumerate(zip(segments, widths)):
+                drawn = width if index == len(segments) - 1 else width - BAR_GAP  # pixels of colour
+                # Pillow's corners are inclusive: a box from x to x + n - 1 is n pixels wide
+                box = (x, bar_top, x + drawn - 1, bar_bottom - 1)
+                draw.rectangle(box, fill=_rich_color_to_rgb(segment.color))
                 x += width
             y = bar_bottom + 12
 
