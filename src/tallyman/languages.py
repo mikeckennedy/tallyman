@@ -74,6 +74,8 @@ LANGUAGES: tuple[Language, ...] = (
 )
 # fmt: on
 
+OTHER_COLOR = 'grey50'  # The colour of the bar's and legend's "Other" segment (aggregator.bar_segments)
+
 
 def _build_extension_map() -> dict[str, Language]:
     ext_map: dict[str, Language] = {}

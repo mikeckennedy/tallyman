@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from typing import Optional
 
 from tallyman.counter import FileCount
-from tallyman.languages import Language
+from tallyman.languages import OTHER_COLOR, Language
 
 CATEGORY_DISPLAY_NAMES: dict[str, str] = {
     'code': 'Code',
@@ -20,6 +22,9 @@ CATEGORY_DISPLAY_NAMES: dict[str, str] = {
 
 CATEGORY_ORDER: list[str] = ['code', 'devops', 'design', 'docs', 'specs', 'data']
 
+SMALL_LANGUAGE_THRESHOLD = 2.0  # Percentage below which languages are grouped as "Other" in the bar
+OTHER_LABEL = 'Other'
+
 
 @dataclass(slots=True)
 class LanguageStats:
@@ -31,22 +36,31 @@ class LanguageStats:
     blank_lines: int = 0
 
     @property
-    def non_blank_non_comment(self) -> int:
-        """Lines excluding comments and blank lines."""
-        return self.code_lines
+    def effective_lines(self) -> int:
+        """The one definition of "effective lines": what both outputs count unless ``--with-spaces`` is given.
 
-    @property
-    def non_blank(self) -> int:
-        """Lines excluding blank lines (for languages without comment detection)."""
+        Code lines (excluding comments and blanks) for a language with a comment marker,
+        and non-blank lines for one without (its comments can't be told apart).
+        """
+        if self.language.single_line_comment is not None:
+            return self.code_lines
         return self.total_lines - self.blank_lines
+
+    def shown_lines(self, *, with_spaces: bool) -> int:
+        """The lines the report shows: total lines with ``--with-spaces``, else effective lines."""
+        return self.total_lines if with_spaces else self.effective_lines
 
 
 @dataclass(slots=True)
 class CategoryStats:
     name: str  # 'Code', 'DevOps', 'Design', 'Docs', 'Specs', 'Data'
     total_lines: int = 0
-    effective_lines: int = 0  # non-blank non-comment (or non-blank for languages without comment detection)
+    effective_lines: int = 0  # the sum of its languages' LanguageStats.effective_lines
     languages: list[str] = field(default_factory=list)
+
+    def shown_lines(self, *, with_spaces: bool) -> int:
+        """The lines the report shows: total lines with ``--with-spaces``, else effective lines."""
+        return self.total_lines if with_spaces else self.effective_lines
 
 
 @dataclass(slots=True)
@@ -84,10 +98,7 @@ def aggregate(file_results: Iterable[tuple[Language, FileCount]]) -> TallyResult
     for stats in sorted_langs:
         cat = stats.language.category
         cat_lines[cat] += stats.total_lines
-        if stats.language.single_line_comment is not None:
-            cat_effective[cat] += stats.non_blank_non_comment
-        else:
-            cat_effective[cat] += stats.non_blank
+        cat_effective[cat] += stats.effective_lines
         cat_langs[cat].append(stats.language.name)
 
     categories = []
@@ -120,21 +131,107 @@ def language_percentages(result: TallyResult, *, with_spaces: bool = False) -> l
     if not result.by_language:
         return []
 
-    def _effective(s: LanguageStats) -> int:
-        if s.language.single_line_comment is not None:
-            return s.non_blank_non_comment
-        return s.non_blank
-
-    if with_spaces:
-        total = result.grand_total_lines
-        if total == 0:
-            return []
-        pairs = [(s.language, s.total_lines / total * 100) for s in result.by_language]
-    else:
-        grand_effective = sum(_effective(s) for s in result.by_language)
-        if grand_effective == 0:
-            return []
-        pairs = [(s.language, _effective(s) / grand_effective * 100) for s in result.by_language]
+    total = sum(s.shown_lines(with_spaces=with_spaces) for s in result.by_language)
+    if total == 0:
+        return []
+    pairs = [(s.language, s.shown_lines(with_spaces=with_spaces) / total * 100) for s in result.by_language]
 
     pairs.sort(key=lambda p: p[1], reverse=True)
     return pairs
+
+
+# The report model: what the terminal (display.py) and the image card (image.py) both draw.
+# They choose the categories, segments, labels and widths here, and only lay them out themselves.
+
+
+def language_display_names(result: TallyResult) -> dict[Language, str]:
+    """Build display names, appending category when a language name appears in multiple categories."""
+    name_categories: dict[str, set[str]] = {}
+    for stats in result.by_language:
+        name_categories.setdefault(stats.language.name, set()).add(stats.language.category)
+
+    display_names: dict[Language, str] = {}
+    for stats in result.by_language:
+        if len(name_categories[stats.language.name]) > 1:
+            cat_label = CATEGORY_DISPLAY_NAMES.get(stats.language.category, stats.language.category)
+            display_names[stats.language] = f'{stats.language.name} ({cat_label.lower()})'
+        else:
+            display_names[stats.language] = stats.language.name
+    return display_names
+
+
+def active_categories(result: TallyResult, *, with_spaces: bool = False) -> list[CategoryStats]:
+    """The categories with any lines, most shown lines first; ties keep CATEGORY_ORDER (the sort is stable)."""
+    return sorted(
+        (c for c in result.by_category if c.total_lines > 0),
+        key=lambda c: c.shown_lines(with_spaces=with_spaces),
+        reverse=True,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class BarSegment:
+    """One coloured block of the percentage bar, and its legend entry."""
+
+    language: Optional[Language]  # None for the Other segment
+    label: str  # display name, e.g. 'Markdown (specs)', or OTHER_LABEL
+    color: str  # a Rich colour name: language.color, or OTHER_COLOR
+    percent: float
+
+
+def bar_segments(
+    result: TallyResult, *, with_spaces: bool = False, max_languages: Optional[int] = None
+) -> list[BarSegment]:
+    """The bar's segments, largest first: each language at or above SMALL_LANGUAGE_THRESHOLD, then Other.
+
+    Other holds the languages under the threshold, plus those past the first *max_languages* when that is given
+    (the image card names at most five). It is always last, and left out when it would add up to nothing.
+    Empty when no language has a line to show, so neither output draws a bar for nothing.
+    """
+    percentages = language_percentages(result, with_spaces=with_spaces)
+    if not percentages:
+        return []
+    names = language_display_names(result)
+    segments = [
+        BarSegment(lang, names[lang], lang.color, pct) for lang, pct in percentages if pct >= SMALL_LANGUAGE_THRESHOLD
+    ]
+    other_pct = sum(pct for _, pct in percentages if pct < SMALL_LANGUAGE_THRESHOLD)
+    if max_languages is not None and len(segments) > max_languages:
+        other_pct += sum(s.percent for s in segments[max_languages:])
+        segments = segments[:max_languages]
+    if other_pct > 0:
+        segments.append(BarSegment(None, OTHER_LABEL, OTHER_COLOR, other_pct))
+    return segments
+
+
+def segment_widths(percents: Sequence[float], total: int, minimum: int) -> list[int]:
+    """Split *total* cells (or pixels) between segments in proportion to *percents*.
+
+    Each segment gets at least *minimum*, unless len(percents) * minimum > total: then the minimum is lowered
+    to total // len(percents), which is 0 when there are more segments than cells. The widths add up to *total*
+    exactly, and spare cells go to the largest remainders, earliest first on ties.
+    """
+    percent_sum = sum(percents)
+    if not percents or percent_sum <= 0:
+        return []
+    minimum = min(minimum, total // len(percents))
+    # Divide by the sum, not 100, so floating-point error in the percentages can't leak into the widths
+    ideal = [p / percent_sum * total for p in percents]
+    widths = [max(minimum, math.floor(i)) for i in ideal]
+    indexes = range(len(widths))
+    while sum(widths) < total:  # hand out the cells flooring left over
+        widths[max(indexes, key=lambda i: ideal[i] - widths[i])] += 1  # max() keeps the earliest on ties
+    while sum(widths) > total:  # the minimum took cells: give them back from those furthest over their share
+        spare = [i for i in indexes if widths[i] > minimum]
+        widths[max(spare, key=lambda i: widths[i] - ideal[i])] -= 1
+    return widths
+
+
+def percent_label(percent: float) -> str:
+    """A legend percentage: rounded, but never '0%' for a share that isn't nothing, nor '100%' for one short of all."""
+    label = f'{percent:.0f}%'
+    if label == '0%' and percent > 0:
+        return '<1%'
+    if label == '100%' and percent < 100:
+        return '>99%'
+    return label

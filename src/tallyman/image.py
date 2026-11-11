@@ -8,9 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
 from tallyman import __version__
-from tallyman.aggregator import TallyResult, language_percentages
-from tallyman.display import _language_display_names
-from tallyman.languages import Language
+from tallyman.aggregator import TallyResult, active_categories, bar_segments, percent_label, segment_widths
 
 if TYPE_CHECKING:  # Pillow is imported lazily at runtime
     from PIL.ImageFont import FreeTypeFont, ImageFont
@@ -24,8 +22,9 @@ LINE_HEIGHT = 36
 LEGEND_LINE_HEIGHT = 24
 BAR_HEIGHT = 28
 BAR_GAP = 2  # px gap between bar segments (filled with background)
-SMALL_LANGUAGE_THRESHOLD = 2.0
-MAX_LEGEND_ITEMS = 5  # show at most this many languages; remainder grouped as "Other"
+MIN_SEGMENT_PX = 4  # the narrowest a bar segment gets; must stay above BAR_GAP or a segment would have no width
+MAX_LEGEND_ITEMS = 5  # name at most this many languages, in the bar and the legend; the rest are grouped as "Other"
+LEGEND_SEPARATOR = '  \u00b7  '
 
 
 @dataclass(slots=True)
@@ -110,27 +109,6 @@ def _fit_text(text: str, font: Union[FreeTypeFont, ImageFont], max_width: int) -
     return text.rstrip() + '…'
 
 
-def _cap_legend(
-    main_langs: list[tuple[Language | None, float]],
-    display_names: dict[Language, str],
-) -> list[str]:
-    """Build legend parts, capping at MAX_LEGEND_ITEMS and grouping the rest as 'Other'."""
-    legend_parts: list[str] = []
-    overflow_pct = 0.0
-    for i, (lang, pct) in enumerate(main_langs):
-        if i >= MAX_LEGEND_ITEMS:
-            overflow_pct += pct
-            continue
-        if lang is None:
-            overflow_pct += pct
-        else:
-            name = display_names.get(lang, lang.name)
-            legend_parts.append(f'{name} {pct:.0f}%')
-    if overflow_pct > 0:
-        legend_parts.append(f'Other {overflow_pct:.0f}%')
-    return legend_parts
-
-
 def generate_image(
     result: TallyResult,
     directory: str,
@@ -153,34 +131,17 @@ def generate_image(
     font_attr = _load_font(14, bold=False)
 
     # Compute height: title + spacing + category lines + combined + bar + legend + attribution
-    active_categories = sorted(
-        (c for c in result.by_category if c.total_lines > 0),
-        key=lambda c: c.total_lines if with_spaces else c.effective_lines,
-        reverse=True,
-    )
-    num_category_lines = len(active_categories) + 1 if active_categories else 0  # +1 for Combined
-    has_bar = result.grand_total_lines > 0
-    percentages = language_percentages(result, with_spaces=with_spaces) if has_bar else []
-    # A None language is the "Other" segment that groups the small languages
-    main_langs: list[tuple[Language | None, float]] = [
-        (lang, pct) for lang, pct in percentages if pct >= SMALL_LANGUAGE_THRESHOLD
-    ]
-    other_pct = sum(pct for _, pct in percentages if pct < SMALL_LANGUAGE_THRESHOLD)
-    if other_pct > 0:
-        main_langs.append((None, other_pct))
-
-    # Pre-compute legend parts (capped at MAX_LEGEND_ITEMS + Other)
-    display_names = _language_display_names(result) if result.by_language else {}
-    legend_parts: list[str] = []
-    if has_bar and main_langs:
-        legend_parts = _cap_legend(main_langs, display_names)
+    categories = active_categories(result, with_spaces=with_spaces)
+    num_category_lines = len(categories) + 1 if categories else 0  # +1 for Combined
+    segments = bar_segments(result, with_spaces=with_spaces, max_languages=MAX_LEGEND_ITEMS)
+    has_bar = bool(segments)  # no effective lines: no bar, and no room left for one
 
     content_lines = 1 + num_category_lines + 1  # title, categories, attribution
     if not result.by_language:
         content_lines = 2  # title + "No recognized source files"
 
     title_gap = 40  # extra space below the title
-    separator_gap = 14 if active_categories else 0  # space for the line above "Total:"
+    separator_gap = 14 if categories else 0  # space for the line above "Total:"
     bar_section = (BAR_HEIGHT + 16 + LEGEND_LINE_HEIGHT) if has_bar else 0
     height = PADDING * 2 + content_lines * LINE_HEIGHT + title_gap + separator_gap + bar_section + LINE_HEIGHT
     img = Image.new('RGB', (IMAGE_WIDTH, height), bg_rgb)
@@ -198,57 +159,44 @@ def generate_image(
         y += LINE_HEIGHT * 2
     else:
         # Category totals
-        max_name_len = max((len(c.name) for c in active_categories), default=0)
+        max_name_len = max((len(c.name) for c in categories), default=0)
         max_name_len = max(max_name_len, len('Combined'))
 
-        for cat in active_categories:
+        for cat in categories:
             if len(cat.languages) <= 3:
                 lang_list = ' + '.join(cat.languages)
             else:
                 lang_list = ' + '.join(cat.languages[:3]) + ', etc'
-            lines = cat.total_lines if with_spaces else cat.effective_lines
+            lines = cat.shown_lines(with_spaces=with_spaces)
             line = f'{cat.name}:'.ljust(max_name_len + 1) + f'{lines:>10,} lines ({lang_list})'
             draw.text((PADDING, y), line, font=font_body, fill=text_rgb)
             y += LINE_HEIGHT
 
-        if active_categories:
+        if categories:
             # Separator line above total
             y += 4
             draw.line((PADDING, y, IMAGE_WIDTH - PADDING, y), fill=dim_rgb, width=1)
             y += 10
 
-            combined = sum(c.total_lines if with_spaces else c.effective_lines for c in active_categories)
+            combined = sum(c.shown_lines(with_spaces=with_spaces) for c in categories)
             total_line = 'Total:'.ljust(max_name_len + 1) + f'{combined:>10,} lines'
             draw.text((PADDING, y), total_line, font=font_body, fill=text_rgb)
             y += LINE_HEIGHT
 
         # Percentage bar -- square segments separated by background-color gaps
-        if has_bar and main_langs:
+        if has_bar:
             y += 8
-            bar_left = PADDING
-            bar_right = IMAGE_WIDTH - PADDING
             bar_top = y
             bar_bottom = y + BAR_HEIGHT
-            total_width = bar_right - bar_left
-            x = bar_left
-            for i, (lang, pct) in enumerate(main_langs):
-                if pct <= 0:
-                    continue
-                if i == len(main_langs) - 1:
-                    seg_right = bar_right
-                else:
-                    segment_width = max(4, int(total_width * pct / 100))
-                    segment_width = min(segment_width, bar_right - x)
-                    seg_right = x + segment_width
-                if seg_right <= x:
-                    continue
-                rgb = _rich_color_to_rgb(lang.color) if lang is not None else _rich_color_to_rgb('grey50')
-                draw.rectangle((x, bar_top, seg_right - BAR_GAP, bar_bottom), fill=rgb)
-                x = seg_right
+            widths = segment_widths([s.percent for s in segments], IMAGE_WIDTH - 2 * PADDING, MIN_SEGMENT_PX)
+            x = PADDING
+            for segment, width in zip(segments, widths):
+                draw.rectangle((x, bar_top, x + width - BAR_GAP, bar_bottom), fill=_rich_color_to_rgb(segment.color))
+                x += width
             y = bar_bottom + 12
 
-            # Legend -- single line, capped to MAX_LEGEND_ITEMS + Other
-            legend = '  \u00b7  '.join(legend_parts)
+            # Legend -- single line, one entry per segment (at most MAX_LEGEND_ITEMS languages + Other)
+            legend = LEGEND_SEPARATOR.join(f'{s.label} {percent_label(s.percent)}' for s in segments)
             draw.text((PADDING, y), legend, font=font_legend, fill=dim_rgb)
             y += LEGEND_LINE_HEIGHT
 

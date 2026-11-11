@@ -22,6 +22,11 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - Plan: `plans/005-hardening/phase-03-spec-overrides-and-tui.plan.md`
 
 ### Changed
+- The image card's bar now folds languages past the fifth into Other, as its legend already did, so every coloured block on the card has a legend entry.
+- A legend share that isn't zero but rounds to 0% reads `<1%`, and one that rounds to 100% while something else is listed reads `>99%`, in the terminal and on the image.
+- The terminal report and the image card now get their categories, totals, bar segments, legend labels and segment widths from one report model in `aggregator.py` (`active_categories()`, `bar_segments()`, `segment_widths()`, `percent_label()`), so they can't disagree; a test checks that they don't. The image no longer imports from `display.py`.
+- Files: `src/tallyman/aggregator.py`, `src/tallyman/languages.py`, `src/tallyman/display.py`, `src/tallyman/image.py`, `tests/test_aggregator.py`, `tests/test_display.py`, `tests/test_image.py`, `CLAUDE.md`
+- Plan: `plans/008-output-hardening/phase-01-shared-report-model.plan.md`
 - The image card's attribution footer links to mkennedy.codes/tools/tallyman.
 - Files: `src/tallyman/image.py`
 - Removed the `pathspec` dependency; tallyman now compiles gitignore patterns itself (`src/tallyman/gitignore.py`).
@@ -38,6 +43,11 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - Plan: `plans/007-exclude-patterns/phase-01-merge-config-chain.plan.md`
 
 ### Fixed
+- A project with no effective lines (only comments and blanks) no longer prints an empty bar and legend under the totals, and the image no longer leaves a blank band where the bar would be. The totals still say `0 lines`. With `--with-spaces` the bar is drawn as before.
+- A small "Other" always gets at least one cell of the terminal bar. Python 496, Rust 496 and Go 8 lines used to give Python and Rust 30 cells each and leave Other, still listed in the legend, with none. Bar widths are now split by largest remainder, in both outputs, and always fill the bar exactly.
+- `--image` no longer crashes with `ValueError: x1 must be greater than or equal to x0` when "Other" is under about 0.1% of the lines; every image segment is at least 4 px wide.
+- Files: `src/tallyman/aggregator.py`, `src/tallyman/languages.py`, `src/tallyman/display.py`, `src/tallyman/image.py`, `tests/test_aggregator.py`, `tests/test_display.py`, `tests/test_image.py`, `CLAUDE.md`
+- Plan: `plans/008-output-hardening/phase-01-shared-report-model.plan.md`
 - An empty `NO_COLOR` no longer disables colour; per no-color.org only a non-empty value does.
 - Solidity's colour changed from `bright_cyan`, which SQL also uses, to `slate_blue1`, so the two are distinguishable in the bar.
 - README and `CLAUDE.md` describe the current behaviour: config search and rebasing, `[specs] ignore`, `"."`, no-terminal runs, what is never counted, and the language count (43, not 41).

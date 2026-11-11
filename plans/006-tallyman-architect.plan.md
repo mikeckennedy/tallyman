@@ -192,14 +192,14 @@ These are the rules the codebase depends on. A change that breaks one is a bug, 
 **Counting**
 - Comment detection is single-line only: the stripped line starts with the language's marker. Block comments count as code. That's a documented limitation, not a bug to "fix" casually.
 - Lines end at `\n`, `\r\n` or a lone `\r`; form feeds and other `str.splitlines()` separators do not end a line. A final line without a newline counts. A BOM picks the encoding; undecodable bytes are replaced.
-- "Effective" lines are code lines for languages with a comment marker, and non-blank lines for those without. The aggregator, `language_percentages()`, display and image must all use the same definition.
+- "Effective" lines are code lines for languages with a comment marker, and non-blank lines for those without. `LanguageStats.effective_lines` is the one definition (`shown_lines(with_spaces=...)` picks effective or total); nothing else may recompute it.
 
 **Output**
 - `--no-color`, or `NO_COLOR` set to a non-empty value, disables colour.
 - `--with-spaces` switches totals, category order, percentages and the bar from effective to total lines, in both terminal and image output.
-- The terminal bar is exactly `BAR_WIDTH` characters. Languages under `SMALL_LANGUAGE_THRESHOLD` (2%) are grouped as Other. Box and block characters fall back to ASCII when stdout can't encode them.
-- Display names add the category (`Markdown (specs)`) only when one language name appears in more than one category (`_language_display_names()`, shared by display and image).
-- Terminal and image agree on numbers, category order and percentages. The selection logic (active categories, the 2% threshold, the Other segment) is written out in both `display.py` and `image.py`, so a change to one needs the same change to the other. Deliberate differences: the image legend shows at most `MAX_LEGEND_ITEMS` (5) languages plus Other, its total line says `Total:` where the terminal says `Combined:`, its bar segments are pixels, and the `[exclude] patterns` note is terminal-only.
+- The terminal bar is exactly `BAR_WIDTH` characters, and every segment gets at least one. Languages under `aggregator.SMALL_LANGUAGE_THRESHOLD` (2%) are grouped as Other. Box and block characters fall back to ASCII when stdout can't encode them.
+- Display names add the category (`Markdown (specs)`) only when one language name appears in more than one category (`aggregator.language_display_names()`, shared by display and image).
+- Terminal and image agree on numbers, category order, percentages and colours. Both draw one report model in `aggregator.py`: `active_categories()`, `bar_segments()` (labels, colours, the 2% threshold, Other), `segment_widths()` and `percent_label()`. Selection, threshold, width or colour logic in `display.py` or `image.py` is a bug, and `image.py` must not import from `display.py`. `TestMatchesTerminal` in `tests/test_image.py` checks the agreement. Deliberate differences: the image folds languages past `MAX_LEGEND_ITEMS` (5) into Other in both its bar and its legend, its total line says `Total:` where the terminal says `Combined:`, its bar segments are pixels (at least `MIN_SEGMENT_PX`), and the `[exclude] patterns` note is terminal-only.
 - When patterns removed something, the terminal report ends with a dim `Excluded by [exclude] patterns: N files, M directories` line (only the non-zero parts), also on the "No recognized source files" path. It is printed as `Text`, because the literal `[exclude]` would otherwise be read as a Rich tag.
 - Image files go to `~/Desktop` (or the current directory), named by an ASCII slug capped at 100 characters, with `-N` added rather than overwriting.
 

@@ -6,9 +6,9 @@ from typing import Optional
 import pytest
 from rich.console import Console
 
-from tallyman.aggregator import aggregate
+from tallyman.aggregator import aggregate, bar_segments
 from tallyman.counter import FileCount
-from tallyman.display import BAR_WIDTH, BLOCK_CHAR, display_results
+from tallyman.display import BAR_WIDTH, BLOCK_CHAR, _bar_text, display_results
 from tallyman.languages import EXTENSION_MAP, as_spec
 from tallyman.walker import WalkStats
 
@@ -127,6 +127,45 @@ class TestPercentageBar:
         assert 'Other' in legend
         assert 'Rust' not in legend
         assert 'Go' not in legend
+
+    def test_no_effective_lines_prints_no_bar(self) -> None:
+        """Bug 6: a file that is all comments printed a blank line, an empty bar and an empty legend."""
+        out = _render_tally([('.py', FileCount(total_lines=3, comment_lines=3))])
+        assert BLOCK_CHAR not in out
+        lines = out.splitlines()
+        combined = next(i for i, line in enumerate(lines) if 'Combined:' in line)
+        assert ' '.join(lines[combined].split()) == 'Combined: 0 lines'
+        assert lines[combined + 1 :] == []
+        assert out.endswith('lines\n')
+
+    def test_with_spaces_draws_the_bar_when_no_lines_are_effective(self) -> None:
+        out = _render_tally([('.py', FileCount(total_lines=3, comment_lines=3))], with_spaces=True)
+        assert len([line for line in out.splitlines() if BLOCK_CHAR in line]) == 1
+        assert out.splitlines()[-1].strip() == 'Python 100%'
+
+    def test_every_segment_gets_a_cell(self) -> None:
+        """Bug 7: Go's 0.8% rounded the first two segments to 30 cells each and left Other none."""
+        tally = aggregate(
+            [
+                (EXTENSION_MAP['.py'], FileCount(total_lines=496, code_lines=496)),
+                (EXTENSION_MAP['.rs'], FileCount(total_lines=496, code_lines=496)),
+                (EXTENSION_MAP['.go'], FileCount(total_lines=8, code_lines=8)),
+            ]
+        )
+        segments = bar_segments(tally)
+        bar = _bar_text(segments)
+        assert len(bar) == BAR_WIDTH
+        assert len(bar.spans) == len(segments) == 3
+        assert all(span.end - span.start >= 1 for span in bar.spans)
+        assert [span.style for span in bar.spans] == [s.color for s in segments]
+        assert [span.end - span.start for span in bar.spans] == [30, 29, 1]
+
+    def test_tiny_other_reads_under_one_percent(self) -> None:
+        entries = [
+            ('.py', FileCount(total_lines=2000, code_lines=2000)),
+            ('.go', FileCount(total_lines=1, code_lines=1)),
+        ]
+        assert _render_tally(entries).splitlines()[-1].endswith('Other <1%')
 
 
 def _render_with_stats(stats: Optional[WalkStats], files: bool = True) -> str:

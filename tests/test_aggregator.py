@@ -1,8 +1,21 @@
 from __future__ import annotations
 
-from tallyman.aggregator import LanguageStats, TallyResult, aggregate, language_percentages
+import pytest
+
+from tallyman.aggregator import (
+    CATEGORY_ORDER,
+    OTHER_LABEL,
+    LanguageStats,
+    TallyResult,
+    active_categories,
+    aggregate,
+    bar_segments,
+    language_percentages,
+    percent_label,
+    segment_widths,
+)
 from tallyman.counter import FileCount
-from tallyman.languages import Language
+from tallyman.languages import EXTENSION_MAP, OTHER_COLOR, Language, as_spec
 
 
 def _lang(name: str, category: str = 'code', comment: str | None = '#') -> Language:
@@ -175,3 +188,158 @@ class TestLanguagePercentages:
     def test_empty_returns_empty(self):
         tally = TallyResult(by_language=[], by_category=[], grand_total_lines=0)
         assert language_percentages(tally) == []
+
+
+def _code(n: int) -> FileCount:
+    """*n* lines, all of them code."""
+    return FileCount(total_lines=n, code_lines=n)
+
+
+class TestEffectiveLines:
+    def test_with_a_comment_marker_it_is_code_lines(self) -> None:
+        stats = LanguageStats(_lang('Python'), total_lines=10, code_lines=6, comment_lines=3, blank_lines=1)
+        assert stats.effective_lines == 6
+
+    def test_without_a_comment_marker_it_is_non_blank_lines(self) -> None:
+        stats = LanguageStats(_lang('Markdown', 'docs', None), total_lines=10, code_lines=6, blank_lines=1)
+        assert stats.effective_lines == 9  # its comments can't be told apart, so only blanks drop out
+
+    def test_category_effective_lines_is_the_sum_of_its_languages(self) -> None:
+        tally = aggregate(
+            [
+                (_lang('Python'), FileCount(total_lines=10, code_lines=6, comment_lines=3, blank_lines=1)),
+                (_lang('OCaml', 'code', None), FileCount(total_lines=8, code_lines=5, comment_lines=0, blank_lines=2)),
+            ]
+        )
+        assert tally.by_category[0].effective_lines == sum(s.effective_lines for s in tally.by_language) == 12
+
+    def test_shown_lines_with_spaces_is_total_lines(self) -> None:
+        tally = aggregate([(_lang('Python'), FileCount(total_lines=10, code_lines=6, comment_lines=3, blank_lines=1))])
+        assert tally.by_language[0].shown_lines(with_spaces=True) == 10
+        assert tally.by_language[0].shown_lines(with_spaces=False) == 6
+        assert tally.by_category[0].shown_lines(with_spaces=True) == 10
+        assert tally.by_category[0].shown_lines(with_spaces=False) == 6
+
+
+class TestActiveCategories:
+    def test_sorted_by_effective_lines_or_by_total_lines_with_spaces(self) -> None:
+        tally = aggregate(
+            [
+                (_lang('Python'), FileCount(total_lines=100, code_lines=10, comment_lines=80, blank_lines=10)),
+                (_lang('YAML', 'data'), FileCount(total_lines=50, code_lines=50)),
+            ]
+        )
+        assert [c.name for c in active_categories(tally)] == ['Data', 'Code']
+        assert [c.name for c in active_categories(tally, with_spaces=True)] == ['Code', 'Data']
+
+    def test_categories_with_no_lines_are_left_out(self) -> None:
+        tally = aggregate([(_lang('Python'), _code(5)), (_lang('YAML', 'data'), FileCount(total_lines=0))])
+        assert [c.name for c in tally.by_category] == ['Code', 'Data']
+        assert [c.name for c in active_categories(tally)] == ['Code']
+
+    def test_equal_counts_keep_category_order(self) -> None:
+        tally = aggregate([(_lang(f'L{key}', key), _code(7)) for key in reversed(CATEGORY_ORDER) if key != 'specs'])
+        expected = [c.name for c in tally.by_category]
+        assert [c.name for c in active_categories(tally)] == expected
+        assert expected == ['Code', 'DevOps', 'Design', 'Docs', 'Data']
+
+
+class TestBarSegments:
+    def test_small_languages_become_other(self) -> None:
+        sizes = [('Python', 97), ('Rust', 1), ('Go', 1), ('Lua', 1)]
+        tally = aggregate([(_lang(name), _code(n)) for name, n in sizes])
+        segments = bar_segments(tally)
+        assert [s.label for s in segments] == ['Python', OTHER_LABEL]
+        assert segments[0].percent == pytest.approx(97)
+        assert segments[1].language is None
+        assert segments[1].percent == pytest.approx(3)
+
+    def test_no_other_when_nothing_is_under_the_threshold(self) -> None:
+        tally = aggregate([(_lang('Python'), _code(60)), (_lang('Rust'), _code(40))])
+        assert [s.label for s in bar_segments(tally)] == ['Python', 'Rust']
+
+    def test_empty_when_nothing_is_counted(self) -> None:
+        assert bar_segments(aggregate([])) == []
+
+    def test_empty_when_no_line_is_effective(self) -> None:
+        """Bug 6: a file that is all comments has nothing to share out."""
+        tally = aggregate([(_lang('Python'), FileCount(total_lines=3, comment_lines=3))])
+        assert bar_segments(tally) == []
+        assert [s.label for s in bar_segments(tally, with_spaces=True)] == ['Python']
+
+    def test_labels_and_colours(self) -> None:
+        md, py = EXTENSION_MAP['.md'], EXTENSION_MAP['.py']
+        tally = aggregate([(md, _code(500)), (as_spec(md), _code(499)), (py, _code(1))])
+        segments = bar_segments(tally)
+        assert [s.label for s in segments] == ['Markdown (docs)', 'Markdown (specs)', OTHER_LABEL]
+        assert [s.color for s in segments] == [md.color, as_spec(md).color, OTHER_COLOR]
+        assert segments[1].language is as_spec(md)
+
+    def test_max_languages_folds_the_rest_into_other(self) -> None:
+        sizes = [30, 20, 15, 12, 10, 8, 5]
+        tally = aggregate([(_lang(f'L{i}'), _code(n)) for i, n in enumerate(sizes)])
+        segments = bar_segments(tally, max_languages=2)
+        assert [s.label for s in segments] == ['L0', 'L1', OTHER_LABEL]
+        assert segments[-1].language is None
+        assert segments[-1].percent == pytest.approx(sum(sizes[2:]))
+
+    def test_max_languages_merges_with_the_small_languages(self) -> None:
+        tally = aggregate([(_lang(name), _code(n)) for name, n in [('A', 50), ('B', 30), ('C', 19), ('D', 1)]])
+        segments = bar_segments(tally, max_languages=2)
+        assert [s.label for s in segments] == ['A', 'B', OTHER_LABEL]  # one Other, not two
+        assert segments[-1].percent == pytest.approx(20)
+
+
+_SIZE_LISTS = [  # the same lists as test_display.py::TestPercentageBar::test_bar_is_exactly_bar_width
+    [100],
+    [50, 50],
+    [70, 20, 10],
+    [97, 1, 1, 1],
+    [34, 33, 33],
+    [10] * 10,
+    [16, 14, 14, 14, 14, 14, 14],
+    [1] * 17,
+]
+
+
+class TestSegmentWidths:
+    def test_every_segment_gets_a_cell(self) -> None:
+        """Bug 7: rounding gave 30 + 30 cells and left the last segment none."""
+        assert segment_widths([49.6, 49.6, 0.8], 60, 1) == [30, 29, 1]
+
+    @pytest.mark.parametrize(
+        ('percents', 'total', 'minimum'),
+        [(sizes, 60, 1) for sizes in _SIZE_LISTS]
+        + [(sizes, 1080, 4) for sizes in _SIZE_LISTS]
+        + [([99.95, 0.05], 1080, 4), ([99.95, 0.05], 60, 1)],
+    )
+    def test_widths_fill_the_bar(self, percents: list[float], total: int, minimum: int) -> None:
+        widths = segment_widths(percents, total, minimum)
+        assert len(widths) == len(percents)
+        assert sum(widths) == total
+        assert all(w >= minimum for w in widths)
+        ideal = [p / sum(percents) * total for p in percents]
+        if all(i >= minimum for i in ideal):  # no segment was bumped up to the minimum
+            assert all(abs(w - i) < 1 for w, i in zip(widths, ideal))
+
+    def test_spare_cells_go_to_the_largest_remainders(self) -> None:
+        assert segment_widths([1, 1, 1], 10, 1) == [4, 3, 3]  # ties: earliest first
+        assert segment_widths([25, 50, 25], 6, 1) == [2, 3, 1]  # 1.5, 3.0, 1.5: the tie goes to the first
+
+    def test_a_minimum_too_large_is_lowered(self) -> None:
+        widths = segment_widths([50, 30, 20], 5, 4)
+        assert sum(widths) == 5
+        assert all(w >= 1 for w in widths)  # lowered to 5 // 3
+
+    @pytest.mark.parametrize('percents', [[], [0.0, 0.0]])
+    def test_nothing_to_split(self, percents: list[float]) -> None:
+        assert segment_widths(percents, 60, 1) == []
+
+
+class TestPercentLabel:
+    @pytest.mark.parametrize(
+        ('percent', 'label'),
+        [(0.3, '<1%'), (0, '0%'), (0.6, '1%'), (49.6, '50%'), (99.7, '>99%'), (100, '100%'), (2.5, '2%')],
+    )
+    def test_labels(self, percent: float, label: str) -> None:
+        assert percent_label(percent) == label
