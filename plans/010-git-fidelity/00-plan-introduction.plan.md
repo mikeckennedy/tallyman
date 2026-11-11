@@ -92,6 +92,9 @@ Phase 1 goes first because phase 2's nested repos use phase 1's `info/exclude` l
 
 ## Open questions (Michael's call; defaults are what the phases implement)
 
+**Confirmed with Michael, 2026-11-10: every default below was chosen.** Implement them as written.
+
+
 1. **Strict or lenient nested-repo detection?** Git treats a `.git` that isn't a valid repository (an empty `.git` directory, a `.git` file pointing nowhere) as an ordinary directory, so the outer rules continue inside. *Default: lenient*, the same `.git`-exists test as `find_git_root()` (decision 6). Scanning a directory directly and scanning its parent then agree. The tests' fake `(tmp_path / '.git').mkdir()` repos keep working. The case is rare (a half-deleted checkout, a stale worktree after its main repo moved). Going strict would mean validating `HEAD`, `objects/` and `refs/` the way git's `is_git_directory()` does, in both `find_git_root()` and nested detection, and rewriting the 39 fake-repo test sites.
 2. **Should the config chain also stop at nested repo boundaries?** Scanning `outer`, a pattern such as `*.md` in `outer/.tally-config.toml` still excludes `outer/sub/a.md` inside the nested repo `sub`. *Default: yes, configs keep applying* (decision 9). They are the user's instructions for this scan, not git rules, and Michael's decision covers git's rules only. Scanning from inside `sub` already ignores outer configs, because `find_configs()` stops at the nearest git root.
 3. **Show nested repos in the setup TUI?** A dim `(git repo)` suffix would explain why an outer rule no longer applies beneath a directory. *Default: no label change in this plan.* If Michael wants it, it fits better in 011, which rebuilds labels as `Text`.

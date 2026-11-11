@@ -164,6 +164,9 @@ On both PNGs (open them with Read), the 34% specs segment is violet and the 6% d
 
 ## Open questions (Michael's call; defaults let implementation go ahead)
 
+**Confirmed with Michael, 2026-11-10: every default below was chosen.** Implement them as written.
+
+
 1. **The exact spec colours.** Default `violet` (`#d787ff`) for Markdown (specs) and `dark_sea_green4` (`#5faf5f`) for reStructuredText (specs). If violet is too close to PHP's purple for taste, the most distinct alternative is `deep_pink2` (`#ff005f`, ΔE 35 from Indian red, 16-colour `91`), but it's loud on a large segment.
 2. **Recolour Other too (decision 3)?** Default yes, to `grey37`. Leaving `grey50` keeps the TOML/Other merge and the 16-colour `37` collapse. Caveat: SGR `90` (bright black) is nearly invisible on a few themes such as Solarized Dark. That only matters on true 16-colour terminals, and only for the smallest segment.
 3. **Field or table?** Default: a `spec_color` field on `Language`. The alternative is a `SPEC_COLOURS = {'Markdown': ..., ...}` dict in `languages.py`, which leaves the dataclass alone but keys colours by name.

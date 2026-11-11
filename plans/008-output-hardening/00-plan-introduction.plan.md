@@ -54,6 +54,9 @@ Michael's open calls are under "Open questions" below. These follow from the rev
 
 ## Open questions (recommended defaults; implementation goes ahead with them unless Michael says otherwise)
 
+**Confirmed with Michael, 2026-11-10: every default below was chosen.** Implement them as written.
+
+
 1. **Image card with more than five languages: fold the bar too?** Today the bar draws every segment but the legend names only five. **Recommended: fold in both.** `bar_segments(..., max_languages=MAX_LEGEND_ITEMS)` folds languages past the fifth into "Other", so every coloured block on the card has a legend entry, and the agreement test can say "image = terminal, folded after five". The alternative keeps today's bar and folds only the legend.
 2. **Tiny percentages in the legend.** Today an "Other" of 0.3% reads `Other 0%`, next to a 1-cell segment. **Recommended: `<1%`**, and `>99%` for a language that rounds to 100% while something else is listed. Both outputs use one `percent_label()`.
 3. **UTF-16/32 configs.** Windows PowerShell 5.1's `>` and `Out-File` write UTF-16 LE with a BOM by default, so a hand-made config can easily arrive that way. **Recommended: accept any BOM** through `text_encoding()` (decision 9), which matches how source files are read. The stricter option accepts only a UTF-8 BOM (`utf-8-sig`), since TOML says UTF-8.

@@ -73,6 +73,9 @@ Phase 1 comes first so that phase 2's recount includes the test it adds.
 
 ## Open questions for Michael (defaults in bold)
 
+**Confirmed with Michael, 2026-11-10: every default below was chosen.** Implement them as written.
+
+
 1. **Enforce `Optional` with `tests/test_conventions.py`?** It is about 60 lines, standard library only, and runs in milliseconds. It finds the same 7 sites as the review today, including the nested `list[tuple[Language | None, float]]` ones that a line grep can only approximate. The alternative is a note in `CLAUDE.md` and trusting the architect review. **Default: add the test.**
 2. **All of `ANN`, or only the rules that fire today (`ANN001`, `ANN201`, `ANN202`)?** The full set also brings `ANN002`/`ANN003` (`*args`/`**kwargs`), `ANN204` (`__init__` and other special methods) and `ANN401` (a bare `Any` argument or return type). None fires today; `config.py`'s `dict[str, Any]` is nested and allowed. **Default: all of `ANN`.**
 3. **Promote only `unnecessary-type-conversion`, or all Pyrefly warnings?** Pyrefly has no "warnings are errors" switch; each kind is promoted by name. **Default: only this one**, since it is the only kind that fires.

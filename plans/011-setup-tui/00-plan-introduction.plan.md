@@ -108,6 +108,9 @@ Plan 010 is written (`plans/010-git-fidelity/`, especially `phase-02-nested-repo
 
 ## Open questions (Michael's call; defaults are what the phases implement)
 
+**Confirmed with Michael, 2026-11-10: every default below was chosen.** Implement them as written.
+
+
 1. **Shadowed scan-root spec entries.** A scan-root `[specs] directories = ["lib"]` while `lib/.tally-config.toml` says `ignore = ["."]`: the nested config wins, so the scan-root entry does nothing, and setup shows `lib` locked by the nested config. It isn't a copy (opposite set). *Default: keep it.* It may be deliberate, it takes effect again if the nested setting is removed, and dropping it would change behaviour then.
 2. **Scan-root exclusions beneath a parent's or nested config's exclusion** (scan-root `src/vendor` while a parent excludes `src`). Not a copy, and inert while the outer exclusion stands. With decision 7 it isn't shown at all. *Default: keep it*, for the same reason as 1. (`_clean_exclusions()` already drops children of the user's *own* exclusions on save. That is unchanged.)
 3. **Directories excluded by a parent or nested config become leaves** (decision 7). Today their children are listed, all `✗`. *Default: leaves.* That changes `test_child_of_an_inherited_exclusion_is_excluded`.
