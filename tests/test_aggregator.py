@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Optional
+
 import pytest
 
 from tallyman.aggregator import (
@@ -18,12 +20,12 @@ from tallyman.counter import FileCount
 from tallyman.languages import EXTENSION_MAP, OTHER_COLOR, Language, as_spec
 
 
-def _lang(name: str, category: str = 'code', comment: str | None = '#') -> Language:
+def _lang(name: str, category: str = 'code', comment: Optional[str] = '#') -> Language:
     return Language(name, category, 'white', comment, (f'.{name.lower()}',))
 
 
 class TestAggregate:
-    def test_single_language(self):
+    def test_single_language(self) -> None:
         lang = _lang('Python')
         results = [
             (lang, FileCount(total_lines=100, code_lines=80, comment_lines=10, blank_lines=10)),
@@ -38,7 +40,7 @@ class TestAggregate:
         assert stats.blank_lines == 15
         assert stats.file_count == 2
 
-    def test_multiple_languages_sorted_descending(self):
+    def test_multiple_languages_sorted_descending(self) -> None:
         py = _lang('Python')
         rs = _lang('Rust')
         results = [
@@ -49,7 +51,7 @@ class TestAggregate:
         assert tally.by_language[0].language.name == 'Rust'
         assert tally.by_language[1].language.name == 'Python'
 
-    def test_category_grouping(self):
+    def test_category_grouping(self) -> None:
         py = _lang('Python', 'code')
         css = _lang('CSS', 'design', None)
         md = _lang('Markdown', 'docs', None)
@@ -69,7 +71,7 @@ class TestAggregate:
         assert code_cat.total_lines == 100
         assert 'Python' in code_cat.languages
 
-    def test_grand_total(self):
+    def test_grand_total(self) -> None:
         py = _lang('Python')
         results = [
             (py, FileCount(total_lines=100, code_lines=80, comment_lines=10, blank_lines=10)),
@@ -77,7 +79,7 @@ class TestAggregate:
         tally = aggregate(results)
         assert tally.grand_total_lines == 100
 
-    def test_empty_results(self):
+    def test_empty_results(self) -> None:
         tally = aggregate([])
         assert tally.by_language == []
         assert tally.by_category == []
@@ -85,7 +87,7 @@ class TestAggregate:
 
 
 class TestAggregateSpecs:
-    def test_specs_category_in_output(self):
+    def test_specs_category_in_output(self) -> None:
         """Spec-category languages produce a Specs category in results."""
         md = Language('Markdown', 'docs', 'white', None, ('.md',))
         spec_md = Language('Markdown', 'specs', 'white', None, ('.md',))
@@ -108,7 +110,7 @@ class TestAggregateSpecs:
         assert docs_cat.effective_lines == 80  # 100 - 20 blank
         assert specs_cat.effective_lines == 450  # 500 - 50 blank
 
-    def test_groups_by_language_object(self):
+    def test_groups_by_language_object(self) -> None:
         """Two Language objects with same name but different categories stay separate."""
         md_docs = Language('Markdown', 'docs', 'white', None, ('.md',))
         md_specs = Language('Markdown', 'specs', 'white', None, ('.md',))
@@ -122,7 +124,7 @@ class TestAggregateSpecs:
         assert len(tally.by_language) == 2
         assert tally.grand_total_lines == 300
 
-    def test_specs_category_order(self):
+    def test_specs_category_order(self) -> None:
         """Specs appears between Docs and Data in category output."""
         md = Language('Markdown', 'docs', 'white', None, ('.md',))
         spec_md = Language('Markdown', 'specs', 'white', None, ('.md',))
@@ -141,7 +143,7 @@ class TestAggregateSpecs:
 
 
 class TestLanguagePercentages:
-    def test_single_language_is_100_percent(self):
+    def test_single_language_is_100_percent(self) -> None:
         py = _lang('Python')
         tally = TallyResult(
             by_language=[LanguageStats(language=py, total_lines=100, code_lines=80, blank_lines=10)],
@@ -153,7 +155,7 @@ class TestLanguagePercentages:
         assert pcts[0][0] is py
         assert pcts[0][1] == 100.0
 
-    def test_percentages_sum_to_100(self):
+    def test_percentages_sum_to_100(self) -> None:
         py = _lang('Python')
         rs = _lang('Rust')
         tally = TallyResult(
@@ -168,7 +170,7 @@ class TestLanguagePercentages:
         total = sum(p[1] for p in pcts)
         assert abs(total - 100.0) < 0.01
 
-    def test_with_spaces_uses_total_lines(self):
+    def test_with_spaces_uses_total_lines(self) -> None:
         py = _lang('Python')
         rs = _lang('Rust')
         tally = TallyResult(
@@ -185,7 +187,7 @@ class TestLanguagePercentages:
         assert pcts[1][0] is rs
         assert pcts[1][1] == 25.0
 
-    def test_empty_returns_empty(self):
+    def test_empty_returns_empty(self) -> None:
         tally = TallyResult(by_language=[], by_category=[], grand_total_lines=0)
         assert language_percentages(tally) == []
 

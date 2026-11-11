@@ -17,154 +17,154 @@ from tallyman.languages import (
 
 
 class TestIdentifyLanguage:
-    def test_python_file(self):
+    def test_python_file(self) -> None:
         assert identify_language(Path('main.py')) == EXTENSION_MAP['.py']
 
-    def test_rust_file(self):
+    def test_rust_file(self) -> None:
         lang = identify_language(Path('lib.rs'))
         assert lang is not None
         assert lang.name == 'Rust'
 
-    def test_javascript_jsx(self):
+    def test_javascript_jsx(self) -> None:
         lang = identify_language(Path('App.jsx'))
         assert lang is not None
         assert lang.name == 'JavaScript'
 
-    def test_typescript_tsx(self):
+    def test_typescript_tsx(self) -> None:
         lang = identify_language(Path('component.tsx'))
         assert lang is not None
         assert lang.name == 'TypeScript'
 
-    def test_solidity_file(self):
+    def test_solidity_file(self) -> None:
         lang = identify_language(Path('Token.sol'))
         assert lang is not None
         assert lang.name == 'Solidity'
         assert lang.category == 'code'
         assert lang.single_line_comment == '//'
 
-    def test_markdown(self):
+    def test_markdown(self) -> None:
         lang = identify_language(Path('README.md'))
         assert lang is not None
         assert lang.name == 'Markdown'
         assert lang.category == 'docs'
 
-    def test_html_template_extensions(self):
+    def test_html_template_extensions(self) -> None:
         for ext in ('.xhtml', '.shtml', '.pt', '.jinja', '.jinja2', '.j2', '.njk', '.hbs', '.ejs', '.mustache'):
             lang = identify_language(Path(f'template{ext}'))
             assert lang is not None, f'{ext} not recognized'
             assert lang.name == 'HTML', f'{ext} mapped to {lang.name}, expected HTML'
 
-    def test_css(self):
+    def test_css(self) -> None:
         lang = identify_language(Path('styles.css'))
         assert lang is not None
         assert lang.category == 'design'
 
-    def test_unknown_extension(self):
+    def test_unknown_extension(self) -> None:
         assert identify_language(Path('photo.png')) is None
 
-    def test_no_extension_unknown(self):
+    def test_no_extension_unknown(self) -> None:
         assert identify_language(Path('README')) is None
 
-    def test_case_insensitive(self):
+    def test_case_insensitive(self) -> None:
         lang = identify_language(Path('README.MD'))
         assert lang is not None
         assert lang.name == 'Markdown'
 
 
 class TestFilenameIdentification:
-    def test_makefile(self):
+    def test_makefile(self) -> None:
         lang = identify_language(Path('Makefile'))
         assert lang is not None
         assert lang.name == 'Makefile'
 
-    def test_makefile_lowercase(self):
+    def test_makefile_lowercase(self) -> None:
         lang = identify_language(Path('makefile'))
         assert lang is not None
         assert lang.name == 'Makefile'
 
-    def test_gnumakefile(self):
+    def test_gnumakefile(self) -> None:
         lang = identify_language(Path('GNUmakefile'))
         assert lang is not None
         assert lang.name == 'Makefile'
 
-    def test_makefile_mk_extension(self):
+    def test_makefile_mk_extension(self) -> None:
         lang = identify_language(Path('rules.mk'))
         assert lang is not None
         assert lang.name == 'Makefile'
 
-    def test_dockerfile(self):
+    def test_dockerfile(self) -> None:
         lang = identify_language(Path('Dockerfile'))
         assert lang is not None
         assert lang.name == 'Docker'
 
-    def test_dockerfile_variant(self):
+    def test_dockerfile_variant(self) -> None:
         lang = identify_language(Path('Dockerfile.dev'))
         assert lang is not None
         assert lang.name == 'Docker'
 
-    def test_dockerfile_extension(self):
+    def test_dockerfile_extension(self) -> None:
         lang = identify_language(Path('app.dockerfile'))
         assert lang is not None
         assert lang.name == 'Docker'
 
-    def test_docker_compose_yml(self):
+    def test_docker_compose_yml(self) -> None:
         lang = identify_language(Path('docker-compose.yml'))
         assert lang is not None
         assert lang.name == 'Docker'
 
-    def test_docker_compose_yaml(self):
+    def test_docker_compose_yaml(self) -> None:
         lang = identify_language(Path('docker-compose.yaml'))
         assert lang is not None
         assert lang.name == 'Docker'
 
-    def test_compose_yml(self):
+    def test_compose_yml(self) -> None:
         lang = identify_language(Path('compose.yml'))
         assert lang is not None
         assert lang.name == 'Docker'
 
-    def test_compose_yaml(self):
+    def test_compose_yaml(self) -> None:
         lang = identify_language(Path('compose.yaml'))
         assert lang is not None
         assert lang.name == 'Docker'
 
-    def test_filename_takes_priority_over_extension(self):
+    def test_filename_takes_priority_over_extension(self) -> None:
         """docker-compose.yml should be Docker, not YAML."""
         lang = identify_language(Path('docker-compose.yml'))
         assert lang is not None
         assert lang.name == 'Docker'
         assert lang.name != 'YAML'
 
-    def test_filename_map_entries_are_valid(self):
+    def test_filename_map_entries_are_valid(self) -> None:
         for name, lang in FILENAME_MAP.items():
             assert lang in LANGUAGES, f'FILENAME_MAP entry {name!r} points to unregistered language'
 
 
 class TestLanguageRegistry:
-    def test_no_duplicate_extensions(self):
+    def test_no_duplicate_extensions(self) -> None:
         seen: dict[str, str] = {}
         for lang in LANGUAGES:
             for ext in lang.extensions:
                 assert ext not in seen, f'Extension {ext} is mapped to both {seen[ext]} and {lang.name}'
                 seen[ext] = lang.name
 
-    def test_all_languages_have_extensions(self):
+    def test_all_languages_have_extensions(self) -> None:
         for lang in LANGUAGES:
             assert len(lang.extensions) > 0, f'{lang.name} has no extensions'
 
-    def test_all_extensions_start_with_dot(self):
+    def test_all_extensions_start_with_dot(self) -> None:
         for lang in LANGUAGES:
             for ext in lang.extensions:
                 assert ext.startswith('.'), f'{lang.name} extension {ext!r} missing leading dot'
 
-    def test_valid_categories(self):
+    def test_valid_categories(self) -> None:
         valid = {'code', 'devops', 'design', 'docs', 'data'}
         for lang in LANGUAGES:
             assert lang.category in valid, f'{lang.name} has invalid category {lang.category!r}'
 
-    def test_at_least_30_languages(self):
+    def test_at_least_30_languages(self) -> None:
         assert len(LANGUAGES) >= 30
 
-    def test_language_is_frozen(self):
+    def test_language_is_frozen(self) -> None:
         lang = LANGUAGES[0]
         try:
             lang.name = 'Nope'  # type: ignore
@@ -174,7 +174,7 @@ class TestLanguageRegistry:
 
 
 class TestAsSpec:
-    def test_creates_spec_category(self):
+    def test_creates_spec_category(self) -> None:
         md = identify_language(Path('test.md'))
         assert md is not None
         spec_md = as_spec(md)
@@ -185,18 +185,18 @@ class TestAsSpec:
         assert spec_md.spec_color is None  # the variant isn't a docs language
         assert spec_md.extensions == md.extensions
 
-    def test_caching(self):
+    def test_caching(self) -> None:
         md = identify_language(Path('test.md'))
         assert md is not None
         assert as_spec(md) is as_spec(md)
 
-    def test_rejects_non_docs(self):
+    def test_rejects_non_docs(self) -> None:
         py = identify_language(Path('test.py'))
         assert py is not None
         with pytest.raises(ValueError):
             as_spec(py)
 
-    def test_rst(self):
+    def test_rst(self) -> None:
         rst = identify_language(Path('test.rst'))
         assert rst is not None
         spec_rst = as_spec(rst)
@@ -236,7 +236,7 @@ class TestAsSpec:
         ('docker-compose.yml.example', None),
     ],
 )
-def test_docker_and_compose_variants(name: str, expected: str):
+def test_docker_and_compose_variants(name: str, expected: str) -> None:
     lang = identify_language(Path(name))
     assert (lang.name if lang else None) == expected
 
@@ -272,7 +272,7 @@ def test_only_docs_languages_have_spec_colours() -> None:
         assert (lang.spec_color is not None) == (lang.category == 'docs'), lang.name
 
 
-def test_every_colour_is_a_valid_rich_colour():
+def test_every_colour_is_a_valid_rich_colour() -> None:
     """An invalid name (like 'dodger_blue' once) crashes image export."""
     for _, colour in _bar_colours():
         Color.parse(colour)

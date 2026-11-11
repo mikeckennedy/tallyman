@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional, Union
 
 import pytest
 from rich.console import Console
@@ -35,39 +35,39 @@ def _lang(name: str, category: str = 'code', color: str = 'yellow') -> Language:
 
 
 class TestSlugifyDirectoryName:
-    def test_spaces_to_hyphens(self):
+    def test_spaces_to_hyphens(self) -> None:
         assert slugify_directory_name('Talk Python Training') == 'talk-python-training'
 
-    def test_special_chars_stripped(self):
+    def test_special_chars_stripped(self) -> None:
         assert slugify_directory_name('my_project (v2)') == 'my-project-v2'
 
-    def test_unicode_normalized_to_ascii_chars(self):
+    def test_unicode_normalized_to_ascii_chars(self) -> None:
         # Non-ASCII become hyphens (regex [^a-z0-9]+)
         assert slugify_directory_name('café') == 'caf'
         assert slugify_directory_name('naïve') == 'na-ve'
 
-    def test_empty_after_strip_returns_fallback(self):
+    def test_empty_after_strip_returns_fallback(self) -> None:
         assert slugify_directory_name('---') == 'tallyman-report'
 
-    def test_single_word_lowercase(self):
+    def test_single_word_lowercase(self) -> None:
         assert slugify_directory_name('Tallyman') == 'tallyman'
 
-    def test_long_names_are_capped(self):
+    def test_long_names_are_capped(self) -> None:
         assert len(slugify_directory_name('a' * 253)) == MAX_SLUG_LENGTH
 
-    def test_cap_does_not_leave_a_trailing_hyphen(self):
+    def test_cap_does_not_leave_a_trailing_hyphen(self) -> None:
         assert not slugify_directory_name('ab ' * 60).endswith('-')
 
 
 class TestResolveImagePath:
-    def test_no_conflict_uses_slug_png(self, tmp_path, monkeypatch):
+    def test_no_conflict_uses_slug_png(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(Path, 'home', lambda: tmp_path)
         desktop = tmp_path / 'Desktop'
         desktop.mkdir()
         out = resolve_image_path('My Project', desktop_preferred=True)
         assert out == desktop / 'my-project.png'
 
-    def test_conflict_adds_numeric_suffix(self, tmp_path, monkeypatch):
+    def test_conflict_adds_numeric_suffix(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(Path, 'home', lambda: tmp_path)
         desktop = tmp_path / 'Desktop'
         desktop.mkdir()
@@ -75,7 +75,7 @@ class TestResolveImagePath:
         out = resolve_image_path('My Project', desktop_preferred=True)
         assert out == desktop / 'my-project-1.png'
 
-    def test_multiple_conflicts_increment_suffix(self, tmp_path, monkeypatch):
+    def test_multiple_conflicts_increment_suffix(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(Path, 'home', lambda: tmp_path)
         desktop = tmp_path / 'Desktop'
         desktop.mkdir()
@@ -85,14 +85,14 @@ class TestResolveImagePath:
         out = resolve_image_path('foo', desktop_preferred=True)
         assert out == desktop / 'foo-3.png'
 
-    def test_desktop_missing_falls_back_to_cwd(self, tmp_path, monkeypatch):
+    def test_desktop_missing_falls_back_to_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(Path, 'home', lambda: tmp_path)
         monkeypatch.chdir(tmp_path)
         # No Desktop directory
         out = resolve_image_path('proj', desktop_preferred=True)
         assert out == tmp_path / 'proj.png'
 
-    def test_desktop_preferred_false_uses_cwd(self, tmp_path, monkeypatch):
+    def test_desktop_preferred_false_uses_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(Path, 'home', lambda: tmp_path)
         desktop = tmp_path / 'Desktop'
         desktop.mkdir()
@@ -102,18 +102,18 @@ class TestResolveImagePath:
 
 
 class TestHexToRgb:
-    def test_parses_hex(self):
+    def test_parses_hex(self) -> None:
         assert _hex_to_rgb('#1e1e2e') == (30, 30, 46)
         assert _hex_to_rgb('#ffffff') == (255, 255, 255)
 
 
 class TestRichColorToRgb:
-    def test_named_color_returns_tuple(self):
+    def test_named_color_returns_tuple(self) -> None:
         r, g, b = _rich_color_to_rgb('yellow')
         assert isinstance(r, int) and isinstance(g, int) and isinstance(b, int)
         assert 0 <= r <= 255 and 0 <= g <= 255 and 0 <= b <= 255
 
-    def test_grey50(self):
+    def test_grey50(self) -> None:
         r, g, b = _rich_color_to_rgb('grey50')
         assert r == g == b
 
@@ -130,7 +130,7 @@ class TestGenerateImage:
         ]
         return aggregate(results)
 
-    def test_produces_valid_png(self, tmp_path):
+    def test_produces_valid_png(self, tmp_path: Path) -> None:
         tally = self._make_tally()
         out = tmp_path / 'out.png'
         generate_image(tally, 'test-project', out, DARK_THEME)
@@ -139,7 +139,7 @@ class TestGenerateImage:
             header = f.read(8)
         assert header[:8] == b'\x89PNG\r\n\x1a\n'
 
-    def test_empty_results_produces_image(self, tmp_path):
+    def test_empty_results_produces_image(self, tmp_path: Path) -> None:
         tally = self._make_tally(with_data=False)
         out = tmp_path / 'empty.png'
         generate_image(tally, 'empty', out, DARK_THEME)
@@ -147,21 +147,21 @@ class TestGenerateImage:
         with open(out, 'rb') as f:
             assert f.read(8) == b'\x89PNG\r\n\x1a\n'
 
-    def test_long_directory_name_saves_and_fits(self, tmp_path):
+    def test_long_directory_name_saves_and_fits(self, tmp_path: Path) -> None:
         """A 253-character name used to crash the save with 'File name too long'."""
         name = 'x' * 253
         out = resolve_image_path(name, desktop_preferred=False).name
         generate_image(self._make_tally(), name, tmp_path / out, DARK_THEME)
         assert (tmp_path / out).exists()
 
-    def test_fit_text_adds_an_ellipsis_only_when_needed(self):
+    def test_fit_text_adds_an_ellipsis_only_when_needed(self) -> None:
         font = _load_font(36, bold=True)
         assert _fit_text('short', font, 1080) == 'short'
         fitted = _fit_text('Code stats for ' + 'x' * 200, font, 1080)
         assert fitted.endswith('…')
         assert font.getlength(fitted) <= 1080
 
-    def test_dark_and_light_differ(self, tmp_path):
+    def test_dark_and_light_differ(self, tmp_path: Path) -> None:
         tally = self._make_tally()
         dark_path = tmp_path / 'dark.png'
         light_path = tmp_path / 'light.png'
@@ -180,20 +180,29 @@ def _record_drawing(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
 
     Only the bar's segments are drawn as rectangles. The originals still run, so Pillow's own checks apply.
     """
-    from PIL import ImageDraw
+    from PIL import ImageDraw, ImageFont
 
     drawn: dict[str, list] = {'text': [], 'rectangles': [], 'fills': []}
     original_text = ImageDraw.ImageDraw.text
     original_rectangle = ImageDraw.ImageDraw.rectangle
 
-    def text(self: ImageDraw.ImageDraw, xy: Any, text: Any, *args: Any, **kwargs: Any) -> None:
+    # The arguments generate_image() passes, with Pillow's defaults
+    def text(
+        self: ImageDraw.ImageDraw,
+        xy: tuple[float, float],
+        text: str,
+        fill: Optional[tuple[int, int, int]] = None,
+        font: Optional[Union[ImageFont.FreeTypeFont, ImageFont.ImageFont]] = None,
+    ) -> None:
         drawn['text'].append(text)
-        original_text(self, xy, text, *args, **kwargs)
+        original_text(self, xy, text, fill=fill, font=font)
 
-    def rectangle(self: ImageDraw.ImageDraw, xy: Any, *args: Any, **kwargs: Any) -> None:
+    def rectangle(
+        self: ImageDraw.ImageDraw, xy: tuple[float, float, float, float], fill: Optional[tuple[int, int, int]] = None
+    ) -> None:
         drawn['rectangles'].append(tuple(xy))
-        drawn['fills'].append(kwargs.get('fill'))
-        original_rectangle(self, xy, *args, **kwargs)
+        drawn['fills'].append(fill)
+        original_rectangle(self, xy, fill=fill)
 
     monkeypatch.setattr(ImageDraw.ImageDraw, 'text', text)
     monkeypatch.setattr(ImageDraw.ImageDraw, 'rectangle', rectangle)

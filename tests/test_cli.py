@@ -132,7 +132,7 @@ def _files_by_category(tally: TallyResult) -> dict[str, int]:
 
 
 class TestConfigFromParentDirectory:
-    def test_parent_config_is_rebased_onto_the_scan_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_parent_config_is_rebased_onto_the_scan_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Excluding 'src/vendor' and 'docs' at the repo root, then scanning src/."""
         (tmp_path / '.git').mkdir()
         _make(
@@ -148,7 +148,7 @@ class TestConfigFromParentDirectory:
         assert tally is not None
         assert _files_by_category(tally) == {'Python/code': 2}  # app.py and docs/conf.py, not vendor/lib.py
 
-    def test_parent_spec_dir_covering_the_scan_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_parent_spec_dir_covering_the_scan_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (tmp_path / '.git').mkdir()
         _make(
             tmp_path,
@@ -162,7 +162,7 @@ class TestConfigFromParentDirectory:
         assert tally is not None
         assert _files_by_category(tally) == {'Markdown/specs': 2}
 
-    def test_config_above_the_git_root_is_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_config_above_the_git_root_is_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make(tmp_path, {CONFIG_FILENAME: '[exclude]\ndirectories = ["repo"]\n', 'repo/a.py': 'x = 1\n'})
         (tmp_path / 'repo' / '.git').mkdir()
         tally = _run(monkeypatch, str(tmp_path / 'repo'))
@@ -181,7 +181,9 @@ class TestConfigWithByteOrderMark:
 
 
 class TestErrors:
-    def test_not_a_directory(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+    def test_not_a_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         (tmp_path / 'file.py').write_text('x = 1\n')
         with pytest.raises(SystemExit) as exc:
             _run(monkeypatch, str(tmp_path / 'file.py'))
@@ -190,7 +192,7 @@ class TestErrors:
 
     def test_malformed_root_config(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ):
+    ) -> None:
         _make(tmp_path, {CONFIG_FILENAME: 'not toml [\n', 'a.py': 'x = 1\n'})
         with pytest.raises(SystemExit) as exc:
             _run(monkeypatch, str(tmp_path))
@@ -202,7 +204,7 @@ class TestErrors:
 
     def test_wrong_shape_root_config(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ):
+    ) -> None:
         _make(tmp_path, {CONFIG_FILENAME: '[exclude]\ndirectories = "vendor"\n'})
         with pytest.raises(SystemExit) as exc:
             _run(monkeypatch, str(tmp_path))
@@ -213,7 +215,7 @@ class TestErrors:
 class TestNoTerminal:
     def test_first_run_uses_defaults(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ):
+    ) -> None:
         _make(tmp_path, {'a.py': 'x = 1\n', 'plans/p.md': '# p\n'})
         tally = _run(monkeypatch, str(tmp_path))
         assert tally is not None
@@ -223,7 +225,7 @@ class TestNoTerminal:
 
     def test_setup_flag_needs_a_terminal(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ):
+    ) -> None:
         with pytest.raises(SystemExit) as exc:
             _run(monkeypatch, '--setup', str(tmp_path))
         assert exc.value.code == 2
@@ -231,7 +233,7 @@ class TestNoTerminal:
 
     def test_existing_config_needs_no_terminal(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ):
+    ) -> None:
         _make(
             tmp_path,
             {CONFIG_FILENAME: '[exclude]\ndirectories = ["vendor"]\n', 'a.py': 'x = 1\n', 'vendor/v.py': 'x\n'},
@@ -256,7 +258,7 @@ class TestNestedRepo:
 class TestSetupRecovery:
     def test_setup_replaces_a_malformed_config(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ):
+    ) -> None:
         """The error message says to re-run --setup, so --setup must work on a broken config."""
         _make(tmp_path, {CONFIG_FILENAME: 'not toml [\n', 'a.py': 'x = 1\n', 'vendor/v.py': 'x = 1\n'})
         tally = _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup_result=({'vendor'}, set(), set()))
@@ -266,7 +268,9 @@ class TestSetupRecovery:
 
 
 class TestSetupWithParentConfig:
-    def test_setup_locks_parent_settings_instead_of_copying_them(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_setup_locks_parent_settings_instead_of_copying_them(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         (tmp_path / '.git').mkdir()
         _make(
             tmp_path,
@@ -298,7 +302,7 @@ class TestSetupWithParentConfig:
         assert tally is not None
         assert _files_by_category(tally) == {'Python/code': 1}  # the parent still excludes vendor
 
-    def test_setup_drops_local_copies_of_parent_settings(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_setup_drops_local_copies_of_parent_settings(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Older versions copied the parent's settings into the new config; setup clears those copies."""
         (tmp_path / '.git').mkdir()
         _make(
@@ -311,7 +315,9 @@ class TestSetupWithParentConfig:
         _run(monkeypatch, '--setup', str(tmp_path / 'src'), interactive=True, setup=_real_setup())
         assert load_config(tmp_path / 'src' / CONFIG_FILENAME).excluded_dirs == {'build'}
 
-    def test_setup_drops_a_local_copy_of_a_nested_exclusion(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_setup_drops_a_local_copy_of_a_nested_exclusion(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Older versions copied nested settings too. Once dropped, removing the nested setting takes effect."""
         _make(
             tmp_path,
@@ -331,7 +337,9 @@ class TestSetupWithParentConfig:
         assert tally is not None
         assert _files_by_category(tally) == {'Python/code': 2}
 
-    def test_setup_keeps_a_spec_dir_that_covers_the_scan_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_setup_keeps_a_spec_dir_that_covers_the_scan_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A no-op setup run must not change the numbers: design/ stays specs."""
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {CONFIG_FILENAME: '[specs]\ndirectories = ["design"]\n', 'design/a.md': '# a\n'})
@@ -346,7 +354,7 @@ class TestSetupWithParentConfig:
 
     def test_unsavable_config_warns_and_still_counts(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ):
+    ) -> None:
         (tmp_path / CONFIG_FILENAME).mkdir()  # a directory where the file should go
         (tmp_path / 'a.py').write_text('x = 1\n')
         tally = _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup_result=(set(), set(), set()))
@@ -355,7 +363,7 @@ class TestSetupWithParentConfig:
 
 
 class TestScanInsideSpecDirectory:
-    def test_scanning_inside_plans_counts_specs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_scanning_inside_plans_counts_specs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """From the repo root plans/ is specs, so scanning plans/ or below it must say the same."""
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {'plans/p.md': '# p\n', 'plans/sub/q.md': '# q\n'})
@@ -368,7 +376,7 @@ class TestScanInsideSpecDirectory:
 class TestErrorHint:
     def test_hint_names_the_broken_configs_directory(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ):
+    ) -> None:
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {CONFIG_FILENAME: 'not toml [\n', 'src/a.py': 'x = 1\n'})
         with pytest.raises(SystemExit):
@@ -465,14 +473,14 @@ class TestRealProcess:
         assert 'Python' in result.stdout  # it really counted
         assert result.stderr.splitlines()[-2:] == ['plain run: []', "after import: ['PIL', 'textual']"]
 
-    def test_no_terminal_returns_promptly(self, tmp_path: Path):
+    def test_no_terminal_returns_promptly(self, tmp_path: Path) -> None:
         (tmp_path / 'a.py').write_text('x = 1\n')
         result = _run_process(tmp_path)
         assert result.returncode == 0, result.stderr
         assert 'tallyman --setup' in result.stderr
         assert not (tmp_path / CONFIG_FILENAME).exists()
 
-    def test_pattern_note_is_printed(self, tmp_path: Path):
+    def test_pattern_note_is_printed(self, tmp_path: Path) -> None:
         (tmp_path / CONFIG_FILENAME).write_text('[exclude]\npatterns = ["tests.rs"]\n')
         (tmp_path / 'src' / 'routing').mkdir(parents=True)
         (tmp_path / 'src' / 'routing.rs').write_text('fn a() {}\n')
@@ -482,7 +490,7 @@ class TestRealProcess:
         assert result.stdout.rstrip().endswith('Excluded by [exclude] patterns: 1 file')
 
     @pytest.mark.skipif(sys.platform == 'win32', reason='closing stdin in the child is POSIX-only')
-    def test_closed_stdin(self, tmp_path: Path):
+    def test_closed_stdin(self, tmp_path: Path) -> None:
         (tmp_path / 'a.py').write_text('x = 1\n')
         result = _run_process(tmp_path, preexec_fn=lambda: os.close(0))
         assert result.returncode == 0, result.stderr
@@ -508,7 +516,7 @@ class TestRealProcess:
 class TestSpecIgnoreEndToEnd:
     def test_ignored_spec_dir_stays_docs_when_scanned_from_inside(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ):
+    ) -> None:
         """[specs] ignore = ["plans"] must beat the scan-inside-plans rule."""
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {CONFIG_FILENAME: '[specs]\nignore = ["plans"]\n', 'plans/sub/q.md': '# q\n'})
@@ -518,7 +526,9 @@ class TestSpecIgnoreEndToEnd:
             assert _files_by_category(tally).get('Markdown/docs') == 1, scan
             assert 'Markdown/specs' not in _files_by_category(tally), scan
 
-    def test_setup_passes_a_parent_ignore_list_as_inherited(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_setup_passes_a_parent_ignore_list_as_inherited(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {CONFIG_FILENAME: '[specs]\nignore = ["src/agents"]\n', 'src/agents/a.md': '# a\n'})
         calls: list[tuple[set[str], set[str], set[str]]] = []
@@ -536,7 +546,9 @@ class TestSpecIgnoreEndToEnd:
         assert inherited[0].non_spec_dirs == {'agents'}
         assert load_config(tmp_path / 'src' / CONFIG_FILENAME).non_spec_dirs == set()
 
-    def test_setup_prefill_and_save_carry_a_local_ignore_list(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_setup_prefill_and_save_carry_a_local_ignore_list(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         _make(tmp_path, {CONFIG_FILENAME: '[specs]\nignore = ["agents"]\n', 'agents/a.md': '# a\n'})
         calls: list[tuple[set[str], set[str], set[str]]] = []
         _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup_result=ECHO, setup_calls=calls)
@@ -545,7 +557,7 @@ class TestSpecIgnoreEndToEnd:
 
 
 class TestConfigChain:
-    def test_every_config_down_to_the_scan_root_applies(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_every_config_down_to_the_scan_root_applies(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """repo/ excludes app/vendor, repo/app/ excludes build; scanning app/ must honour both."""
         (tmp_path / '.git').mkdir()
         _make(
@@ -562,7 +574,7 @@ class TestConfigChain:
         assert tally is not None
         assert _files_by_category(tally) == {'Python/code': 1}
 
-    def test_deeper_config_wins_on_the_same_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_deeper_config_wins_on_the_same_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (tmp_path / '.git').mkdir()
         _make(
             tmp_path,
@@ -578,7 +590,7 @@ class TestConfigChain:
 
     def test_malformed_parent_config(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ):
+    ) -> None:
         (tmp_path / '.git').mkdir()
         _make(
             tmp_path,
@@ -595,7 +607,7 @@ class TestConfigChain:
 
     def test_setup_skips_a_malformed_parent_config(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ):
+    ) -> None:
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {CONFIG_FILENAME: 'not toml [\n', 'app/a.py': 'x = 1\n'})
         tally = _run(monkeypatch, '--setup', str(tmp_path / 'app'), interactive=True, setup_result=ECHO)
@@ -604,7 +616,7 @@ class TestConfigChain:
 
 
 class TestExcludePatterns:
-    def test_setup_keeps_hand_written_patterns(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_setup_keeps_hand_written_patterns(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Setup rewrites the file but never edits patterns: they must survive exactly, in order."""
         block = 'patterns = [\n    "tests.rs",\n    "!src/keep/tests.rs",\n    "/gen/",\n    "we\\"ird",\n]\n'
         _make(tmp_path, {CONFIG_FILENAME: '[exclude]\ndirectories = ["vendor"]\n' + block, 'a.rs': ''})
@@ -616,7 +628,9 @@ class TestExcludePatterns:
         assert saved.patterns == patterns
         assert saved.excluded_dirs == {'vendor', 'build'}
 
-    def test_setup_shows_parent_local_and_nested_patterns(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_setup_shows_parent_local_and_nested_patterns(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         (tmp_path / '.git').mkdir()
         _make(
             tmp_path,
@@ -673,7 +687,7 @@ class TestExcludePatterns:
         _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup=_real_setup())
         assert load_config(tmp_path / CONFIG_FILENAME).spec_dirs == {'node_modules/p'}
 
-    def test_patterns_apply_on_a_normal_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_patterns_apply_on_a_normal_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make(
             tmp_path,
             {
@@ -686,7 +700,7 @@ class TestExcludePatterns:
         assert tally is not None
         assert _files_by_category(tally) == {'Rust/code': 1}
 
-    def test_parent_patterns_are_anchored_to_the_parent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_parent_patterns_are_anchored_to_the_parent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (tmp_path / '.git').mkdir()
         _make(
             tmp_path,
@@ -702,7 +716,7 @@ class TestExcludePatterns:
         assert tally is not None
         assert _files_by_category(tally) == {'Rust/code': 2}  # main.rs and src/gen/kept.rs
 
-    def test_parent_pattern_never_excludes_the_scan_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_parent_pattern_never_excludes_the_scan_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {CONFIG_FILENAME: '[exclude]\npatterns = ["app/", "app"]\n', 'app/main.rs': ''})
         tally = _run(monkeypatch, str(tmp_path / 'app'))
@@ -711,7 +725,7 @@ class TestExcludePatterns:
 
     def test_wrong_shape_patterns_exit_cleanly(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ):
+    ) -> None:
         _make(tmp_path, {CONFIG_FILENAME: '[exclude]\npatterns = "tests.rs"\n'})
         with pytest.raises(SystemExit) as exc:
             _run(monkeypatch, str(tmp_path))
@@ -720,7 +734,7 @@ class TestExcludePatterns:
 
 
 class TestFlags:
-    def test_version(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+    def test_version(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
         monkeypatch.setattr(sys, 'argv', ['tallyman', '--version'])
         with pytest.raises(SystemExit) as exc:
             cli.main()
@@ -736,7 +750,7 @@ class TestFlags:
             (None, {'NO_COLOR': ''}, True),  # no-color.org: an empty value does not disable colour
         ],
     )
-    def test_colour_switches(self, tmp_path: Path, flag: Optional[str], env: dict[str, str], coloured: bool):
+    def test_colour_switches(self, tmp_path: Path, flag: Optional[str], env: dict[str, str], coloured: bool) -> None:
         """Colour codes only; bold and dim are styles, which no-color.org allows."""
         (tmp_path / 'a.py').write_text('x = 1\n')
         environment = {k: v for k, v in os.environ.items() if k != 'NO_COLOR'}
@@ -750,7 +764,7 @@ class TestFlags:
         assert 'Python' in result.stdout
         assert bool(_COLOUR_CODE.search(result.stdout)) is coloured
 
-    def test_with_spaces_reaches_the_display(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_with_spaces_reaches_the_display(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (tmp_path / 'a.py').write_text('x = 1\n')
         seen: list[bool] = []
         monkeypatch.setattr(sys, 'argv', ['tallyman', '--with-spaces', str(tmp_path)])
@@ -759,7 +773,7 @@ class TestFlags:
         cli.main()
         assert seen == [True]
 
-    def test_with_spaces_reaches_the_image(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_with_spaces_reaches_the_image(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (tmp_path / 'a.py').write_text('x = 1\n')
         seen: list[bool] = []
         monkeypatch.setattr(sys, 'argv', ['tallyman', '--with-spaces', '--image', str(tmp_path)])

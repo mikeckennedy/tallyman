@@ -14,7 +14,7 @@ Do this **after plan 005 (hardening) is merged**. Several rules below describe b
 2. **File name.** `.claude/agents/architect-tallyman.md`, a Claude Code sub-agent named `architect-tallyman` (first saved as `plans/agents/architect-tallyman.md`; see decision 6). Michael chose to delete `architect-python.md` from this repo; the shared copy lives on in other projects (`commandbookapp`).
 3. **Tracking.** `.claude/agents/` is gitignored, as `plans/agents/` is, so the agent stays local. This plan file is tracked and carries the full persona, so it can be recreated from it.
 4. **Import style.** Tallyman imports functions directly (`from tallyman.walker import load_gitignore, walk_project`), and the persona documents that rather than the original's namespace imports.
-5. **No codebase-wide changes from the persona yet.** Michael, 2026-11-10: build the architect now; sweeps it implies (step 4) come later, and Michael will do the `Optional` sweep himself.
+5. **No codebase-wide changes from the persona yet.** Michael, 2026-11-10: build the architect now; sweeps it implies (step 4) come later, and Michael will do the `Optional` sweep himself. Superseded for step 4 on 2026-11-10: the sweep is plan 012, phase 1.
 6. **Claude Code, not Cursor.** Michael, 2026-11-10: "migrate away from cursor, full claude code style". The architect is a native Claude Code sub-agent (frontmatter `name`, `description`, `tools: Read, Grep, Glob, Bash`, `color: orange`). Its description says when to use it, so reviews run as `architect-tallyman` rather than a general-purpose agent handed a file path. The Cursor trigger (`.cursor/rules/agents.mdc`) is deleted. As a sub-agent it reviews and plans but doesn't edit, commit or interview: its final message is the deliverable, and a feature plan ends with the questions for Michael.
 
 ## Steps
@@ -33,7 +33,7 @@ Do this **after plan 005 (hardening) is merged**. Several rules below describe b
 - Steps 1, 2, 3, 5, 6, 7 and 8: done. `CLAUDE.md` and the Cursor coding guidelines both state the `Optional` convention.
 - Step 1 corrected the draft against the code: line counting differs from `wc -l` (an unterminated last line and a lone `\r` count); only Pillow is lazy, Rich and Textual load on every run; a nested `[specs]` entry can override a shallower one; the image legend is capped at 5 and says `Total:`, and the display/image selection logic is duplicated; backslash normalisation is Windows-only and `..` escapes are dropped; only the nearest config applied until issue #6 (since updated: plan 007 phase 1, `c6a53fb`, merges the whole chain, phase 2, `7cd3951`, adds `[exclude] patterns`, and phase 3, `9d32ec5`, reports them in the terminal; the persona now describes all three); `encoding.py` added to the module map.
 - Step 5: a fresh sub-agent, told nothing about the plants, flagged all five planted problems under the matching Never rules, plus follow-on bugs in the planted code. No wording needed tightening.
-- Step 4: deferred (decision 5). Ruff's `UP` rules are confirmed off (`ruff.toml` selects `E`, `F`, `W`, `I`).
+- Step 4: done in plan 012, phase 1, after Michael chose in the 2026-11-10 architect review to do the sweep now. `tests/test_conventions.py` now enforces it, and Ruff's `UP` rules are still off.
 
 ## Done when
 
@@ -132,7 +132,7 @@ Each stage feeds the next and knows nothing about the stages after it. Keep it t
 
 ### Never
 
-- ❌ **Never use `X | None`.** Use `Optional[X]` from `typing`, in `src/` and `tests/`, for parameters, return types, attributes and nested types (`list[tuple[Optional[Language], float]]`). Ruff's `UP` rules stay off because `UP045` enforces the opposite.
+- ❌ **Never use `X | None`.** Use `Optional[X]` from `typing`, in `src/` and `tests/`, for parameters, return types, attributes and nested types (`list[tuple[Optional[Language], float]]`). Ruff's `UP` rules stay off because `UP045` enforces the opposite. `tests/test_conventions.py` fails on any.
 - ❌ **Never let the walker and the setup TUI disagree.** Gitignore status, exclusion (directory entries and `[exclude] patterns`) and spec status are computed in both. The TUI must get spec status from `walker.spec_state()` / `root_spec_state()` (through `_derive()`) and gitignore and pattern status from the same `GitIgnoreSpec` calls the walker makes, in the same order (patterns are checked only for entries gitignore lets through, and neither kind of excluded directory is descended into). Its spec and ignore sets must be merged the way the walker merges them (`_spec_sets()`: parent configs, then the scan root's, then nested, through `merge_configs()`). A TUI label or toggle that checks a directory's name, `SPEC_DIR_NAMES` or a config set directly, instead of the state `_derive()` computed, is a disagreement waiting to happen. A change to one side is a change to both, with a test for each.
 - ❌ **Never build a relative path with `str(Path)`, `str(p.relative_to(...))` or `os.path.relpath`.** Use `relative_posix()`. Config entries, gitignore matching, spec roots and TUI node paths are all `/`-separated strings, and `str()` gives backslashes on Windows. It also gives `'.'` for the root where `relative_posix()` gives `''`. It passes every test on macOS, so look for it in the diff rather than waiting for a failure.
 - ❌ **Never group or compare languages by name.** `Markdown` (docs) and `Markdown` (specs) are different `Language` objects. Aggregation and display key on the object.
@@ -298,7 +298,7 @@ Shape it for `plans/planning-rules.md`: a numbered plan, split into phase files 
 
 - **Python 3.14+.** `match`, dataclass slots, `tomllib`, and PEP 758 unparenthesised `except A, B:` (in `display.py`) are all in use.
 - **Runtime dependencies:** `rich` (terminal output), `textual` (setup TUI), `Pillow` (image export, imported lazily). Gitignore matching is in-house (`gitignore.py`), checked against real git by `tests/test_gitignore.py`.
-- **Dev tooling:** `pytest`, Ruff (lint and format, configured only in `ruff.toml`: rules `E`, `F`, `W`, `I`), ty (`ty.toml`) and Pyrefly (`pyrefly.toml`), kept consistent with each other.
+- **Dev tooling:** `pytest`, Ruff (lint and format, configured only in `ruff.toml`: rules `E`, `F`, `W`, `I`, `ANN`), ty (`ty.toml`) and Pyrefly (`pyrefly.toml`, which promotes `unnecessary-type-conversion` to an error), kept consistent with each other.
 - **Environment:** uv with a `venv/` directory (not `.venv/`). Install with `uv pip install -e ".[dev]"`.
 - **Build:** hatchling. Entry points `tallyman` and `tallyman-metrics` both map to `tallyman.cli:main`.
 - **Versioning:** `MAJOR.MINOR.BUILD` in `pyproject.toml`; the last number counts releases and never resets. Run `uv lock` after changing it.

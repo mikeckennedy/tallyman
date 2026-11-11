@@ -14,7 +14,7 @@ class Language:
     name: str
     category: str  # 'code', 'devops', 'design', 'docs', 'specs' (via as_spec), 'data'
     color: str  # Rich color name
-    single_line_comment: str | None  # e.g. '#', '//', '--'; None if no simple detection
+    single_line_comment: Optional[str]  # e.g. '#', '//', '--'; None if no simple detection
     extensions: tuple[str, ...]
     # docs languages only: the colour of their as_spec() variant
     spec_color: Optional[str] = field(default=None, kw_only=True)

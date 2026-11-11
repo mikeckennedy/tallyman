@@ -98,10 +98,10 @@ class Session:
             self.root_label = str(label)
             self.root_text = label
         if node.data and node.data.path:
-            path = str(node.data.path)
+            path = node.data.path
             self.labels[path] = str(label)
             self.texts[path] = label
-            self.flags[path] = bool(node.data.spec)
+            self.flags[path] = node.data.spec
             self.excluded[path] = node.data.excluded
         for child in node.children:
             self._record(child)
@@ -114,7 +114,7 @@ def _walk_categories(root: Path, result: SetupResult) -> dict[str, str]:
 
 
 class TestSpecToggles:
-    def test_untouched_save(self, tmp_path: Path):
+    def test_untouched_save(self, tmp_path: Path) -> None:
         _make_tree(tmp_path)
         session = Session(tmp_path)
         assert session.run([]) == (set(), set(), set())
@@ -122,7 +122,7 @@ class TestSpecToggles:
         assert session.labels['plans/sub'] == 'S sub (specs)'
         assert session.labels['src/agents'] == 'S agents (specs)'
 
-    def test_turning_off_an_auto_detected_spec_dir_sticks(self, tmp_path: Path):
+    def test_turning_off_an_auto_detected_spec_dir_sticks(self, tmp_path: Path) -> None:
         """H4: the walker must honour it, not re-detect 'plans' by name."""
         _make_tree(tmp_path)
         session = Session(tmp_path)
@@ -134,18 +134,18 @@ class TestSpecToggles:
         categories = _walk_categories(tmp_path, result)
         assert categories['plans'] == categories['plans/sub'] == 'docs'
 
-    def test_turning_it_back_on_removes_the_override(self, tmp_path: Path):
+    def test_turning_it_back_on_removes_the_override(self, tmp_path: Path) -> None:
         _make_tree(tmp_path)
         assert Session(tmp_path).run([('plans', 's'), ('plans', 's')]) == (set(), set(), set())
 
-    def test_marking_a_plain_directory(self, tmp_path: Path):
+    def test_marking_a_plain_directory(self, tmp_path: Path) -> None:
         _make_tree(tmp_path)
         session = Session(tmp_path)
         result = session.run([('docs', 's')])
         assert result == (set(), {'docs'}, set())
         assert session.labels['docs'] == 'S docs'
 
-    def test_explicit_spec_below_an_ignored_directory(self, tmp_path: Path):
+    def test_explicit_spec_below_an_ignored_directory(self, tmp_path: Path) -> None:
         _make_tree(tmp_path, ['agents/plans', 'agents/plans/deep', 'agents/code'])
         session = Session(tmp_path, non_specs={'agents'})
         session.run([])
@@ -163,17 +163,17 @@ class TestSpecToggles:
 
 
 class TestExcludeToggles:
-    def test_root_cannot_be_excluded(self, tmp_path: Path):
+    def test_root_cannot_be_excluded(self, tmp_path: Path) -> None:
         """H10: 'x' on the root used to write "" into the config and exclude everything below."""
         _make_tree(tmp_path)
         assert Session(tmp_path).run([('', 'x')]) == (set(), set(), set())
 
-    def test_explicitly_excluded_child_of_an_excluded_parent_keeps_its_entry(self, tmp_path: Path):
+    def test_explicitly_excluded_child_of_an_excluded_parent_keeps_its_entry(self, tmp_path: Path) -> None:
         _make_tree(tmp_path)
         result = Session(tmp_path, excluded={'src/vendor'}).run([('src', 'x'), ('src/vendor', 'x'), ('src', 'x')])
         assert result == ({'src/vendor'}, set(), set())
 
-    def test_children_of_an_excluded_directory_show_excluded(self, tmp_path: Path):
+    def test_children_of_an_excluded_directory_show_excluded(self, tmp_path: Path) -> None:
         """H11: reopening setup with src excluded used to show src/vendor with a green check."""
         _make_tree(tmp_path)
         session = Session(tmp_path, excluded={'src'})
@@ -183,18 +183,18 @@ class TestExcludeToggles:
         assert session.labels['src/vendor'] == '✗ vendor'
         assert session.labels['src/agents/inner'] == '✗ inner'
 
-    def test_exclude_then_include_restores_spec_status(self, tmp_path: Path):
+    def test_exclude_then_include_restores_spec_status(self, tmp_path: Path) -> None:
         _make_tree(tmp_path)
         session = Session(tmp_path)
         assert session.run([('plans', 'x'), ('plans', 'x')]) == (set(), set(), set())
         assert session.labels['plans'] == 'S plans (specs)'
 
-    def test_excluding_a_parent_keeps_a_childs_own_exclusion(self, tmp_path: Path):
+    def test_excluding_a_parent_keeps_a_childs_own_exclusion(self, tmp_path: Path) -> None:
         _make_tree(tmp_path)
         result = Session(tmp_path, excluded={'src/vendor'}).run([('src', 'x'), ('src', 'x')])
         assert result == ({'src/vendor'}, set(), set())
 
-    def test_cancel_returns_none(self, tmp_path: Path):
+    def test_cancel_returns_none(self, tmp_path: Path) -> None:
         _make_tree(tmp_path)
         assert Session(tmp_path).run([('docs', 's')], save=False) is None
 
@@ -215,7 +215,7 @@ class TestExcludeToggles:
 
 
 class TestLabels:
-    def test_directory_names_are_not_read_as_markup(self, tmp_path: Path):
+    def test_directory_names_are_not_read_as_markup(self, tmp_path: Path) -> None:
         _make_tree(tmp_path, ['[bold]x', 'a[red]'])
         session = Session(tmp_path)
         session.run([])
@@ -280,7 +280,7 @@ _CONFIGS: list[tuple[set[str], set[str], set[str]]] = [
 
 
 @pytest.mark.parametrize(('excluded', 'specs', 'non_specs'), _CONFIGS)
-def test_tui_and_walker_agree(tmp_path: Path, excluded: set[str], specs: set[str], non_specs: set[str]):
+def test_tui_and_walker_agree(tmp_path: Path, excluded: set[str], specs: set[str], non_specs: set[str]) -> None:
     """Every directory the TUI labels as specs is exactly where the walker counts Markdown as specs."""
     _make_tree(tmp_path)
     session = Session(tmp_path, excluded, specs, non_specs)
@@ -294,13 +294,13 @@ def test_tui_and_walker_agree(tmp_path: Path, excluded: set[str], specs: set[str
 
 
 class TestRootSpec:
-    def test_s_on_the_root_marks_everything(self, tmp_path: Path):
+    def test_s_on_the_root_marks_everything(self, tmp_path: Path) -> None:
         _make_tree(tmp_path)
         session = Session(tmp_path)
         assert session.run([('', 's')]) == (set(), {'.'}, set())
         assert session.labels['docs'] == 'S docs (specs)'
 
-    def test_root_inside_an_auto_spec_dir_shows_specs_and_can_be_turned_off(self, tmp_path: Path):
+    def test_root_inside_an_auto_spec_dir_shows_specs_and_can_be_turned_off(self, tmp_path: Path) -> None:
         """Setup run from inside plans/ must show what the run will count, and offer a way out."""
         _make_tree(tmp_path)
         session = Session(tmp_path, root_auto_spec=True)
@@ -312,14 +312,16 @@ class TestRootSpec:
 
 
 class TestRoundTrips:
-    def test_s_twice_keeps_an_ignore_that_exists_for_the_children(self, tmp_path: Path):
+    def test_s_twice_keeps_an_ignore_that_exists_for_the_children(self, tmp_path: Path) -> None:
         _make_tree(tmp_path)
         assert Session(tmp_path, non_specs={'src'}).run([('src', 's'), ('src', 's')]) == (set(), set(), {'src'})
 
     @pytest.mark.parametrize(
         ('specs', 'non_specs'), [(set(), set()), (set(), {'src'}), ({'lib'}, {'plans'}), ({'.'}, {'src/agents'})]
     )
-    def test_s_twice_on_any_directory_changes_nothing(self, tmp_path: Path, specs: set[str], non_specs: set[str]):
+    def test_s_twice_on_any_directory_changes_nothing(
+        self, tmp_path: Path, specs: set[str], non_specs: set[str]
+    ) -> None:
         _make_tree(tmp_path)
         dirs = ['', 'plans', 'plans/sub', 'src', 'src/agents', 'src/agents/inner', 'docs', 'lib']
         result = Session(tmp_path, set(), set(specs), set(non_specs)).run([(d, 's') for d in dirs for _ in range(2)])
@@ -335,7 +337,7 @@ class TestNestedConfigs:
         (tmp_path / 'vendor' / '.tally-config.toml').write_text('[exclude]\ndirectories = ["y"]\n')
         return tmp_path
 
-    def test_nested_settings_are_shown_locked_and_not_saved(self, tree: Path):
+    def test_nested_settings_are_shown_locked_and_not_saved(self, tree: Path) -> None:
         session = Session(tree)
         result = session.run([('plans', 's'), ('lib', 's'), ('vendor/y', 'x')])
         assert result == (set(), set(), set())
@@ -343,7 +345,7 @@ class TestNestedConfigs:
         assert session.labels['lib'] == 'S lib (set in a nested config)'
         assert session.labels['vendor/y'] == '✗ y (set in a nested config)'
 
-    def test_tui_and_walker_agree_with_nested_configs(self, tree: Path):
+    def test_tui_and_walker_agree_with_nested_configs(self, tree: Path) -> None:
         session = Session(tree)
         result = session.run([('docs', 's')])
         assert result is not None
@@ -352,7 +354,7 @@ class TestNestedConfigs:
 
 
 class TestNestedConfigPrecedence:
-    def test_deeper_nested_config_wins_and_tui_matches_walker(self, tmp_path: Path):
+    def test_deeper_nested_config_wins_and_tui_matches_walker(self, tmp_path: Path) -> None:
         """lib/ marks notes as specs; lib/notes/ ignores itself. The deeper config wins in the TUI too."""
         _make_tree(tmp_path, ['lib/notes'])
         (tmp_path / 'lib' / '.tally-config.toml').write_text('[specs]\ndirectories = ["notes"]\n')
@@ -365,7 +367,7 @@ class TestNestedConfigPrecedence:
         assert walked['lib/notes'] == 'docs'
         assert {d for d, cat in walked.items() if cat == 'specs'} == {d for d in walked if session.flags[d]}
 
-    def test_excluding_a_dir_whose_spec_setting_is_nested_drops_the_credit(self, tmp_path: Path):
+    def test_excluding_a_dir_whose_spec_setting_is_nested_drops_the_credit(self, tmp_path: Path) -> None:
         _make_tree(tmp_path, ['lib/l'])
         (tmp_path / 'lib' / '.tally-config.toml').write_text('[specs]\ndirectories = ["."]\n')
         session = Session(tmp_path)
@@ -376,7 +378,7 @@ class TestNestedConfigPrecedence:
 class TestParentConfigs:
     """Settings inherited from configs above the scan root are shown locked and never saved."""
 
-    def test_inherited_exclusion_is_locked(self, tmp_path: Path):
+    def test_inherited_exclusion_is_locked(self, tmp_path: Path) -> None:
         _make_tree(tmp_path)
         session = Session(tmp_path, inherited=TallyConfig({'src/vendor'}))
         result = session.run([('src/vendor', 'x'), ('src/vendor', 's')])
@@ -391,7 +393,7 @@ class TestParentConfigs:
         assert session.labels['src'] == '✗ src (set in a parent config)'
         assert not any(d.startswith('src/') for d in session.labels)
 
-    def test_inherited_spec_settings_are_locked(self, tmp_path: Path):
+    def test_inherited_spec_settings_are_locked(self, tmp_path: Path) -> None:
         _make_tree(tmp_path)
         session = Session(tmp_path, inherited=TallyConfig(spec_dirs={'docs'}, non_spec_dirs={'plans'}))
         result = session.run([('docs', 's'), ('plans', 's')])
@@ -400,14 +402,14 @@ class TestParentConfigs:
         assert session.labels['plans'] == '✓ plans (not specs) (set in a parent config)'
         assert session.labels['plans/sub'] == '✓ sub'
 
-    def test_inherited_root_spec_is_shown_on_the_root(self, tmp_path: Path):
+    def test_inherited_root_spec_is_shown_on_the_root(self, tmp_path: Path) -> None:
         _make_tree(tmp_path, ['docs'])
         session = Session(tmp_path, inherited=TallyConfig(spec_dirs={'.'}))
         session.run([('', 's')])
         assert session.root_label == f'{tmp_path.name} (specs) (set in a parent config)'
         assert session.labels['docs'] == 'S docs (specs)'
 
-    def test_a_local_override_of_a_parent_setting_stays_editable(self, tmp_path: Path):
+    def test_a_local_override_of_a_parent_setting_stays_editable(self, tmp_path: Path) -> None:
         """The parent marks docs as specs, the local config ignores it: the local entry is the user's to change."""
         _make_tree(tmp_path, ['docs'])
         session = Session(tmp_path, non_specs={'docs'}, inherited=TallyConfig(spec_dirs={'docs'}))
@@ -415,14 +417,14 @@ class TestParentConfigs:
         assert result == (set(), set(), set())  # dropping the override lets the parent's setting apply
         assert session.labels['docs'] == 'S docs'
 
-    def test_nested_config_beats_an_inherited_setting(self, tmp_path: Path):
+    def test_nested_config_beats_an_inherited_setting(self, tmp_path: Path) -> None:
         _make_tree(tmp_path, ['lib/l'])
         (tmp_path / 'lib' / '.tally-config.toml').write_text('[specs]\nignore = ["."]\n')
         session = Session(tmp_path, inherited=TallyConfig(spec_dirs={'lib'}))
         session.run([])
         assert session.labels['lib'] == '✓ lib (not specs) (set in a nested config)'
 
-    def test_tui_and_walker_agree_with_parent_configs(self, tmp_path: Path):
+    def test_tui_and_walker_agree_with_parent_configs(self, tmp_path: Path) -> None:
         _make_tree(tmp_path)
         inherited = TallyConfig({'lib'}, {'docs'}, {'src/agents'})
         session = Session(tmp_path, inherited=inherited)
@@ -621,7 +623,7 @@ class TestExclusionPrecedence:
 
 
 class TestPatternExclusions:
-    def test_pattern_excluded_directory_is_shown_locked(self, tmp_path: Path):
+    def test_pattern_excluded_directory_is_shown_locked(self, tmp_path: Path) -> None:
         _make_tree(tmp_path, ['src/fixtures/deep', 'lib'])
         session = Session(tmp_path, patterns=['fixtures/'])
         result = session.run([('src/fixtures', 'x'), ('src/fixtures', 's')])
@@ -629,7 +631,7 @@ class TestPatternExclusions:
         assert session.labels['src/fixtures'] == 'fixtures (excluded by pattern)'
         assert 'src/fixtures/deep' not in session.labels  # the walker never enters it either
 
-    def test_tui_and_walker_agree_with_patterns(self, tmp_path: Path):
+    def test_tui_and_walker_agree_with_patterns(self, tmp_path: Path) -> None:
         _make_tree(tmp_path, ['plans/sub', 'src/fixtures', 'docs'])
         session = Session(tmp_path, patterns=['fixtures/', '/plans/sub/'])
         result = session.run([])
@@ -645,7 +647,7 @@ class TestPatternExclusions:
 
 
 class TestNestedPatternLayers:
-    def test_tui_and_walker_agree_with_nested_patterns(self, tmp_path: Path):
+    def test_tui_and_walker_agree_with_nested_patterns(self, tmp_path: Path) -> None:
         _make_tree(tmp_path, ['crate/gen', 'crate/src', 'gen'])
         (tmp_path / 'crate' / '.tally-config.toml').write_text('[exclude]\npatterns = ["/gen/"]\n')
         session = Session(tmp_path)
@@ -756,7 +758,7 @@ class TestNestedConfigDiscovery:
 
 
 class TestLabels2:
-    def test_not_specs_shows_on_any_ignored_directory(self, tmp_path: Path):
+    def test_not_specs_shows_on_any_ignored_directory(self, tmp_path: Path) -> None:
         _make_tree(tmp_path)
         session = Session(tmp_path, specs={'.'}, non_specs={'docs'})
         session.run([])
@@ -782,11 +784,13 @@ _SUP = SpecState(False, True)
         ('plans', _N, set(), {'plans'}, _SUP),
     ],
 )
-def test_spec_state_rule(rel: str, parent: SpecState, specs: set[str], non_specs: set[str], expected: SpecState):
+def test_spec_state_rule(
+    rel: str, parent: SpecState, specs: set[str], non_specs: set[str], expected: SpecState
+) -> None:
     assert spec_state(rel, rel.rsplit('/', 1)[-1], parent, specs, non_specs) == expected
 
 
-def test_root_spec_state_rule():
+def test_root_spec_state_rule() -> None:
     assert root_spec_state(set(), set()) == _N
     assert root_spec_state(set(), set(), auto=True) == _P
     assert root_spec_state(set(), {'.'}, auto=True) == _SUP

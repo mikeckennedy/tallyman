@@ -32,40 +32,40 @@ def _walked(root: Path) -> set[str]:
 
 
 class TestFindGitRoot:
-    def test_finds_git_root(self, tmp_path: Path):
+    def test_finds_git_root(self, tmp_path: Path) -> None:
         (tmp_path / '.git').mkdir()
         assert find_git_root(tmp_path) == tmp_path
 
-    def test_finds_git_root_from_subdirectory(self, tmp_path: Path):
+    def test_finds_git_root_from_subdirectory(self, tmp_path: Path) -> None:
         (tmp_path / '.git').mkdir()
         sub = tmp_path / 'src' / 'app'
         sub.mkdir(parents=True)
         assert find_git_root(sub) == tmp_path
 
-    def test_returns_none_when_no_git(self, tmp_path: Path):
+    def test_returns_none_when_no_git(self, tmp_path: Path) -> None:
         assert find_git_root(tmp_path) is None
 
 
 class TestLoadGitignore:
-    def test_loads_gitignore(self, tmp_path: Path):
+    def test_loads_gitignore(self, tmp_path: Path) -> None:
         (tmp_path / '.gitignore').write_text('node_modules/\n*.log\n')
         spec = load_gitignore(tmp_path)
         assert spec.match_file('node_modules/')
         assert spec.match_file('error.log')
         assert not spec.match_file('main.py')
 
-    def test_no_gitignore(self, tmp_path: Path):
+    def test_no_gitignore(self, tmp_path: Path) -> None:
         spec = load_gitignore(tmp_path)
         assert not spec.match_file('anything.py')
 
-    def test_loads_git_info_exclude(self, tmp_path: Path):
+    def test_loads_git_info_exclude(self, tmp_path: Path) -> None:
         git_info = tmp_path / '.git' / 'info'
         git_info.mkdir(parents=True)
         (git_info / 'exclude').write_text('secret/\n')
         spec = load_gitignore(tmp_path)
         assert spec.match_file('secret/')
 
-    def test_loads_gitignore_from_parent_repo(self, tmp_path: Path):
+    def test_loads_gitignore_from_parent_repo(self, tmp_path: Path) -> None:
         """Running from a subdirectory should find the repo root .gitignore."""
         (tmp_path / '.git').mkdir()
         (tmp_path / '.gitignore').write_text('node_modules/\n*.log\n')
@@ -75,7 +75,7 @@ class TestLoadGitignore:
         assert spec.match_file('node_modules/')
         assert spec.match_file('error.log')
 
-    def test_loads_intermediate_gitignore(self, tmp_path: Path):
+    def test_loads_intermediate_gitignore(self, tmp_path: Path) -> None:
         """Collects .gitignore files between git root and analysis dir."""
         (tmp_path / '.git').mkdir()
         (tmp_path / '.gitignore').write_text('*.log\n')
@@ -88,7 +88,7 @@ class TestLoadGitignore:
         assert spec.match_file('error.log')
         assert spec.match_file('vendor/')
 
-    def test_add_directory_is_idempotent(self, tmp_path: Path):
+    def test_add_directory_is_idempotent(self, tmp_path: Path) -> None:
         """A second registration of the same directory must not re-read its .gitignore."""
         sub = tmp_path / 'sub'
         sub.mkdir()
@@ -100,7 +100,7 @@ class TestLoadGitignore:
         assert spec.match_file('sub/error.log')
         assert not spec.match_file('sub/notes.md')
 
-    def test_gitignore_does_not_apply_to_its_own_directory(self, tmp_path: Path):
+    def test_gitignore_does_not_apply_to_its_own_directory(self, tmp_path: Path) -> None:
         sub = tmp_path / 'sub'
         sub.mkdir()
         (sub / '.gitignore').write_text('*\n')
@@ -109,7 +109,7 @@ class TestLoadGitignore:
         assert not spec.match_file('sub/')
         assert spec.match_file('sub/anything.py')
 
-    def test_unreadable_gitignore_is_skipped(self, tmp_path: Path):
+    def test_unreadable_gitignore_is_skipped(self, tmp_path: Path) -> None:
         """A .gitignore that can't be read (here, a directory by that name) must not abort the walk."""
         (tmp_path / 'sub' / '.gitignore').mkdir(parents=True)
         (tmp_path / 'sub' / 'a.py').write_text(X)
@@ -125,7 +125,7 @@ class TestLoadGitignore:
         spec.add_directory('sub', sub)
         assert not spec.match_file('sub/a.py')
 
-    def test_bom_does_not_break_first_pattern(self, tmp_path: Path):
+    def test_bom_does_not_break_first_pattern(self, tmp_path: Path) -> None:
         (tmp_path / '.gitignore').write_text('\ufeff*.md\n')
         (tmp_path / 'a.md').write_text('# a\n')
         (tmp_path / 'a.py').write_text(X)
@@ -293,18 +293,18 @@ class TestInfoExcludeLocation:
 class TestNestedGitignore:
     """Each .gitignore applies to its own directory, at any depth, as git does."""
 
-    def test_nested_gitignore_below_root(self, tmp_path: Path):
+    def test_nested_gitignore_below_root(self, tmp_path: Path) -> None:
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {'app.py': X, 'sub/.gitignore': 'generated/\n', 'sub/generated/big.py': X})
         assert _walked(tmp_path) == {'app.py'}
 
-    def test_self_ignoring_directory(self, tmp_path: Path):
+    def test_self_ignoring_directory(self, tmp_path: Path) -> None:
         """uv and virtualenv write a '*' .gitignore inside the venv they create."""
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {'venv2/.gitignore': '*\n', 'venv2/lib/x.py': X, 'venv2/top.py': X})
         assert _walked(tmp_path) == set()
 
-    def test_intermediate_anchored_pattern(self, tmp_path: Path):
+    def test_intermediate_anchored_pattern(self, tmp_path: Path) -> None:
         """'/build' in sub/.gitignore means sub/build, not sub/sub/build."""
         (tmp_path / '.git').mkdir()
         _make(
@@ -312,19 +312,19 @@ class TestNestedGitignore:
         )
         assert _walked(tmp_path / 'sub') == {'keep.py', 'sub/build/x.py'}
 
-    def test_intermediate_pattern_anchored_to_its_own_directory(self, tmp_path: Path):
+    def test_intermediate_pattern_anchored_to_its_own_directory(self, tmp_path: Path) -> None:
         """'/sub/keep.py' in sub/.gitignore means sub/sub/keep.py, so sub/keep.py stays."""
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {'sub/.gitignore': '/sub/keep.py\n', 'sub/keep.py': X})
         assert _walked(tmp_path / 'sub') == {'keep.py'}
 
-    def test_lazy_gitignore_below_a_subdirectory_scan(self, tmp_path: Path):
+    def test_lazy_gitignore_below_a_subdirectory_scan(self, tmp_path: Path) -> None:
         """Scanning repo/sub, a .gitignore in sub/inner is scoped to sub/inner."""
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {'sub/inner/.gitignore': '/gen/\n', 'sub/inner/gen/a.py': X, 'sub/gen/b.py': X})
         assert _walked(tmp_path / 'sub') == {'gen/b.py'}
 
-    def test_deeper_gitignore_re_includes(self, tmp_path: Path):
+    def test_deeper_gitignore_re_includes(self, tmp_path: Path) -> None:
         (tmp_path / '.git').mkdir()
         _make(
             tmp_path,
@@ -338,13 +338,13 @@ class TestNestedGitignore:
         )
         assert _walked(tmp_path) == {'docs/keep.md'}
 
-    def test_root_gitignore_outranks_info_exclude(self, tmp_path: Path):
+    def test_root_gitignore_outranks_info_exclude(self, tmp_path: Path) -> None:
         (tmp_path / '.git' / 'info').mkdir(parents=True)
         (tmp_path / '.git' / 'info' / 'exclude').write_text('*.py\n')
         _make(tmp_path, {'.gitignore': '!keep.py\n', 'keep.py': X, 'drop.py': X})
         assert _walked(tmp_path) == {'keep.py'}
 
-    def test_nested_gitignore_without_git_repo(self, tmp_path: Path):
+    def test_nested_gitignore_without_git_repo(self, tmp_path: Path) -> None:
         _make(tmp_path, {'app.py': X, 'sub/.gitignore': 'generated/\n', 'sub/generated/big.py': X})
         assert _walked(tmp_path) == {'app.py'}
 
@@ -352,18 +352,18 @@ class TestNestedGitignore:
 class TestNegation:
     """Negations judge only the entry they match, never what lies beneath it."""
 
-    def test_whitelist_style(self, tmp_path: Path):
+    def test_whitelist_style(self, tmp_path: Path) -> None:
         """'*' then '!*/' then '!*.py' keeps every .py file at any depth."""
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {'.gitignore': '*\n!*/\n!*.py\n', 'a.py': X, 'a.md': X, 'sub/b.py': X, 'sub/b.md': X})
         assert _walked(tmp_path) == {'a.py', 'sub/b.py'}
 
-    def test_whitelist_named_directory(self, tmp_path: Path):
+    def test_whitelist_named_directory(self, tmp_path: Path) -> None:
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {'.gitignore': '*\n!src/\n!*.py\n', 'src/b.py': X, 'src/b.md': X, 'other/c.py': X})
         assert _walked(tmp_path) == {'src/b.py'}
 
-    def test_deeper_negated_directory_does_not_re_include_its_contents(self, tmp_path: Path):
+    def test_deeper_negated_directory_does_not_re_include_its_contents(self, tmp_path: Path) -> None:
         """'!dist/' re-includes the dist directory, but '*.md' still applies inside it."""
         (tmp_path / '.git').mkdir()
         _make(
@@ -378,14 +378,14 @@ class TestNegation:
         )
         assert _walked(tmp_path) == {'pkg/dist/a.py'}
 
-    def test_deeper_negated_name_does_not_re_include_its_contents(self, tmp_path: Path):
+    def test_deeper_negated_name_does_not_re_include_its_contents(self, tmp_path: Path) -> None:
         (tmp_path / '.git').mkdir()
         _make(
             tmp_path, {'.gitignore': '*.md\n', 'pkg/.gitignore': '!docs\n', 'pkg/docs/notes.md': X, 'pkg/docs/a.py': X}
         )
         assert _walked(tmp_path) == {'pkg/docs/a.py'}
 
-    def test_scan_root_inside_ignored_directory(self, tmp_path: Path):
+    def test_scan_root_inside_ignored_directory(self, tmp_path: Path) -> None:
         """Git never looks inside an ignored directory, so a .gitignore there can't re-include."""
         (tmp_path / '.git').mkdir()
         _make(tmp_path, {'.gitignore': 'build/\n', 'build/.gitignore': '!*.py\n', 'build/a.py': X})
@@ -621,7 +621,7 @@ _PATTERN_CASES = [
 
 
 @pytest.mark.parametrize(('pattern', 'entry', 'ignored'), _PATTERN_CASES)
-def test_pattern_compiler(tmp_path: Path, pattern: str, entry: str, ignored: bool):
+def test_pattern_compiler(tmp_path: Path, pattern: str, entry: str, ignored: bool) -> None:
     """Each gitignore pattern judges an entry as git does, with no crash or warning on odd input."""
     (tmp_path / '.gitignore').write_text(pattern + '\n')
     with warnings.catch_warnings():
@@ -629,7 +629,7 @@ def test_pattern_compiler(tmp_path: Path, pattern: str, entry: str, ignored: boo
         assert load_gitignore(tmp_path).match_file(entry) is ignored
 
 
-def test_only_newline_separates_patterns(tmp_path: Path):
+def test_only_newline_separates_patterns(tmp_path: Path) -> None:
     """str.splitlines() would split on the form feed; git does not."""
     (tmp_path / '.gitignore').write_bytes(b'a\x0cb.py\r\n')
     spec = load_gitignore(tmp_path)
@@ -823,7 +823,7 @@ needs_git = pytest.mark.skipif(shutil.which('git') is None, reason='git is not i
 
 @needs_git
 @pytest.mark.parametrize(('files', 'scan', 'exclude'), _GIT_CASES)
-def test_matches_git(tmp_path: Path, files: dict[str, str], scan: str, exclude: Optional[str]):
+def test_matches_git(tmp_path: Path, files: dict[str, str], scan: str, exclude: Optional[str]) -> None:
     """walk_project() yields exactly the untracked files git does not ignore."""
     repo = tmp_path / 'repo'
     _make(repo, files)
@@ -1032,7 +1032,7 @@ def test_worktree_inside_repo_matches_git(tmp_path: Path) -> None:
     assert _walked(main) == _git_view(main, env) == {'kept.py', 'top.py', 'wt/kept.py', 'wt/ok.py'}
 
 
-def test_tui_shows_every_directory_as_spec_when_root_is_spec(tmp_path: Path):
+def test_tui_shows_every_directory_as_spec_when_root_is_spec(tmp_path: Path) -> None:
     """spec_dirs containing '.' (the scan root) makes the walker count everything as specs; the TUI must agree."""
     _make(tmp_path, {'a/b/x.md': '# x\n'})
 
@@ -1048,7 +1048,7 @@ def test_tui_shows_every_directory_as_spec_when_root_is_spec(tmp_path: Path):
 class TestConfigPatterns:
     """[exclude] patterns: a second GitIgnoreSpec, one layer per config, scoped to that config's directory."""
 
-    def test_patterns_at_the_scan_root(self, tmp_path: Path):
+    def test_patterns_at_the_scan_root(self, tmp_path: Path) -> None:
         spec = GitIgnoreSpec.for_patterns(tmp_path)
         spec.add_rules(tmp_path, ['tests.rs', '/top.rs', 'fixtures/'])
         assert spec.match_file('tests.rs')
@@ -1058,7 +1058,7 @@ class TestConfigPatterns:
         assert spec.match_file('src/fixtures/')
         assert not spec.match_file('src/fixtures')  # trailing slash: directories only
 
-    def test_ancestor_layer_is_anchored_to_its_own_directory(self, tmp_path: Path):
+    def test_ancestor_layer_is_anchored_to_its_own_directory(self, tmp_path: Path) -> None:
         (tmp_path / '.git').mkdir()
         (tmp_path / 'app' / 'src').mkdir(parents=True)
         spec = GitIgnoreSpec.for_patterns(tmp_path / 'app')
@@ -1067,7 +1067,7 @@ class TestConfigPatterns:
         assert not spec.match_file('src/gen/')
         assert spec.match_file('src/app')  # 'app' matches below the scan root, but never the scan root itself
 
-    def test_deeper_layer_can_re_include(self, tmp_path: Path):
+    def test_deeper_layer_can_re_include(self, tmp_path: Path) -> None:
         (tmp_path / 'crate').mkdir()
         spec = GitIgnoreSpec.for_patterns(tmp_path)
         spec.add_rules(tmp_path / 'crate', ['!tests.rs'])
@@ -1075,19 +1075,19 @@ class TestConfigPatterns:
         assert spec.match_file('other/tests.rs')
         assert not spec.match_file('crate/src/tests.rs')
 
-    def test_registering_a_directory_twice_is_a_no_op(self, tmp_path: Path):
+    def test_registering_a_directory_twice_is_a_no_op(self, tmp_path: Path) -> None:
         spec = GitIgnoreSpec.for_patterns(tmp_path)
         spec.add_rules(tmp_path, ['a.rs'])
         spec.add_rules(tmp_path, ['!a.rs'])
         assert spec.match_file('a.rs')
 
-    def test_directory_outside_the_anchor_is_ignored(self, tmp_path: Path):
+    def test_directory_outside_the_anchor_is_ignored(self, tmp_path: Path) -> None:
         (tmp_path / 'scan').mkdir()
         spec = GitIgnoreSpec.for_patterns(tmp_path / 'scan')  # no repo: the scan root is the anchor
         spec.add_rules(tmp_path, ['*'])
         assert not spec.match_file('a.rs')
 
-    def test_patterns_do_not_mix_with_gitignore(self, tmp_path: Path):
+    def test_patterns_do_not_mix_with_gitignore(self, tmp_path: Path) -> None:
         """A pattern's '!' can't bring back a gitignored file."""
         _make(tmp_path, {'.gitignore': 'gen.py\n', 'gen.py': X, 'a.py': X})
         spec = GitIgnoreSpec.for_patterns(tmp_path)
@@ -1101,6 +1101,6 @@ class TestConfigPatterns:
         assert not spec.match_file('a\\')
         assert spec.match_file('c\\')
 
-    def test_add_rules_needs_an_anchored_spec(self, tmp_path: Path):
+    def test_add_rules_needs_an_anchored_spec(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError):
             GitIgnoreSpec().add_rules(tmp_path, ['a.rs'])

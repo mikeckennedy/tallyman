@@ -77,7 +77,7 @@ def _rich_color_to_rgb(name: str) -> tuple[int, int, int]:
     return (triplet.red, triplet.green, triplet.blue)
 
 
-def _load_font(size: int, bold: bool = False):
+def _load_font(size: int, bold: bool = False) -> Union[FreeTypeFont, ImageFont]:
     """Load monospace font: bundled JetBrains Mono, then system fallbacks."""
     from PIL import ImageFont
 

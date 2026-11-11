@@ -130,7 +130,7 @@ class WalkStats:
 def walk_project(
     root: Path,
     excluded_dirs: set[str],
-    gitignore_spec: GitIgnoreSpec | None = None,
+    gitignore_spec: Optional[GitIgnoreSpec] = None,
     spec_dirs: Optional[set[str]] = None,
     non_spec_dirs: Optional[set[str]] = None,
     exclude_patterns: Optional[GitIgnoreSpec] = None,
