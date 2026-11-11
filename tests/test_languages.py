@@ -42,6 +42,13 @@ class TestIdentifyLanguage:
         assert lang.category == 'code'
         assert lang.single_line_comment == '//'
 
+    def test_matlab_file(self) -> None:
+        lang = identify_language(Path('solver.m'))
+        assert lang is not None
+        assert lang.name == 'MATLAB'
+        assert lang.category == 'code'
+        assert lang.single_line_comment == '%'
+
     def test_markdown(self) -> None:
         lang = identify_language(Path('README.md'))
         assert lang is not None

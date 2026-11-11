@@ -32,7 +32,7 @@ tallyman --exclude-rust-tests  # leave out Rust test code this run (--no-exclude
 tallyman --image            # PNG summary card on the Desktop (--image-light for the light theme)
 
 # Tests
-pytest                      # all 952 tests (about 36 s, mostly the Textual pilot tests)
+pytest                      # all 953 tests (about 36 s, mostly the Textual pilot tests)
 pytest -v                   # verbose
 pytest tests/test_walker.py # single module
 
@@ -139,7 +139,7 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 | Test File | Tests | Covers |
 |---|---|---|
 | `tests/test_counter.py` | 35 | Line counting, line endings, BOMs and wide encodings, Rust test code left out |
-| `tests/test_languages.py` | 67 | Language registry, extension map (lowercase extensions, any-case lookup), Docker/Compose variants, valid and unshared colours (languages, spec variants, Other), `as_spec` |
+| `tests/test_languages.py` | 68 | Language registry, extension map (lowercase extensions, any-case lookup), Docker/Compose variants, valid and unshared colours (languages, spec variants, Other), `as_spec` |
 | `tests/test_display.py` | 44 | Terminal rendering: header escaping, wording, labels, bar width and cells, bar colour runs, no bar for nothing, pattern and Rust test notes, Unicode probe |
 | `tests/test_image.py` | 33 | Slugs, image paths, themes, PNG generation, title and category-line fitting, bar segments and their pixels, legend swatches and wrapping, agreement with the terminal |
 | `tests/test_walker.py` | 73 | Walking, exclusions, spec detection, nested configs, exclude patterns (and a final `--exclude` layer), `WalkStats`, FIFOs and sockets, settings inside nested repos, the per-directory Rust setting (no sibling leak) and its command-line override |
