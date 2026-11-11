@@ -321,39 +321,6 @@ def load_config_chain(
     return chain
 
 
-def discover_nested_configs(root: Path, pattern_layers: Optional[list[PatternLayer]] = None) -> TallyConfig:
-    """Scan subdirectories for .tally-config.toml and merge their settings.
-
-    If *pattern_layers* is given, each nested config's patterns are appended to
-    it, shallowest first.
-
-    Paths from nested configs are translated to be relative to *root*, and a
-    deeper config wins on the same path, as in :func:`merge_configs`.
-    Only non-root configs are considered (the root config is loaded separately).
-    Hidden directories are skipped for performance.
-    """
-    merged = TallyConfig()
-
-    for dirpath_str, dirnames, _filenames in os.walk(root, topdown=True, followlinks=False):
-        # Skip hidden directories (e.g. .git, .venv)
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith('.'))
-
-        dirpath = Path(dirpath_str)
-        rel_dir_str = relative_posix(dirpath, root)
-        if not rel_dir_str:
-            continue
-
-        config_file = dirpath / CONFIG_FILENAME
-        if config_file.is_file() and (loaded := load_nested_config(config_file, rel_dir_str)) is not None:
-            nested, patterns = loaded
-            # Top-down, so an ancestor's config is merged before a descendant's and the deeper one wins
-            merged = merge_configs(merged, nested)
-            if pattern_layers is not None and patterns:
-                pattern_layers.append((dirpath, patterns))
-
-    return merged
-
-
 def _toml_string(value: str) -> str:
     """Quote *value* as a TOML basic string, escaping backslashes, quotes and control characters."""
     out: list[str] = []

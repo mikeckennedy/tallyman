@@ -56,12 +56,13 @@ def _run(
         _spec: object,
         excluded: set[str],
         specs: set[str],
-        non_specs: set[str],
+        *,
+        existing_non_specs: Optional[set[str]] = None,
         inherited: Optional[TallyConfig] = None,
         exclude_patterns: Optional[GitIgnoreSpec] = None,
         **_kwargs: object,
     ) -> object:
-        prefill = (set(excluded), set(specs), set(non_specs))
+        prefill = (set(excluded), set(specs), set(existing_non_specs or ()))
         if setup_calls is not None:
             setup_calls.append(prefill)
         if inherited_calls is not None:
@@ -87,8 +88,8 @@ def _real_setup(actions: Sequence[tuple[str, str]] = ()) -> Callable[..., object
         gitignore_spec: GitIgnoreSpec,
         existing_exclusions: set[str],
         existing_specs: set[str],
+        *,
         existing_non_specs: Optional[set[str]] = None,
-        nested: Optional[TallyConfig] = None,
         root_auto_spec: bool = False,
         inherited: Optional[TallyConfig] = None,
         exclude_patterns: Optional[GitIgnoreSpec] = None,
@@ -100,11 +101,10 @@ def _real_setup(actions: Sequence[tuple[str, str]] = ()) -> Callable[..., object
             gitignore_spec,
             existing_exclusions,
             existing_specs,
-            existing_non_specs,
-            nested,
-            root_auto_spec,
-            inherited,
-            exclude_patterns,
+            existing_non_specs=existing_non_specs,
+            root_auto_spec=root_auto_spec,
+            inherited=inherited,
+            exclude_patterns=exclude_patterns,
         )
 
         async def drive() -> None:
@@ -123,7 +123,7 @@ def _real_setup(actions: Sequence[tuple[str, str]] = ()) -> Callable[..., object
         asyncio.run(drive())
         return app.return_value
 
-    assert inspect.signature(run).parameters.keys() == inspect.signature(cli.run_setup).parameters.keys()
+    assert inspect.signature(run).parameters == inspect.signature(cli.run_setup).parameters
     return run
 
 
@@ -627,13 +627,51 @@ class TestExcludePatterns:
                 'app/main.rs': '',
             },
         )
+        real = _real_setup()  # before _run() replaces cli.run_setup, whose signature it checks
         specs: list[GitIgnoreSpec] = []
         _run(monkeypatch, '--setup', str(tmp_path / 'app'), interactive=True, setup_result=ECHO, pattern_calls=specs)
         assert len(specs) == 1
         assert specs[0].match_file('gen/')  # from the parent
         assert specs[0].match_file('x/fixtures/')  # from the scan root's own config
-        assert specs[0].match_file('crate/out/')  # from a nested config
         assert not specs[0].match_file('out/')
+
+        # A nested config's patterns are added by the TUI itself, as it reaches crate/
+        (tmp_path / 'app' / 'crate' / 'out').mkdir()
+        (tmp_path / 'app' / 'crate' / 'out' / 'o.rs').write_text('')
+        seen: list[GitIgnoreSpec] = []
+
+        def setup(*args: object, exclude_patterns: GitIgnoreSpec, **kwargs: object) -> object:
+            result = real(*args, exclude_patterns=exclude_patterns, **kwargs)
+            seen.append(exclude_patterns)
+            return result
+
+        tally = _run(monkeypatch, '--setup', str(tmp_path / 'app'), interactive=True, setup=setup)
+        assert seen[0].match_file('crate/out/')
+        assert not seen[0].match_file('out/')
+        assert tally is not None
+        assert _files_by_category(tally) == {'Rust/code': 1}  # main.rs: the walk skips crate/out too
+
+    def test_setup_ignores_configs_under_gitignored_directories(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The walker never reads a config in node_modules, so setup doesn't either: the scan root's entry for that
+        path isn't a copy of anything, and stays."""
+        _make(
+            tmp_path,
+            {
+                '.gitignore': 'node_modules/\n',
+                'node_modules/p/.tally-config.toml': '[specs]\ndirectories = ["."]\n',
+                'node_modules/p/index.md': '# p\n',
+                'main.py': 'x = 1\n',
+            },
+        )
+        tally = _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup=_real_setup())
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+        assert load_config(tmp_path / CONFIG_FILENAME) == TallyConfig()
+        (tmp_path / CONFIG_FILENAME).write_text('[specs]\ndirectories = ["node_modules/p"]\n')
+        _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup=_real_setup())
+        assert load_config(tmp_path / CONFIG_FILENAME).spec_dirs == {'node_modules/p'}
 
     def test_patterns_apply_on_a_normal_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         _make(

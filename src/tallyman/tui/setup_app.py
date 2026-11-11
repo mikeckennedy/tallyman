@@ -13,12 +13,15 @@ from textual.containers import Horizontal
 from textual.widgets import Button, Footer, Header, Static, Tree
 from textual.widgets.tree import TreeNode
 
-from tallyman.config import SELF, TallyConfig, merge_configs, without_copies
+from tallyman.config import CONFIG_FILENAME, SELF, TallyConfig, load_nested_config, merge_configs, without_copies
 from tallyman.gitignore import GitIgnoreSpec
 from tallyman.walker import SpecState, root_spec_state, spec_state
 
 # (excluded_dirs, spec_dirs, non_spec_dirs) chosen in setup
 SetupResult = tuple[set[str], set[str], set[str]]
+
+# Spec and ignore entries as the walker will see them (see SetupApp._spec_sets)
+_SpecSets = tuple[set[str], set[str]]
 
 # The entry a directory can carry in the config: none, a spec entry, or an ignore entry
 _UNSET, _SPEC, _IGNORE = 'unset', 'spec', 'ignore'
@@ -31,6 +34,10 @@ class NodeInfo:
     Everything but path, gitignored and pattern_excluded is derived by _refresh(). Those two are fixed when the
     tree is built and mean "gitignore or a pattern would exclude it if no config did": the walker checks a
     config's exclusion first, so config_excluded explains an exclusion before either of them.
+
+    A directory that gitignore, a pattern, or a parent or nested config excludes is a leaf: the walker never
+    enters it, and setup can't change those. One only the scan root's own config excludes keeps its children,
+    since the user can lift that exclusion here.
     """
 
     path: str  # relative to the scan root; '' for the root
@@ -86,19 +93,21 @@ class SetupApp(App[Optional[SetupResult]]):
         gitignore_spec: GitIgnoreSpec,
         existing_exclusions: set[str],
         existing_specs: set[str],
+        *,
         existing_non_specs: Optional[set[str]] = None,
-        nested: Optional[TallyConfig] = None,
         root_auto_spec: bool = False,
         inherited: Optional[TallyConfig] = None,
         exclude_patterns: Optional[GitIgnoreSpec] = None,
     ) -> None:
-        """*existing_** are the editable settings saved at the scan root. *nested* holds settings from
-        .tally-config.toml files below it, and *inherited* the merged settings of those above it, rebased
-        onto the scan root. Tallyman reads those files on every run, so their settings are shown but can't be
-        changed here, and are not saved. *root_auto_spec* says the scan root is inside an auto-detected
-        spec directory (see walker.inside_auto_spec_dir). *exclude_patterns* holds the ``[exclude] patterns``
-        of every config that applies (see GitIgnoreSpec.for_patterns); directories they match are shown
-        excluded and locked, since setup doesn't edit patterns."""
+        """*existing_** are the editable settings saved at the scan root. *inherited* holds the merged settings
+        of the .tally-config.toml files above it, rebased onto the scan root. The configs below it (nested
+        configs) are read while the tree is built, wherever the walker would read them, and also beneath the scan
+        root's own exclusions, which the user can lift here. Tallyman reads all those files on every run, so their
+        settings are shown but can't be changed here, and are not saved. *root_auto_spec* says the scan root is
+        inside an auto-detected spec directory (see walker.inside_auto_spec_dir). *exclude_patterns* holds the
+        ``[exclude] patterns`` of the configs at and above the scan root (see GitIgnoreSpec.for_patterns); nested
+        configs' patterns are added to it as the tree is built. Directories they match are shown excluded and
+        locked, since setup doesn't edit patterns."""
         super().__init__()
         self.root = root
         self.title = f'Setup Tallyman for {root.name}'
@@ -106,7 +115,7 @@ class SetupApp(App[Optional[SetupResult]]):
         self.user_excluded: set[str] = set(existing_exclusions)
         self.user_spec_dirs: set[str] = set(existing_specs)
         self.user_non_spec_dirs: set[str] = set(existing_non_specs or ())
-        self.nested = nested or TallyConfig()
+        self.nested = TallyConfig()  # every nested config read so far, merged: filled in by _populate()
         self.inherited = inherited or TallyConfig()
         self.exclude_patterns = exclude_patterns or GitIgnoreSpec.for_patterns(root)
         self.root_auto_spec = root_auto_spec
@@ -136,14 +145,23 @@ class SetupApp(App[Optional[SetupResult]]):
         yield Footer()
 
     def _populate(self, parent_node: TreeNode[NodeInfo], dir_path: Path, rel_path: str) -> None:
-        """Recursively add subdirectories to the tree. Labels and states are filled in by _refresh()."""
+        """Recursively add subdirectories to the tree, reading nested configs on the way, in walk_project()'s order.
+        Labels and states are filled in by _refresh()."""
         # This directory's own .gitignore governs its children, matching walk_project(). It is also where a
         # nested git repository's own rules start, so this must run before its children are judged.
         self.gitignore_spec.add_directory(rel_path, dir_path)
         try:
             entries = sorted(dir_path.iterdir(), key=lambda p: p.name.lower())
         except PermissionError:
+            # os.walk never yields a directory it can't list, so the walker never reads its config: nor does setup
             return
+        # So does its config. Pre-order is enough: a config only names paths beneath its own directory, so every
+        # config that can name a child is merged before the child is judged, and a deeper one merges later and wins.
+        config_file = dir_path / CONFIG_FILENAME
+        if rel_path and config_file.is_file() and (loaded := load_nested_config(config_file, rel_path)) is not None:
+            nested, patterns = loaded  # a malformed config is None: skipped silently, as in the walker
+            self.nested = merge_configs(self.nested, nested)
+            self.exclude_patterns.add_rules(dir_path, patterns)
 
         for entry in entries:
             if not entry.is_dir(follow_symlinks=False) or entry.name.startswith('.'):
@@ -152,10 +170,13 @@ class SetupApp(App[Optional[SetupResult]]):
             is_gitignored = self.gitignore_spec.match_file(child_rel + '/')
             # The walker checks patterns only for entries gitignore lets through
             by_pattern = not is_gitignored and self.exclude_patterns.match_file(child_rel + '/')
+            # Excluded by a parent or nested config: setup can't lift that, so it is a leaf
+            locked_out = child_rel in self.inherited.excluded_dirs or child_rel in self.nested.excluded_dirs
             info = NodeInfo(child_rel, gitignored=is_gitignored, pattern_excluded=by_pattern)
             node = parent_node.add(Text(entry.name), data=info)
-            # Don't recurse into gitignored or pattern-excluded dirs: the walker never enters them
-            if not is_gitignored and not by_pattern:
+            # Don't recurse where the walker never goes. The scan root's own exclusions are entered: the user
+            # can lift them here, and then the walker enters them and reads their configs.
+            if not is_gitignored and not by_pattern and not locked_out:
                 self._populate(node, entry, child_rel)
 
     def _drop_copies(self) -> None:
@@ -176,9 +197,10 @@ class SetupApp(App[Optional[SetupResult]]):
 
     # --- deriving state -------------------------------------------------------------------------------------------
 
-    def _spec_sets(self) -> tuple[set[str], set[str]]:
+    def _spec_sets(self) -> _SpecSets:
         """Spec and ignore entries as the walker will see them: parent configs, then these settings, then nested
-        configs, each deeper one winning on the same path."""
+        configs, each deeper one winning on the same path. Only a toggle changes them, and every toggle ends in
+        _refresh(), which computes them once for the whole subtree."""
         user = TallyConfig(set(), self.user_spec_dirs, self.user_non_spec_dirs)
         merged = merge_configs(merge_configs(self.inherited, user), self.nested)
         return merged.spec_dirs, merged.non_spec_dirs
@@ -200,9 +222,10 @@ class SetupApp(App[Optional[SetupResult]]):
         else:
             info.locked_by = None
 
-    def _derive(self, info: NodeInfo, parent: Optional[NodeInfo]) -> None:
-        """Fill in *info*'s exclusion and spec status from the current settings, exactly as the walker decides."""
-        specs, non_specs = self._spec_sets()
+    def _derive(self, info: NodeInfo, parent: Optional[NodeInfo], sets: _SpecSets) -> None:
+        """Fill in *info*'s exclusion and spec status from the current settings (*sets* is _spec_sets()),
+        exactly as the walker decides."""
+        specs, non_specs = sets
         if parent is None:
             info.state = root_spec_state(specs, non_specs, auto=self.root_auto_spec)
             info.spec = info.state.is_spec
@@ -223,15 +246,18 @@ class SetupApp(App[Optional[SetupResult]]):
 
     def _refresh(self, node: TreeNode[NodeInfo]) -> None:
         """Recompute state and label for *node* and everything beneath it."""
+        self._refresh_tree(node, self._spec_sets())
+
+    def _refresh_tree(self, node: TreeNode[NodeInfo], sets: _SpecSets) -> None:
         info = node.data
         assert info is not None
         parent = node.parent.data if node.parent is not None else None
-        self._derive(info, parent)
-        node.set_label(self._label_for(info))
+        self._derive(info, parent, sets)
+        node.set_label(self._label_for(info, sets))
         for child in node.children:
-            self._refresh(child)
+            self._refresh_tree(child, sets)
 
-    def _label_for(self, info: NodeInfo) -> Text:
+    def _label_for(self, info: NodeInfo, sets: _SpecSets) -> Text:
         """*info*'s label. Labels are Text, never markup, so a directory name always shows exactly as it is on disk.
 
         Known limit: Textual's Tree shows only a label's first line, so a name containing a newline is cut short.
@@ -243,7 +269,7 @@ class SetupApp(App[Optional[SetupResult]]):
             if info.locked_by is not None:
                 label.append(f' (set in a {info.locked_by} config)', style='dim')
             return label
-        specs, non_specs = self._spec_sets()
+        specs, non_specs = sets
         explicit_spec = info.path in specs
         label = self._make_label(
             Path(info.path).name,
@@ -348,7 +374,7 @@ class SetupApp(App[Optional[SetupResult]]):
         """Whether *node* is a spec directory under the current settings."""
         assert node.data is not None
         probe = NodeInfo(node.data.path, gitignored=node.data.gitignored, pattern_excluded=node.data.pattern_excluded)
-        self._derive(probe, node.parent.data if node.parent is not None else None)
+        self._derive(probe, node.parent.data if node.parent is not None else None, self._spec_sets())
         return probe.spec
 
     # --- navigation and buttons -----------------------------------------------------------------------------------
@@ -404,8 +430,8 @@ def run_setup(
     gitignore_spec: GitIgnoreSpec,
     existing_exclusions: set[str],
     existing_specs: set[str],
+    *,
     existing_non_specs: Optional[set[str]] = None,
-    nested: Optional[TallyConfig] = None,
     root_auto_spec: bool = False,
     inherited: Optional[TallyConfig] = None,
     exclude_patterns: Optional[GitIgnoreSpec] = None,
@@ -414,17 +440,17 @@ def run_setup(
 
     Returns the (excluded_dirs, spec_dirs, non_spec_dirs) to save at the scan root, or None if the user
     quit without saving. Settings from parent and nested configs are never included, not even as copies an
-    earlier version wrote into the scan root's config: those files keep them.
+    earlier version wrote into the scan root's config: those files keep them. Nested configs are read by the
+    TUI itself (see SetupApp).
     """
     app = SetupApp(
         root,
         gitignore_spec,
         existing_exclusions,
         existing_specs,
-        existing_non_specs,
-        nested,
-        root_auto_spec,
-        inherited,
-        exclude_patterns,
+        existing_non_specs=existing_non_specs,
+        root_auto_spec=root_auto_spec,
+        inherited=inherited,
+        exclude_patterns=exclude_patterns,
     )
     return app.run()

@@ -20,7 +20,6 @@ from tallyman.config import (
     ConfigError,
     PatternLayer,
     TallyConfig,
-    discover_nested_configs,
     find_configs,
     load_config_chain,
     merge_configs,
@@ -124,8 +123,8 @@ def run_setup(
     gitignore_spec: GitIgnoreSpec,
     existing_exclusions: set[str],
     existing_specs: set[str],
+    *,
     existing_non_specs: Optional[set[str]] = None,
-    nested: Optional[TallyConfig] = None,
     root_auto_spec: bool = False,
     inherited: Optional[TallyConfig] = None,
     exclude_patterns: Optional[GitIgnoreSpec] = None,
@@ -139,7 +138,6 @@ def run_setup(
         existing_exclusions,
         existing_specs,
         existing_non_specs=existing_non_specs,
-        nested=nested,
         root_auto_spec=root_auto_spec,
         inherited=inherited,
         exclude_patterns=exclude_patterns,
@@ -196,18 +194,15 @@ def main() -> None:
         # First run or --setup: launch TUI. --setup is how a broken config gets repaired, so skip
         # a malformed one with a warning rather than refuse.
         chain = load_config_chain(config_paths, root, on_error=_warn_and_skip(root))
-        # Nested configs' patterns are registered up front so the TUI sees them; the walker skips repeats
-        nested_layers: list[PatternLayer] = []
-        nested = discover_nested_configs(root, nested_layers)
-        exclude_patterns = _pattern_spec(root, chain.pattern_layers + nested_layers)
+        # The TUI reads nested configs as it builds its tree, adding their patterns to this same spec
+        exclude_patterns = _pattern_spec(root, chain.pattern_layers)
         # Parent and nested configs are shown locked; they stay in their own files, which are read on every run
         result = run_setup(
             root,
             gitignore_spec,
             chain.local.excluded_dirs,
             chain.local.spec_dirs,
-            chain.local.non_spec_dirs,
-            nested=nested,
+            existing_non_specs=chain.local.non_spec_dirs,
             inherited=chain.inherited,
             root_auto_spec=root_auto_spec,
             exclude_patterns=exclude_patterns,

@@ -12,7 +12,6 @@ from tallyman.config import (
     CONFIG_FILENAME,
     ConfigError,
     TallyConfig,
-    discover_nested_configs,
     find_configs,
     load_config,
     load_config_chain,
@@ -445,14 +444,6 @@ class TestPatterns:
         ]
         assert chain.local.patterns == ['b.rs', '!c.rs']
 
-    def test_nested_configs_report_their_layers(self, tmp_path: Path):
-        _write(tmp_path / 'a' / CONFIG_FILENAME, '[exclude]\npatterns = ["x.rs"]\n')
-        _write(tmp_path / 'a' / 'b' / CONFIG_FILENAME, '[exclude]\npatterns = ["y.rs"]\n')
-        _write(tmp_path / 'c' / CONFIG_FILENAME, '[exclude]\ndirectories = ["z"]\n')
-        layers: list[tuple[Path, list[str]]] = []
-        discover_nested_configs(tmp_path, layers)
-        assert layers == [(tmp_path / 'a', ['x.rs']), (tmp_path / 'a' / 'b', ['y.rs'])]
-
 
 class TestSaveConfig:
     def test_round_trip(self, tmp_path: Path):
@@ -527,73 +518,3 @@ class TestSaveConfig:
         save_config(config, {'vendor'}, set())
         assert config.is_symlink()
         assert load_config(target).excluded_dirs == {'vendor'}
-
-
-class TestDiscoverNestedConfigs:
-    def test_finds_nested_exclusions(self, tmp_path: Path):
-        """Exclusions from a nested config are translated to root-relative paths."""
-        project = tmp_path / 'project1'
-        project.mkdir()
-        save_config(project / CONFIG_FILENAME, {'vendor', 'static/external'}, set())
-
-        result = discover_nested_configs(tmp_path)
-        assert result.excluded_dirs == {'project1/vendor', 'project1/static/external'}
-
-    def test_finds_nested_spec_dirs(self, tmp_path: Path):
-        """Spec dirs from a nested config are translated to root-relative paths."""
-        project = tmp_path / 'project1'
-        project.mkdir()
-        save_config(project / CONFIG_FILENAME, set(), {'docs/arch'})
-
-        result = discover_nested_configs(tmp_path)
-        assert result.spec_dirs == {'project1/docs/arch'}
-
-    def test_ignores_root_config(self, tmp_path: Path):
-        """A config at the root directory itself is not included."""
-        save_config(tmp_path / CONFIG_FILENAME, {'vendor'}, set())
-
-        result = discover_nested_configs(tmp_path)
-        assert result.excluded_dirs == set()
-        assert result.spec_dirs == set()
-
-    def test_multiple_nested_configs(self, tmp_path: Path):
-        """Multiple nested configs are all discovered and merged."""
-        p1 = tmp_path / 'project1'
-        p1.mkdir()
-        save_config(p1 / CONFIG_FILENAME, {'vendor'}, set())
-
-        p2 = tmp_path / 'project2'
-        p2.mkdir()
-        save_config(p2 / CONFIG_FILENAME, {'node_modules'}, {'docs'})
-
-        result = discover_nested_configs(tmp_path)
-        assert result.excluded_dirs == {'project1/vendor', 'project2/node_modules'}
-        assert result.spec_dirs == {'project2/docs'}
-
-    def test_deeply_nested_config(self, tmp_path: Path):
-        """Config found deep in the tree is translated correctly."""
-        deep = tmp_path / 'org' / 'repos' / 'myapp'
-        deep.mkdir(parents=True)
-        save_config(deep / CONFIG_FILENAME, {'typings'}, set())
-
-        result = discover_nested_configs(tmp_path)
-        assert result.excluded_dirs == {'org/repos/myapp/typings'}
-
-    def test_skips_hidden_directories(self, tmp_path: Path):
-        """Configs inside hidden directories are not discovered."""
-        hidden = tmp_path / '.hidden'
-        hidden.mkdir()
-        save_config(hidden / CONFIG_FILENAME, {'vendor'}, set())
-
-        result = discover_nested_configs(tmp_path)
-        assert result.excluded_dirs == set()
-
-    def test_malformed_config_skipped(self, tmp_path: Path):
-        """A malformed config file is silently skipped."""
-        project = tmp_path / 'project1'
-        project.mkdir()
-        (project / CONFIG_FILENAME).write_text('this is not valid toml {{{')
-
-        result = discover_nested_configs(tmp_path)
-        assert result.excluded_dirs == set()
-        assert result.spec_dirs == set()
