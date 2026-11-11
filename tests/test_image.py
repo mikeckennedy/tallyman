@@ -332,6 +332,8 @@ class TestMatchesTerminal:
         segments = bar_segments(tally, with_spaces=with_spaces, max_languages=MAX_LEGEND_ITEMS)
         assert fills == [_rich_color_to_rgb(s.color) for s in segments]  # BarSegment.color is the only source
         assert len(fills) == len(img_legend)
+        fill_of = {s.label: fill for s, fill in zip(segments, fills)}
+        assert fill_of['Markdown (specs)'] != fill_of['Markdown (docs)']  # they drew as one #c0c0c0 block
 
     def test_image_folds_after_five(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         tally = _code_tally([300, 200, 150, 120, 100, 80, 50])  # every language above the threshold

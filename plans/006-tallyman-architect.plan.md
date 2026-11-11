@@ -141,7 +141,7 @@ Each stage feeds the next and knows nothing about the stages after it. Keep it t
 - ❌ **Never write a config entry the loader can't read back.** Every `save_config()` change needs a load/save round-trip test. `[exclude] patterns` are saved verbatim and in file order, never sorted, normalised or deduplicated, because a later `!pattern` undoes an earlier one.
 - ❌ **Never let a config error surface as a traceback.** `load_config()` raises `ConfigError`. A bad config anywhere in the chain from the git root down is reported on stderr, naming that file, with a fix-it hint, and exits 1. Under `--setup` it's a warning and the file is skipped (for the scan root's own config, setup writes a new one). A malformed *nested* config is skipped.
 - ❌ **Never add a runtime dependency without raising it first.** Three is the current count (`rich`, `textual`, `Pillow`); each one costs install time for every user. Gitignore matching was moved in-house to drop `pathspec`.
-- ❌ **Never give two languages the same colour.** Check the new colour against every entry in `LANGUAGES`; `test_no_new_shared_colours` allows only C and its header to share one. The bar and legend are unreadable when two segments match.
+- ❌ **Never give two bar segments the same colour.** Check a new colour against every colour a segment can have: each entry in `LANGUAGES`, each docs language's `spec_color` (its `as_spec()` variant's colour) and `OTHER_COLOR`. `test_no_new_shared_colours` compares them as drawn (the card's RGB and the 256-colour index, so `grey50` and `gray50` are one colour) and allows only C and its header to share one. The bar and legend are unreadable when two segments match.
 - ❌ **Never commit to `main` or push.** On a feature branch, commit per phase. See `CLAUDE.md`.
 
 ### Always
@@ -187,7 +187,7 @@ These are the rules the codebase depends on. A change that breaks one is a bug, 
 - `specs`, `plans`, `specifications` and `agents` directories (any case) are auto-detected at any depth. Spec status cascades to subdirectories.
 - `[specs] ignore` switches spec status and auto-detection off for a directory and its descendants. A deeper `[specs] directories` entry still wins. `walker.spec_state()` is the one rule for this; the walker and the TUI both call it.
 - The scan root's own name is never auto-detected, but a scan root inside an auto-detected directory of its git repo counts as specs, unless a config gives the root a `'.'` entry.
-- Only docs-category languages become specs, via the cached `as_spec()`.
+- Only docs-category languages become specs, via the cached `as_spec()`, which swaps in the docs language's `spec_color` so specs and docs never draw as one bar segment.
 
 **Counting**
 - Comment detection is single-line only: the stripped line starts with the language's marker. Block comments count as code. That's a documented limitation, not a bug to "fix" casually.
@@ -231,7 +231,7 @@ Before considering the content:
 
 - Registry entry in `LANGUAGES`, in the right category, with the right comment marker (or `None`).
 - No extension collision with an existing language (`.v`, `.m`, `.pl` and `.r` are the usual traps), and no clash with a `FILENAME_MAP` name or the Dockerfile/Compose variants.
-- A colour no other language uses. Compare it with every colour in `LANGUAGES`, not just the neighbours, and check it parses as a Rich colour.
+- A colour no other language uses. Compare it with every colour in `LANGUAGES`, the spec colours and `OTHER_COLOR`, not just the neighbours, and check it parses as a Rich colour. It must not drop to ANSI `90` (Other's) on a 16-colour terminal. A docs language also needs a `spec_color`, unused elsewhere and different from its docs colour on a 16-colour terminal.
 - README: the category table, the per-language extension table, and both "N languages" counts, recounted against `LANGUAGES`.
 - Tests in `test_languages.py` for identification, plus counting with its comment marker and the walker picking it up.
 

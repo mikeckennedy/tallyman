@@ -55,6 +55,10 @@ Edits:
 
 No changelog entry: `.R` files were counted before and still are.
 
+## Step 4b - `.cursor/rules/coding-guidelines.mdc` (added after the plan 009 review)
+
+This tracked file repeats CLAUDE.md's data-structure summary and has drifted: its `Language(frozen=True)` line lacks `spec_color` (plan 009), its `as_spec()` line says only the category changes (it also swaps in `spec_color`), and its `TallyConfig` line lacks `non_spec_dirs` and `patterns`. Bring every data-structure and design line in it in line with CLAUDE.md as it stands after plans 008-011, or, if Michael would rather not maintain two copies, reduce it to a pointer to CLAUDE.md. Default: update it to match.
+
 ## Step 5 - Final recount
 
 Run this after everything above, so it includes this plan's new tests (one in phase 1, three in this phase) and anything 008 to 011 added.

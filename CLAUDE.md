@@ -29,7 +29,7 @@ tallyman --with-spaces      # totals and bar use total lines, not effective line
 tallyman --image            # PNG summary card on the Desktop (--image-light for the light theme)
 
 # Tests
-pytest                      # all 547 tests (about 20 s, mostly the Textual pilot tests)
+pytest                      # all 560 tests (about 20 s, mostly the Textual pilot tests)
 pytest -v                   # verbose
 pytest tests/test_walker.py # single module
 
@@ -69,7 +69,7 @@ cli.main()
 | Module | Role |
 |---|---|
 | `src/tallyman/cli.py` | Entry point. Sets stdout to replace characters it can't encode, arg parsing, config loading and errors, no-terminal handling, orchestrates the pipeline |
-| `src/tallyman/languages.py` | Language registry (40+ languages). Frozen dataclasses with name, category, color, comment marker, extensions. `EXTENSION_MAP` for O(1) lookup. `OTHER_COLOR` for the bar's "Other" segment |
+| `src/tallyman/languages.py` | Language registry (40+ languages). Frozen dataclasses with name, category, color, comment marker, extensions, and `spec_color` on docs languages. `EXTENSION_MAP` for O(1) lookup. `OTHER_COLOR` for the bar's "Other" segment |
 | `src/tallyman/walker.py` | Directory traversal. Respects gitignore, config exclusions and `[exclude] patterns`. Detects spec dirs. Yields `(Path, Language)`; fills `WalkStats` |
 | `src/tallyman/gitignore.py` | Gitignore rules (`GitIgnoreSpec`, `load_gitignore`, `find_git_root`). Own pattern compiler that follows gitignore(5). `GitIgnoreSpec.for_patterns()` + `add_rules()` hold `[exclude] patterns` |
 | `src/tallyman/encoding.py` | BOM detection: `text_encoding()`, `has_wide_bom()`. Shared by walker (binary check), counter and config loading |
@@ -89,7 +89,7 @@ cli.main()
 ```python
 # Dataclasses use slots=True (TallyConfig is a plain dataclass; SpecState is a NamedTuple)
 
-Language(frozen=True)         # name, category, color, single_line_comment, extensions
+Language(frozen=True)         # name, category, color, single_line_comment, extensions; spec_color (docs only, keyword-only)
 FileCount                     # total_lines, code_lines, comment_lines, blank_lines
 LanguageStats                 # language, file_count, total_lines, code_lines, comment_lines, blank_lines;
                               # .effective_lines is the one definition (code lines, or non-blank without a comment marker)
@@ -107,7 +107,7 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 
 1. **Language objects are frozen and identity matters.** `Markdown(docs)` and `Markdown(specs)` are distinct objects. Aggregation groups by Language object, not name alone.
 
-2. **Spec variants via `as_spec()`.** When a docs-category file is found in a spec directory, `as_spec()` creates a new Language with `category='specs'`. Results are cached with `@cache`.
+2. **Spec variants via `as_spec()`.** When a docs-category file is found in a spec directory, `as_spec()` creates a new Language with `category='specs'` and the docs language's `spec_color` as its colour, so specs and docs never share a bar colour. Results are cached with `@cache`.
 
 3. **Comment detection is single-line only.** Strips the line, checks `startswith(marker)`. Multi-line comments (`/* */`, `""" """`) are NOT detected.
 
@@ -128,8 +128,8 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 | Test File | Tests | Covers |
 |---|---|---|
 | `tests/test_counter.py` | 29 | Line counting, line endings, BOMs and wide encodings |
-| `tests/test_languages.py` | 58 | Language registry, extension map, Docker/Compose variants, valid and unshared colours, `as_spec` |
-| `tests/test_display.py` | 32 | Terminal rendering: header escaping, wording, labels, bar width and cells, no bar for nothing, pattern note, Unicode probe |
+| `tests/test_languages.py` | 65 | Language registry, extension map, Docker/Compose variants, valid and unshared colours (languages, spec variants, Other), `as_spec` |
+| `tests/test_display.py` | 38 | Terminal rendering: header escaping, wording, labels, bar width and cells, bar colour runs, no bar for nothing, pattern note, Unicode probe |
 | `tests/test_image.py` | 27 | Slugs, image paths, themes, PNG generation, title fitting, bar segments, agreement with the terminal |
 | `tests/test_walker.py` | 55 | Walking, exclusions, spec detection, nested configs, exclude patterns, `WalkStats`, FIFOs and sockets |
 | `tests/test_gitignore.py` | 101 | Git root, gitignore loading and scoping, negation, TUI agreement, parity with `git`, config pattern layers, FIFO `.gitignore` |
@@ -156,7 +156,8 @@ Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` creat
 Add a `Language(...)` instance to `languages.py` and include it in the `LANGUAGES` tuple. The `EXTENSION_MAP` is built automatically. Then:
 
 - Check the extensions don't collide with an existing language.
-- Pick a colour no other language uses. `test_languages.py` checks every colour parses and that no new colour is shared (only C and its header may share one).
+- Pick a colour no other language uses. `test_languages.py` checks every colour parses and that no new colour is shared, comparing resolved colours (the card's RGB and the 256-colour index) across languages, spec variants and Other (only C and its header may share one). No language may drop to ANSI `90` on a 16-colour terminal: that is Other's.
+- A new docs language must set `spec_color`: a colour no other entry uses, and one that differs from its docs colour on a 16-colour terminal.
 - Update the README's category table, the per-language extension table, and both "N languages" counts. Recount them against `LANGUAGES`.
 - Add tests in `test_languages.py`.
 

@@ -57,6 +57,10 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - A `.tally-config.toml` saved with a byte-order mark loads instead of failing with "Invalid statement". A UTF-8, UTF-16 or UTF-32 mark picks the encoding, as it does for source files; `--setup` rewrites the file as UTF-8 without one.
 - Files: `src/tallyman/config.py`, `tests/test_config.py`, `tests/test_cli.py`, `README.md`, `CLAUDE.md`
 - Plan: `plans/008-output-hardening/phase-02-files-stdout-config.plan.md`
+- Spec and docs Markdown no longer merge into one block in the composition bar. Spec variants of docs languages now have their own colour (Markdown violet, reStructuredText dark sea green), in every terminal colour mode and on the image card.
+- The bar's "Other" segment is now dark grey (`grey37`). It no longer merges with TOML, or with Markdown on 16-colour terminals.
+- Files: `src/tallyman/languages.py`, `tests/test_languages.py`, `tests/test_display.py`, `tests/test_image.py`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
+- Plan: `plans/009-spec-colours.plan.md`
 - An empty `NO_COLOR` no longer disables colour; per no-color.org only a non-empty value does.
 - Solidity's colour changed from `bright_cyan`, which SQL also uses, to `slate_blue1`, so the two are distinguishable in the bar.
 - README and `CLAUDE.md` describe the current behaviour: config search and rebasing, `[specs] ignore`, `"."`, no-terminal runs, what is never counted, and the language count (43, not 41).

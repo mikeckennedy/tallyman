@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import io
+import re
 import sys
 from types import SimpleNamespace
-from typing import Optional
+from typing import Literal, Optional
 
 import pytest
 from rich.console import Console
 
-from tallyman.aggregator import aggregate, bar_segments
+from tallyman.aggregator import TallyResult, aggregate, bar_segments
 from tallyman.counter import FileCount
 from tallyman.display import BAR_WIDTH, BLOCK_CHAR, _bar_text, _can_encode_unicode, display_results
 from tallyman.languages import EXTENSION_MAP, as_spec
@@ -76,6 +77,9 @@ class TestBody:
         display_results(tally, 'proj', console=Console(file=out, no_color=True, width=100))
         assert 'Markdown (docs)' in out.getvalue()
         assert 'Markdown (specs)' in out.getvalue()
+        coloured = _render_coloured(tally, '256')
+        assert '\x1b[38;5;177mMarkdown (specs)' in coloured  # the spec colour, violet
+        assert '\x1b[37mMarkdown (docs)' in coloured
 
     def test_more_than_three_languages_in_a_category_ends_with_etc(self):
         entries = [(ext, FileCount(total_lines=10, code_lines=10)) for ext in ('.py', '.rs', '.go', '.java')]
@@ -168,6 +172,52 @@ class TestPercentageBar:
             ('.go', FileCount(total_lines=1, code_lines=1)),
         ]
         assert _render_tally(entries).splitlines()[-1].endswith('Other <1%')
+
+
+_ColorSystem = Literal['standard', '256', 'truecolor']
+_COLOR_SYSTEMS: list[_ColorSystem] = ['standard', '256', 'truecolor']
+
+
+def _render_coloured(tally: TallyResult, color_system: _ColorSystem) -> str:
+    """Render to a colour terminal, with display.py's own highlight=False."""
+    out = io.StringIO()
+    console = Console(
+        file=out, force_terminal=True, color_system=color_system, no_color=False, highlight=False, width=100
+    )
+    display_results(tally, 'proj', console=console)
+    return out.getvalue()
+
+
+def _bar_runs(tally: TallyResult, color_system: _ColorSystem) -> list[str]:
+    """The SGR code of each colour run in the bar. Rich merges neighbouring runs with the same style,
+    so two segments in one colour show up as one run."""
+    (line,) = [line for line in _render_coloured(tally, color_system).splitlines() if BLOCK_CHAR in line]
+    return re.findall(r'\x1b\[([0-9;]+)m' + re.escape(BLOCK_CHAR), line)
+
+
+class TestBarColours:
+    @pytest.mark.parametrize('color_system', _COLOR_SYSTEMS)
+    def test_spec_and_docs_segments_stay_apart(self, color_system: _ColorSystem) -> None:
+        """Markdown (specs) copied the docs colour, so the two drew as one white block."""
+        md = EXTENSION_MAP['.md']
+        tally = aggregate(
+            [(md, FileCount(total_lines=50, code_lines=50)), (as_spec(md), FileCount(total_lines=40, code_lines=40))]
+        )
+        runs = _bar_runs(tally, color_system)
+        assert len(runs) == 2
+        assert runs[0] != runs[1]
+
+    @pytest.mark.parametrize('color_system', _COLOR_SYSTEMS)
+    def test_other_stays_apart_from_its_neighbour(self, color_system: _ColorSystem) -> None:
+        """Other was grey50, TOML's colour, so a TOML segment and Other merged into one run."""
+        entries = [
+            (EXTENSION_MAP['.py'], FileCount(total_lines=93, code_lines=93)),
+            (EXTENSION_MAP['.toml'], FileCount(total_lines=6, code_lines=6)),
+            (EXTENSION_MAP['.json'], FileCount(total_lines=1, code_lines=1)),  # under the cut-off: Other
+        ]
+        runs = _bar_runs(aggregate(entries), color_system)
+        assert len(runs) == 3
+        assert all(a != b for a, b in zip(runs, runs[1:]))
 
 
 def _render_with_stats(stats: Optional[WalkStats], files: bool = True) -> str:

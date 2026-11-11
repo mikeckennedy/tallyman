@@ -181,3 +181,4 @@ On both PNGs (open them with Read), the 34% specs segment is violet and the 6% d
 
 - On the card, standard Rich colours resolve through Rich's default palette, so Python's `yellow` draws olive `#808000` and `red` (Ruby) `#800000`. In the terminal they follow the user's theme. That's a separate decision about the card palette.
 - The card's legend is plain dimmed text with no colour swatches, so segments are matched to names only by order.
+- In 16-colour mode the spec colours share a code with one language each: Markdown (specs) and SCSS both drop to 95, reStructuredText (specs) and Shell to 92. They merge only when those happen to sit next to each other in the bar. Decision 4 limits the 16-colour guarantee to docs/spec pairs and Other, so this is accepted (noted in the architect review).
