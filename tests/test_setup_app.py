@@ -12,7 +12,7 @@ from textual.widgets.tree import TreeNode
 from tallyman.config import TallyConfig, discover_nested_configs, merge_configs
 from tallyman.gitignore import GitIgnoreSpec, load_gitignore
 from tallyman.tui.setup_app import NodeInfo, SetupApp, SetupResult, SetupTree
-from tallyman.walker import SpecState, root_spec_state, spec_state, walk_project
+from tallyman.walker import SpecState, WalkStats, root_spec_state, spec_state, walk_project
 
 TREE = ['plans/sub', 'src/vendor', 'src/agents/inner', 'docs', 'lib']
 
@@ -195,6 +195,21 @@ class TestExcludeToggles:
     def test_cancel_returns_none(self, tmp_path: Path):
         _make_tree(tmp_path)
         assert Session(tmp_path).run([('docs', 's')], save=False) is None
+
+    def test_saving_drops_exclusions_below_an_excluded_directory(self, tmp_path: Path) -> None:
+        _make_tree(tmp_path)
+        result = Session(tmp_path, excluded={'src/vendor', 'src/agents/inner'}).run([('src', 'x')])
+        assert result == ({'src'}, set(), set())
+
+    def test_saving_drops_a_chain_of_nested_exclusions(self, tmp_path: Path) -> None:
+        _make_tree(tmp_path)
+        result = Session(tmp_path, excluded={'src', 'src/agents', 'src/agents/inner'}).run([])
+        assert result == ({'src'}, set(), set())
+
+    def test_sibling_and_prefix_named_exclusions_are_kept(self, tmp_path: Path) -> None:
+        """src2 starts with src, but it isn't beneath it."""
+        _make_tree(tmp_path, ['src', 'src2', 'lib'])
+        assert Session(tmp_path, excluded={'src', 'src2', 'lib'}).run([]) == ({'src', 'src2', 'lib'}, set(), set())
 
 
 class TestLabels:
@@ -414,6 +429,192 @@ class TestParentConfigs:
         walked = _walk_categories(tmp_path, (effective.excluded_dirs, effective.spec_dirs, effective.non_spec_dirs))
         assert 'lib' not in walked
         assert {d for d, cat in walked.items() if cat == 'specs'} == {d for d in walked if session.flags[d]}
+
+
+def _write_configs(root: Path, configs: dict[str, str]) -> None:
+    """Write each nested .tally-config.toml: {directory: contents}."""
+    for directory, content in configs.items():
+        (root / directory / '.tally-config.toml').write_text(content)
+
+
+_NOTHING: SetupResult = (set(), set(), set())
+
+# (tree, nested configs on disk, excluded, specs, non-specs, inherited, what setup saves)
+_COPY_CASES = [
+    (['sub/gen', 'lib'], {'sub': '[exclude]\ndirectories = ["gen"]\n'}, {'sub/gen'}, set(), set(), None, _NOTHING),
+    (['lib/l', 'docs'], {'lib': '[specs]\ndirectories = ["."]\n'}, set(), {'lib'}, set(), None, _NOTHING),
+    (['plans/p', 'docs'], {'plans': '[specs]\nignore = ["."]\n'}, set(), set(), {'plans'}, None, _NOTHING),
+    (['docs', 'lib'], {}, set(), {'docs'}, set(), TallyConfig(spec_dirs={'docs'}), _NOTHING),
+    (['docs', 'lib'], {}, {'lib'}, set(), set(), TallyConfig({'lib'}), _NOTHING),
+    (['docs', 'plans'], {}, set(), set(), {'plans'}, TallyConfig(non_spec_dirs={'plans'}), _NOTHING),
+    # The parent lists docs as both (specs wins there), so the scan root's ignore is an override, not a copy
+    (
+        ['docs', 'lib'],
+        {},
+        set(),
+        set(),
+        {'docs'},
+        TallyConfig(spec_dirs={'docs'}, non_spec_dirs={'docs'}),
+        (set(), set(), {'docs'}),
+    ),
+    # a/b only repeated what the copy of the parent's a already covered, so it goes with it
+    (['a/b', 'lib'], {}, {'a', 'a/b'}, set(), set(), TallyConfig({'a'}), _NOTHING),
+]
+
+
+class TestCopies:
+    """A scan-root entry that a parent or nested config already has in the same set is dropped when setup opens."""
+
+    def test_copy_of_a_nested_exclusion_is_dropped(self, tmp_path: Path) -> None:
+        _make_tree(tmp_path, ['sub/gen'])
+        _write_configs(tmp_path, {'sub': '[exclude]\ndirectories = ["gen"]\n'})
+        session = Session(tmp_path, excluded={'sub/gen'}, nested=discover_nested_configs(tmp_path))
+        assert session.run([]) == (set(), set(), set())
+        assert session.labels['sub/gen'] == '✗ gen (set in a nested config)'
+
+    def test_copy_of_a_nested_spec_setting_is_dropped(self, tmp_path: Path) -> None:
+        _make_tree(tmp_path, ['lib/l'])
+        _write_configs(tmp_path, {'lib': '[specs]\ndirectories = ["."]\n'})
+        session = Session(tmp_path, specs={'lib'}, nested=discover_nested_configs(tmp_path))
+        assert session.run([]) == (set(), set(), set())
+        assert session.labels['lib'] == 'S lib (set in a nested config)'
+
+    def test_copy_of_a_parent_spec_setting_is_dropped_and_locked(self, tmp_path: Path) -> None:
+        _make_tree(tmp_path, ['docs'])
+        session = Session(tmp_path, specs={'docs'}, inherited=TallyConfig(spec_dirs={'docs'}))
+        assert session.run([('docs', 's')]) == (set(), set(), set())  # 's' does nothing: the node is locked
+        assert session.labels['docs'] == 'S docs (set in a parent config)'
+
+    def test_shadowed_entry_is_kept(self, tmp_path: Path) -> None:
+        """The nested config ignores lib, which wins over the scan root's spec entry. Not a copy: it stays."""
+        _make_tree(tmp_path, ['lib/l'])
+        _write_configs(tmp_path, {'lib': '[specs]\nignore = ["."]\n'})
+        session = Session(tmp_path, specs={'lib'}, nested=discover_nested_configs(tmp_path))
+        assert session.run([]) == (set(), {'lib'}, set())
+        assert session.labels['lib'] == '✓ lib (not specs) (set in a nested config)'
+
+    def test_override_of_a_contradictory_parent_is_kept(self, tmp_path: Path) -> None:
+        """The parent lists docs as specs and as ignored, so specs wins there. The scan root's ignore decides it."""
+        _make_tree(tmp_path, ['docs'])
+        inherited = TallyConfig(spec_dirs={'docs'}, non_spec_dirs={'docs'})
+        session = Session(tmp_path, non_specs={'docs'}, inherited=inherited)
+        assert session.run([]) == (set(), set(), {'docs'})
+        assert session.labels['docs'] == '✓ docs (not specs)'
+
+    def test_child_of_a_dropped_exclusion_is_dropped_too(self, tmp_path: Path) -> None:
+        """a is a copy of the parent's exclusion; a/b, beneath it, would otherwise be saved and never be removable."""
+        _make_tree(tmp_path, ['a/b'])
+        session = Session(tmp_path, excluded={'a', 'a/b'}, inherited=TallyConfig({'a'}))
+        assert session.run([]) == (set(), set(), set())
+        assert session.labels['a'] == '✗ a (set in a parent config)'
+
+    @pytest.mark.parametrize(
+        ('dirs', 'configs', 'excluded', 'specs', 'non_specs', 'inherited', 'saved'),
+        _COPY_CASES,
+        ids=[
+            'nested-exclusion',
+            'nested-spec',
+            'nested-ignore',
+            'parent-spec',
+            'parent-exclusion',
+            'parent-ignore',
+            'contradictory-parent',
+            'below-a-copy',
+        ],
+    )
+    def test_tui_and_walker_agree_after_dropping_copies(
+        self,
+        tmp_path: Path,
+        dirs: list[str],
+        configs: dict[str, str],
+        excluded: set[str],
+        specs: set[str],
+        non_specs: set[str],
+        inherited: Optional[TallyConfig],
+        saved: SetupResult,
+    ) -> None:
+        """Dropping a copy never changes a count: the walk with the saved settings matches the original one."""
+        _make_tree(tmp_path, dirs)
+        _write_configs(tmp_path, configs)
+        parent = inherited or TallyConfig()
+        nested = discover_nested_configs(tmp_path)
+        session = Session(tmp_path, set(excluded), set(specs), set(non_specs), nested, inherited=parent)
+        result = session.run([])
+        assert result == saved
+        assert result is not None
+
+        def walk(config: TallyConfig) -> dict[str, str]:
+            effective = merge_configs(parent, config)
+            return _walk_categories(tmp_path, (effective.excluded_dirs, effective.spec_dirs, effective.non_spec_dirs))
+
+        walked = walk(TallyConfig(*result))
+        assert walked == walk(TallyConfig(excluded, specs, non_specs))
+        assert {d for d, cat in walked.items() if cat == 'specs'} == {d for d in walked if session.flags[d]}
+        assert {d for d, ex in session.excluded.items() if not ex} == set(walked) - {'.'}
+
+
+def _pattern_spec(root: Path, patterns: list[str]) -> GitIgnoreSpec:
+    spec = GitIgnoreSpec.for_patterns(root)
+    spec.add_rules(root, patterns)
+    return spec
+
+
+class TestExclusionPrecedence:
+    """Same order as walk_project(): a config exclusion is checked first, then gitignore, then patterns."""
+
+    def test_config_exclusion_outranks_a_pattern(self, tmp_path: Path) -> None:
+        _make_tree(tmp_path, ['vendor', 'lib'])
+        session = Session(tmp_path, excluded={'vendor'}, patterns=['vendor/'])
+        session.run([])
+        assert session.labels['vendor'] == '✗ vendor'
+        session = Session(tmp_path, excluded={'vendor'}, patterns=['vendor/'])
+        assert session.run([('vendor', 'x')]) == (set(), set(), set())
+        assert session.labels['vendor'] == 'vendor (excluded by pattern)'
+
+    @pytest.mark.parametrize(('actions', 'expected'), [([], 1), ([('vendor', 'x')], 2)], ids=['as-opened', 'after-x'])
+    def test_walker_counts_the_pattern_only_where_the_tui_shows_it(
+        self, tmp_path: Path, actions: list[tuple[str, str]], expected: int
+    ) -> None:
+        _make_tree(tmp_path, ['vendor', 'fixtures', 'gen', 'lib'])
+        patterns = ['vendor/', 'fixtures/', 'gen/']
+        inherited = TallyConfig({'gen'})
+        session = Session(tmp_path, excluded={'vendor'}, inherited=inherited, patterns=patterns)
+        result = session.run(actions)
+        assert result is not None
+        effective = merge_configs(inherited, TallyConfig(*result))
+        stats = WalkStats()
+        walked = walk_project(
+            tmp_path,
+            effective.excluded_dirs,
+            load_gitignore(tmp_path),
+            exclude_patterns=_pattern_spec(tmp_path, patterns),
+            stats=stats,
+        )
+        list(walked)  # fills stats
+        shown = [
+            d
+            for d, label in session.labels.items()
+            if '(excluded by pattern)' in label and not session.excluded.get(Path(d).parent.as_posix(), False)
+        ]
+        assert stats.pattern_dirs == len(shown) == expected
+
+    def test_parent_exclusion_outranks_a_pattern(self, tmp_path: Path) -> None:
+        _make_tree(tmp_path, ['gen', 'lib'])
+        session = Session(tmp_path, inherited=TallyConfig({'gen'}), patterns=['gen/'])
+        assert session.run([('gen', 'x')]) == (set(), set(), set())
+        assert session.labels['gen'] == '✗ gen (set in a parent config)'
+
+    def test_config_exclusion_outranks_gitignore(self, tmp_path: Path) -> None:
+        """A user exclusion of a since-gitignored directory can be removed; then gitignore's is locked."""
+        _make_tree(tmp_path, ['build', 'lib'])
+        (tmp_path / '.gitignore').write_text('build/\n')
+        session = Session(tmp_path, excluded={'build'})
+        session.run([])
+        assert session.labels['build'] == '✗ build'
+        session = Session(tmp_path, excluded={'build'})
+        assert session.run([('build', 'x')]) == (set(), set(), set())
+        assert session.labels['build'] == 'build (gitignored)'
+        assert Session(tmp_path, excluded={'build'}).run([('build', 'x'), ('build', 'x')]) == (set(), set(), set())
 
 
 class TestPatternExclusions:

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import codecs
+import os
+import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -17,9 +20,8 @@ from tallyman.config import (
     prefixed,
     rebase_config,
     save_config,
-    without_inherited,
+    without_copies,
 )
-from tallyman.tui.setup_app import SetupApp
 
 
 class TestFindConfigs:
@@ -288,16 +290,37 @@ class TestMergeConfigs:
         assert shallow == TallyConfig({'a'}, {'x'}, set())
 
 
-class TestWithoutInherited:
+class TestWithoutCopies:
     def test_drops_exact_copies(self):
         local = TallyConfig({'a', 'b'}, {'s'}, {'i'})
         inherited = TallyConfig({'a'}, {'s'}, {'i', 'other'})
-        assert without_inherited(local, inherited) == TallyConfig({'b'})
+        assert without_copies(local, inherited) == TallyConfig({'b'})
 
     def test_keeps_a_contradictory_local_pair(self):
         """docs listed as both specs and ignored locally: specs wins now, and must still win after the save."""
         local = TallyConfig(spec_dirs={'docs'}, non_spec_dirs={'docs'})
-        assert without_inherited(local, TallyConfig(spec_dirs={'docs'})) == local
+        assert without_copies(local, TallyConfig(spec_dirs={'docs'})) == local
+
+    def test_drops_copies_of_every_other_config(self) -> None:
+        """A parent and a nested config: copies of either go, opposite-set entries and a contradictory pair stay."""
+        local = TallyConfig(
+            {'sub/gen', 'vendor', 'build'},
+            {'docs', 'lib', 'both', 'notes'},
+            {'plans', 'both', 'sub/plans'},
+        )
+        parent = TallyConfig({'vendor'}, {'docs', 'both', 'plans'}, {'notes'})
+        nested = TallyConfig({'sub/gen'}, {'lib'}, {'sub/plans', 'both'})
+        assert without_copies(local, parent, nested) == TallyConfig({'build'}, {'both', 'notes'}, {'plans', 'both'})
+
+    def test_keeps_an_override_of_a_contradictory_other(self) -> None:
+        """The parent lists docs as both, so specs wins there: the local ignore is an override, not a copy."""
+        local = TallyConfig(spec_dirs={'lib'}, non_spec_dirs={'docs'})
+        parent = TallyConfig(spec_dirs={'docs', 'lib'}, non_spec_dirs={'docs', 'lib'})
+        assert without_copies(local, parent) == local
+
+    def test_no_others_changes_nothing(self) -> None:
+        local = TallyConfig({'a'}, {'s'}, {'i'})
+        assert without_copies(local) == local
 
 
 class TestPrefixed:
@@ -409,7 +432,7 @@ class TestPatterns:
         assert rebase_config(config, tmp_path, tmp_path / 'a').patterns == []
         assert prefixed(config, 'p').patterns == []
         assert merge_configs(config, config).patterns == []
-        assert without_inherited(config, TallyConfig()).patterns == []
+        assert without_copies(config, TallyConfig()).patterns == []
 
     def test_chain_keeps_one_layer_per_config(self, tmp_path: Path):
         top = _write(tmp_path / CONFIG_FILENAME, '[exclude]\npatterns = ["a.rs"]\n')
@@ -477,6 +500,33 @@ class TestSaveConfig:
         save_config(config, {'vendor'}, set())
         content = config.read_text()
         assert '[specs]' not in content
+
+    @pytest.mark.skipif(not hasattr(os, 'mkfifo'), reason='named pipes need os.mkfifo (not on Windows)')
+    def test_a_fifo_in_the_way_is_not_opened(self, tmp_path: Path, make_fifo: Callable[..., Path]) -> None:
+        """Opening a FIFO for writing blocks until something reads it, so setup's save would hang."""
+        config = make_fifo(tmp_path / CONFIG_FILENAME, for_writer=True)
+        with pytest.raises(OSError, match='not a regular file'):
+            save_config(config, {'vendor'}, set())
+
+    @pytest.mark.skipif(sys.platform == 'win32', reason='creating symlinks needs privileges on Windows')
+    def test_a_dangling_symlink_is_refused(self, tmp_path: Path) -> None:
+        """Writing through it would create its target, which may be anywhere."""
+        config = tmp_path / CONFIG_FILENAME
+        config.symlink_to(tmp_path / 'elsewhere' / 'missing.toml')
+        (tmp_path / 'elsewhere').mkdir()
+        with pytest.raises(OSError, match='not a regular file'):
+            save_config(config, {'vendor'}, set())
+        assert not (tmp_path / 'elsewhere' / 'missing.toml').exists()
+
+    @pytest.mark.skipif(sys.platform == 'win32', reason='creating symlinks needs privileges on Windows')
+    def test_a_symlink_to_a_regular_file_is_written_through(self, tmp_path: Path) -> None:
+        target = tmp_path / 'real.toml'
+        target.write_text('')
+        config = tmp_path / CONFIG_FILENAME
+        config.symlink_to(target)
+        save_config(config, {'vendor'}, set())
+        assert config.is_symlink()
+        assert load_config(target).excluded_dirs == {'vendor'}
 
 
 class TestDiscoverNestedConfigs:
@@ -547,23 +597,3 @@ class TestDiscoverNestedConfigs:
         result = discover_nested_configs(tmp_path)
         assert result.excluded_dirs == set()
         assert result.spec_dirs == set()
-
-
-class TestCleanExclusions:
-    def test_removes_children_of_excluded_parents(self):
-        excluded = {'vendor', 'vendor/sub1', 'vendor/sub2', 'other'}
-        cleaned = SetupApp._clean_exclusions(excluded)
-        assert cleaned == {'vendor', 'other'}
-
-    def test_no_redundancy(self):
-        excluded = {'src', 'tests'}
-        cleaned = SetupApp._clean_exclusions(excluded)
-        assert cleaned == {'src', 'tests'}
-
-    def test_empty(self):
-        assert SetupApp._clean_exclusions(set()) == set()
-
-    def test_nested_depth(self):
-        excluded = {'a', 'a/b', 'a/b/c'}
-        cleaned = SetupApp._clean_exclusions(excluded)
-        assert cleaned == {'a'}

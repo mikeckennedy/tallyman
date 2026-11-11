@@ -9,15 +9,17 @@ from pathlib import Path
 
 import pytest
 
-FIFO_UNBLOCK_AFTER = 2.0  # seconds before a blocked reader of a test FIFO is released
+FIFO_UNBLOCK_AFTER = 2.0  # seconds before a blocked reader or writer of a test FIFO is released
 
 
 @pytest.fixture
 def make_fifo() -> Iterator[Callable[..., Path]]:
-    """Create a FIFO. If anything blocks opening it, a writer unblocks it after 2 s, sending *payload*,
-    so a regression fails its assertion instead of hanging the suite.
+    """Create a FIFO. If anything blocks opening it, it is unblocked after 2 s, so a regression fails its
+    assertion instead of hanging the suite: a blocked reader by a writer sending *payload*, or, with
+    *for_writer*, a blocked writer by a reader that drains it until the test ends.
 
-    Call it as ``make_fifo(path, payload=b'')``. Tests that use it must skip where ``os.mkfifo`` is missing.
+    Call it as ``make_fifo(path, payload=b'', for_writer=False)``. Tests that use it must skip where
+    ``os.mkfifo`` is missing.
     """
     stop = threading.Event()
     threads: list[threading.Thread] = []
@@ -43,11 +45,30 @@ def make_fifo() -> Iterator[Callable[..., Path]]:
                 os.close(fd)
             stop.wait(0.05)
 
-    def make(path: Path, payload: bytes = b'') -> Path:
+    def drain(path: Path) -> None:
+        if stop.wait(FIFO_UNBLOCK_AFTER):
+            return
+        # Opening for reading without blocking always succeeds; while this end is open, a writer's open
+        # completes and its writes land here instead of failing with a broken pipe
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        try:
+            while not stop.is_set():
+                try:
+                    os.read(fd, 65536)
+                except BlockingIOError:
+                    pass
+                stop.wait(0.05)
+        finally:
+            os.close(fd)
+
+    def make(path: Path, payload: bytes = b'', for_writer: bool = False) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         os.mkfifo(path)
         fifos.append(path)
-        thread = threading.Thread(target=unblock, args=(path, payload), daemon=True)
+        if for_writer:
+            thread = threading.Thread(target=drain, args=(path,), daemon=True)
+        else:
+            thread = threading.Thread(target=unblock, args=(path, payload), daemon=True)
         thread.start()
         threads.append(thread)
         return path

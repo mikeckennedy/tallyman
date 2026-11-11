@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import codecs
 import inspect
 import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Optional, cast
 
@@ -36,13 +37,14 @@ def _run(
     setup_calls: Optional[list[tuple[set[str], set[str], set[str]]]] = None,
     inherited_calls: Optional[list[TallyConfig]] = None,
     pattern_calls: Optional[list[GitIgnoreSpec]] = None,
+    setup: Optional[Callable[..., object]] = None,
 ) -> Optional[TallyResult]:
     """Run tallyman's main() with *argv*; return the result it would have displayed (None if it exited first).
 
-    The setup TUI is replaced. It records the (excluded, specs, non-specs) it was pre-filled with in
-    *setup_calls*, and the locked parent settings it was given in *inherited_calls*, then returns
-    *setup_result*: such a tuple, ECHO to save the pre-fill unchanged, or None to fail the test because
-    setup should not have launched.
+    The setup TUI is replaced by *setup* if given (see _real_setup). Otherwise a fake records the
+    (excluded, specs, non-specs) it was pre-filled with in *setup_calls*, and the locked parent settings it
+    was given in *inherited_calls*, then returns *setup_result*: such a tuple, ECHO to save the pre-fill
+    unchanged, or None to fail the test because setup should not have launched.
     """
     captured: list[TallyResult] = []
     monkeypatch.setattr(sys, 'argv', ['tallyman', *argv])
@@ -70,9 +72,59 @@ def _run(
             raise AssertionError('the setup TUI must not launch here')
         return prefill if setup_result == ECHO else setup_result
 
-    monkeypatch.setattr(cli, 'run_setup', fake_setup)
+    monkeypatch.setattr(cli, 'run_setup', setup or fake_setup)
     cli.main()
     return captured[0] if captured else None
+
+
+def _real_setup(actions: Sequence[tuple[str, str]] = ()) -> Callable[..., object]:
+    """A stand-in for cli.run_setup() that runs the real setup TUI headless: it presses *actions*
+    ((directory, key); '' is the root) the way test_setup_app's Session does, then clicks Save & Run.
+    """
+
+    def run(
+        root: Path,
+        gitignore_spec: GitIgnoreSpec,
+        existing_exclusions: set[str],
+        existing_specs: set[str],
+        existing_non_specs: Optional[set[str]] = None,
+        nested: Optional[TallyConfig] = None,
+        root_auto_spec: bool = False,
+        inherited: Optional[TallyConfig] = None,
+        exclude_patterns: Optional[GitIgnoreSpec] = None,
+    ) -> object:
+        from tallyman.tui.setup_app import SetupApp, SetupTree
+
+        app = SetupApp(
+            root,
+            gitignore_spec,
+            existing_exclusions,
+            existing_specs,
+            existing_non_specs,
+            nested,
+            root_auto_spec,
+            inherited,
+            exclude_patterns,
+        )
+
+        async def drive() -> None:
+            async with app.run_test(size=(100, 50)) as pilot:
+                tree = app.query_one(SetupTree)
+                tree.focus()
+                for path, key in actions:
+                    nodes = [tree.root]
+                    while (info := (node := nodes.pop()).data) is None or info.path != path:
+                        nodes.extend(node.children)
+                    tree.move_cursor(node)
+                    await pilot.press(key)
+                await pilot.pause()
+                await pilot.click('#save')
+
+        asyncio.run(drive())
+        return app.return_value
+
+    assert inspect.signature(run).parameters.keys() == inspect.signature(cli.run_setup).parameters.keys()
+    return run
 
 
 def _files_by_category(tally: TallyResult) -> dict[str, int]:
@@ -256,10 +308,28 @@ class TestSetupWithParentConfig:
                 'src/.tally-config.toml': '[exclude]\ndirectories = ["vendor", "build"]\n',
             },
         )
-        calls: list[tuple[set[str], set[str], set[str]]] = []
-        _run(monkeypatch, '--setup', str(tmp_path / 'src'), interactive=True, setup_result=ECHO, setup_calls=calls)
-        assert calls == [({'vendor', 'build'}, set(), set())]
+        _run(monkeypatch, '--setup', str(tmp_path / 'src'), interactive=True, setup=_real_setup())
         assert load_config(tmp_path / 'src' / CONFIG_FILENAME).excluded_dirs == {'build'}
+
+    def test_setup_drops_a_local_copy_of_a_nested_exclusion(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Older versions copied nested settings too. Once dropped, removing the nested setting takes effect."""
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: '[exclude]\ndirectories = ["sub/gen"]\n',
+                'sub/.tally-config.toml': '[exclude]\ndirectories = ["gen"]\n',
+                'sub/b.py': 'x = 1\n',
+                'sub/gen/a.py': 'x = 1\n',
+            },
+        )
+        tally = _run(monkeypatch, '--setup', str(tmp_path), interactive=True, setup=_real_setup())
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}  # the nested config still excludes gen
+        assert load_config(tmp_path / CONFIG_FILENAME).excluded_dirs == set()
+        (tmp_path / 'sub' / '.tally-config.toml').unlink()
+        tally = _run(monkeypatch, str(tmp_path))
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 2}
 
     def test_setup_keeps_a_spec_dir_that_covers_the_scan_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """A no-op setup run must not change the numbers: design/ stays specs."""

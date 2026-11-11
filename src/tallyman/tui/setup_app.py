@@ -13,7 +13,7 @@ from textual.containers import Horizontal
 from textual.widgets import Button, Footer, Header, Static, Tree
 from textual.widgets.tree import TreeNode
 
-from tallyman.config import SELF, TallyConfig, merge_configs
+from tallyman.config import SELF, TallyConfig, merge_configs, without_copies
 from tallyman.gitignore import GitIgnoreSpec
 from tallyman.walker import SpecState, root_spec_state, spec_state
 
@@ -28,12 +28,15 @@ _UNSET, _SPEC, _IGNORE = 'unset', 'spec', 'ignore'
 class NodeInfo:
     """What the tree knows about one directory.
 
-    Everything but path, gitignored and pattern_excluded is derived by _refresh().
+    Everything but path, gitignored and pattern_excluded is derived by _refresh(). Those two are fixed when the
+    tree is built and mean "gitignore or a pattern would exclude it if no config did": the walker checks a
+    config's exclusion first, so config_excluded explains an exclusion before either of them.
     """
 
     path: str  # relative to the scan root; '' for the root
     gitignored: bool = False
     pattern_excluded: bool = False  # matched by an [exclude] pattern in some config
+    config_excluded: bool = False  # excluded by this config, a parent or a nested one
     excluded: bool = False
     parent_excluded: bool = False
     spec: bool = False
@@ -107,8 +110,8 @@ class SetupApp(App[Optional[SetupResult]]):
         self.inherited = inherited or TallyConfig()
         self.exclude_patterns = exclude_patterns or GitIgnoreSpec.for_patterns(root)
         self.root_auto_spec = root_auto_spec
-        # Each directory's entry when setup opened, so toggling twice restores it exactly
-        self._original_entry = {d: _SPEC for d in self.user_spec_dirs} | {d: _IGNORE for d in self.user_non_spec_dirs}
+        # Each directory's entry when setup opened, so toggling twice restores it exactly (see _drop_copies())
+        self._original_entry: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -121,6 +124,7 @@ class SetupApp(App[Optional[SetupResult]]):
         tree: SetupTree = SetupTree(Text(self.root.name))
         tree.root.data = NodeInfo('')
         self._populate(tree.root, self.root, '')
+        self._drop_copies()
         self._refresh(tree.root)
         tree.root.expand_all()
         self._collapse_excluded(tree.root)
@@ -153,6 +157,22 @@ class SetupApp(App[Optional[SetupResult]]):
             # Don't recurse into gitignored or pattern-excluded dirs: the walker never enters them
             if not is_gitignored and not by_pattern:
                 self._populate(node, entry, child_rel)
+
+    def _drop_copies(self) -> None:
+        """Drop the scan-root entries that a parent or nested config already has (see config.without_copies).
+
+        Older versions copied parent and nested settings into the scan root's config. Those files are read on
+        every run, so the copies change nothing but would stay locked here and be saved again. Done when setup
+        opens, so the labels, the locks and the 's' round trips all start from what will be saved.
+        """
+        user = TallyConfig(self.user_excluded, self.user_spec_dirs, self.user_non_spec_dirs)
+        local = without_copies(user, self.inherited, self.nested)
+        # An exclusion beneath a dropped one was redundant in this config, as Save would have found: drop it too.
+        # Only these: an exclusion beneath one of this config's own stays, so un-excluding the outer one reveals it.
+        dropped = user.excluded_dirs - local.excluded_dirs
+        self.user_excluded = {e for e in local.excluded_dirs if not any(e.startswith(d + '/') for d in dropped)}
+        self.user_spec_dirs, self.user_non_spec_dirs = local.spec_dirs, local.non_spec_dirs
+        self._original_entry = {d: _SPEC for d in self.user_spec_dirs} | {d: _IGNORE for d in self.user_non_spec_dirs}
 
     # --- deriving state -------------------------------------------------------------------------------------------
 
@@ -190,12 +210,13 @@ class SetupApp(App[Optional[SetupResult]]):
             self._lock(info)
             return
         info.parent_excluded = parent.excluded
-        excluded_here = (
+        info.config_excluded = (
             info.path in self.user_excluded
             or info.path in self.nested.excluded_dirs
             or info.path in self.inherited.excluded_dirs
         )
-        info.excluded = info.gitignored or info.pattern_excluded or excluded_here or parent.excluded
+        # Same order as walk_project(): a config exclusion is checked first, then gitignore, then patterns
+        info.excluded = info.config_excluded or info.gitignored or info.pattern_excluded or parent.excluded
         info.state = spec_state(info.path, Path(info.path).name, parent.state, specs, non_specs)
         info.spec = info.state.is_spec and not info.excluded
         self._lock(info)
@@ -226,16 +247,15 @@ class SetupApp(App[Optional[SetupResult]]):
         explicit_spec = info.path in specs
         label = self._make_label(
             Path(info.path).name,
-            gitignored=info.gitignored,
-            pattern_excluded=info.pattern_excluded,
+            gitignored=info.gitignored and not info.config_excluded,
+            pattern_excluded=info.pattern_excluded and not info.config_excluded,
             excluded=info.excluded,
             spec=info.spec,
             auto_spec=info.spec and not explicit_spec,
             not_spec=info.path in non_specs,
         )
         # Once excluded here, a spec setting from another config no longer matters, so don't credit it
-        unchangeable = info.gitignored or info.pattern_excluded
-        if info.locked_by is not None and not unchangeable and (info.exclude_locked or not info.excluded):
+        if info.locked_by is not None and not _rule_excluded(info) and (info.exclude_locked or not info.excluded):
             label.append(f' (set in a {info.locked_by} config)', style='dim')
         return label
 
@@ -277,8 +297,8 @@ class SetupApp(App[Optional[SetupResult]]):
 
     def _cursor(self) -> Optional[tuple[TreeNode[NodeInfo], NodeInfo]]:
         node = self.query_one(SetupTree).cursor_node
-        if node is None or node.data is None or node.data.gitignored or node.data.pattern_excluded:
-            return None  # gitignored dirs, and dirs a pattern excludes, can't be changed here
+        if node is None or node.data is None or _rule_excluded(node.data):
+            return None  # gitignore and patterns can't be changed here; a config's exclusion of the dir can
         return node, node.data
 
     def action_toggle_node(self) -> None:
@@ -356,8 +376,10 @@ class SetupApp(App[Optional[SetupResult]]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == 'save':
-            excluded = self._clean_exclusions(self.user_excluded)
-            self.exit((excluded, set(self.user_spec_dirs), set(self.user_non_spec_dirs)))
+            user = TallyConfig(self._clean_exclusions(self.user_excluded), self.user_spec_dirs, self.user_non_spec_dirs)
+            # Dropped when setup opened; again here, so no toggle can ever save another config's setting
+            local = without_copies(user, self.inherited, self.nested)
+            self.exit((local.excluded_dirs, local.spec_dirs, local.non_spec_dirs))
         elif event.button.id == 'cancel':
             self.exit(None)
 
@@ -370,6 +392,11 @@ class SetupApp(App[Optional[SetupResult]]):
             if not any(path.startswith(p + '/') for p in cleaned):
                 cleaned.add(path)
         return cleaned
+
+
+def _rule_excluded(info: NodeInfo) -> bool:
+    """Whether gitignore or a pattern excludes *info* and no config does: setup can't change that."""
+    return (info.gitignored or info.pattern_excluded) and not info.config_excluded
 
 
 def run_setup(
@@ -386,7 +413,8 @@ def run_setup(
     """Launch the TUI setup app.
 
     Returns the (excluded_dirs, spec_dirs, non_spec_dirs) to save at the scan root, or None if the user
-    quit without saving. Settings from parent and nested configs are never included: those files keep them.
+    quit without saving. Settings from parent and nested configs are never included, not even as copies an
+    earlier version wrote into the scan root's config: those files keep them.
     """
     app = SetupApp(
         root,

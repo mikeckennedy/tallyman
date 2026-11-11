@@ -25,7 +25,6 @@ from tallyman.config import (
     load_config_chain,
     merge_configs,
     save_config,
-    without_inherited,
 )
 from tallyman.counter import count_lines
 from tallyman.display import display_results
@@ -216,8 +215,7 @@ def main() -> None:
         if result is None:
             print('Setup cancelled.')
             sys.exit(0)
-        # Older versions copied parent settings into a new config; drop those copies so each lives in one file
-        local = without_inherited(TallyConfig(*result), chain.inherited)
+        local = TallyConfig(*result)  # only the scan root's own settings: setup drops copies of the others
         try:
             # Setup doesn't edit patterns: keep the scan-root config's own, as written and in order
             save_config(
