@@ -6,7 +6,7 @@ Tallyman is a command-line tool that gives you a real picture of your codebase -
 
 [![PyPI](https://img.shields.io/pypi/v/tallyman-metrics?v=2)](https://pypi.org/project/tallyman-metrics/)
 [![Python](https://img.shields.io/pypi/pyversions/tallyman-metrics?v=2)](https://pypi.org/project/tallyman-metrics/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/mikeckennedy/tallyman/blob/main/LICENSE)
 
 ![Tallyman output showing language breakdown with colored percentage bar for a Python web project](https://mkennedy-shared.nyc3.digitaloceanspaces.com/github/tallyman-for-commandbook.webp)
 
@@ -337,7 +337,7 @@ mod tests {
 
 Contributions are welcome! Whether it's adding support for a new language, improving detection, or fixing a bug, we'd love the help.
 
-**Before opening a PR, please [create an issue](../../issues/new) first** to discuss what you have in mind. This helps make sure your idea aligns with the direction of the project and saves everyone time. Once we've agreed on the approach, fire away with the pull request.
+**Before opening a PR, please [create an issue](https://github.com/mikeckennedy/tallyman/issues/new) first** to discuss what you have in mind. This helps make sure your idea aligns with the direction of the project and saves everyone time. Once we've agreed on the approach, fire away with the pull request.
 
 ## License
 

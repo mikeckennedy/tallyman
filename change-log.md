@@ -5,29 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and never resets (see `CLAUDE.md`).
 
-## 0.7.6 - UNRELEASED
+## 0.4.3 - 2026-11-11
 
 ### Added
+- MATLAB language support for `.m` files, counted as Code with `%` single-line comment detection (issue #4). `%{ ... %}` block markers count as comments and the lines between them as code, like `/* */` in other languages. MATLAB's binary and zip formats (`.mat`, `.fig`, `.mlx`, `.mlapp`, `.mltbx`, `.mlprj`) aren't source and aren't counted.
+- Files: `src/tallyman/languages.py`, `tests/test_languages.py`, `README.md`, `CLAUDE.md`, `pyproject.toml`, `uv.lock`
 - New `--no-save` runs Tallyman without leaving a `.tally-config.toml` behind (issue #5). Setup opens as usual on a first run, or with `--setup`. Its button reads **Run** instead of **Save & Run**, a subtitle says nothing is saved, and the choices apply to that run only, so the next run opens setup again. Configs that already apply are still read and never changed, so `tallyman --setup --no-save` tries other settings without touching the config. A malformed config there is skipped with a warning, as `--setup` does, and left as it is.
 - Files: `src/tallyman/cli.py`, `src/tallyman/tui/setup_app.py`, `tests/test_cli.py`, `tests/test_setup_app.py`, `README.md`, `CLAUDE.md`, `.cursor/rules/coding-guidelines.mdc`, `.cursor/rules/project-rules.mdc`, `plans/006-tallyman-architect.plan.md`, `pyproject.toml`, `uv.lock`
 - Plan: `plans/015-no-save.plan.md`
-
-## 0.6.5 - UNRELEASED
-
-### Added
 - New `--exclude PATTERN` leaves files out of one run without editing `.tally-config.toml` (issue #10), for example `tallyman --exclude 'tests/' --exclude 'tests.rs'` to see a project's size without its tests. Each value is one gitignore-style pattern, matched from the scanned directory, and the flag can be repeated. The patterns are the last word over every config's `[exclude] patterns`, nested configs included, and a `!` brings back what a config pattern left out (never a gitignored, hidden or `[exclude] directories` entry). They are never saved, setup doesn't show them, and what they remove is counted in the `Excluded by [exclude] patterns` line. A pattern that can never match (blank, a comment such as `#gen`, a lone `!` or `/`, one spanning lines, a `./src/gen/`-style path, or an absolute path into the scanned directory) stops the run with exit code 2, suggesting the fix where there is one.
 - Files: `src/tallyman/cli.py`, `src/tallyman/gitignore.py`, `src/tallyman/walker.py`, `tests/test_cli.py`, `tests/test_gitignore.py`, `tests/test_walker.py`, `README.md`, `CLAUDE.md`, `.cursor/rules/coding-guidelines.mdc`, `.cursor/rules/project-rules.mdc`, `plans/006-tallyman-architect.plan.md`, `pyproject.toml`, `uv.lock`
 - Plan: `plans/014-one-off-overrides/phase-01-exclude-flag.plan.md`
 - New `--exclude-rust-tests` and `--no-exclude-rust-tests` leave Rust test code out of one run, or count it, whatever `[rust] exclude_test_modules` says in any config, nested crate configs included. Neither is saved, and setup shows and saves the config's value; the count after setup uses the flag. Given both, the last one wins.
 - Files: `src/tallyman/cli.py`, `src/tallyman/walker.py`, `tests/test_cli.py`, `tests/test_walker.py`, `README.md`, `CLAUDE.md`, `.cursor/rules/coding-guidelines.mdc`, `.cursor/rules/project-rules.mdc`, `plans/006-tallyman-architect.plan.md`
 - Plan: `plans/014-one-off-overrides/phase-02-rust-flag.plan.md`
-
-### Changed
-- `--no` no longer abbreviates `--no-color`: it could now also mean `--no-exclude-rust-tests`, so it is an error. Write `--no-color` (or `--no-c`). Likewise `--excl` no longer abbreviates `--exclude`.
-
-## 0.5.4 - UNRELEASED
-
-### Added
 - New `[rust] exclude_test_modules = true` config key leaves Rust test-only code out of the count, so Tallyman measures the code that ships (issue #8). It drops any item marked `#[cfg(test)]` or `#[cfg(all(test, ...))]` (a test module, helper fn, `use`, `impl`, or a test-only method inside an `impl` or `trait`), with its attributes and doc comments, and whole files or modules under `#![cfg(test)]`. Code after a test module still counts. `cfg(any(test, ...))` isn't test-only and stays. Off by default. It follows the config chain like every other setting: a nested config (one per crate) can turn it on or off for its subtree, and `false` overrides a parent's `true`. Setup keeps the value when it rewrites the config. A file Tallyman can't follow (unbalanced brackets, an unterminated string) is counted in full.
 - A Rust-aware scanner finds the test-only items: it skips brackets inside strings, raw strings, char literals and nested comments, tells char literals from lifetimes, and pairs every bracket before trusting any of them.
 - Files: `src/tallyman/rust_tests.py`, `tests/test_rust_tests.py`
@@ -42,10 +33,6 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - README and `CLAUDE.md` describe the option.
 - Files: `src/tallyman/display.py`, `tests/test_display.py`, `tests/test_cli.py`, `README.md`, `CLAUDE.md`, `.cursor/rules/project-rules.mdc`, `.cursor/rules/coding-guidelines.mdc`, `plans/006-tallyman-architect.plan.md`, `pyproject.toml`, `uv.lock`
 - Plan: `plans/013-rust-test-code/phase-03-report-and-docs.plan.md`
-
-## 0.4.3 - 2026-11-11
-
-### Added
 - New `[exclude] patterns = [...]` config key: gitignore-style patterns, matched relative to the directory of the config that declares them, for files a directory exclude can't reach, such as Rust's `src/routing/tests.rs` beside `src/routing.rs` (issue #6). A pattern without a slash matches at any depth, a trailing `/` matches directories, and a deeper config's `!pattern` can bring back what a shallower config's pattern excluded. Patterns never bring back gitignored files, excluded or hidden directories, or the default skips, and a parent config's patterns never exclude the scanned directory itself. Setup shows directories a pattern excludes as locked and keeps the patterns, in order, when it rewrites the config.
 - Files: `src/tallyman/config.py`, `src/tallyman/gitignore.py`, `src/tallyman/walker.py`, `src/tallyman/cli.py`, `src/tallyman/tui/setup_app.py`, `tests/test_config.py`, `tests/test_gitignore.py`, `tests/test_walker.py`, `tests/test_cli.py`, `tests/test_setup_app.py`
 - Plan: `plans/007-exclude-patterns/phase-02-exclude-patterns.plan.md`
@@ -60,6 +47,7 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - Plan: `plans/005-hardening/phase-03-spec-overrides-and-tui.plan.md`
 
 ### Changed
+- `--no` no longer abbreviates `--no-color`: it could now also mean `--no-exclude-rust-tests`, so it is an error. Write `--no-color` (or `--no-c`). Likewise `--excl` no longer abbreviates `--exclude`.
 - The image card's legend marks each entry with a square swatch in its bar segment's colour, so a language can be matched to its block by colour rather than by position. The `·` separators are gone; the terminal legend already coloured each label and is unchanged.
 - Files: `src/tallyman/image.py`, `tests/test_image.py`, `README.md`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
 - The language list on each category line (the first three, then `, etc`) comes from one function in the shared report model, `category_language_list()`, instead of a copy in each output. Output unchanged.
