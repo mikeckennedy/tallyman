@@ -40,7 +40,7 @@ A few things that set it apart:
 
 - **Category-aware analysis** - Results grouped by intent, not just by file extension. You see *what kind* of work your project contains, not just how many lines of each language.
 - **Automatic spec detection** - Markdown and reStructuredText files in directories like `specs/`, `plans/`, or `agents/` are automatically reclassified from Docs to Specs. If you're using planning documents to drive development (especially with AI-assisted workflows), Tallyman tracks that separately.
-- **Interactive first-run setup** - On first run, Tallyman launches a TUI where you can walk your project's directory tree and mark directories to exclude or flag as spec directories. Your choices are saved to `.tally-config.toml` so subsequent runs are instant.
+- **Interactive first-run setup** - The first time you run Tallyman in a project, before any `.tally-config.toml` applies, it launches a TUI where you can walk your project's directory tree and mark directories to exclude or flag as spec directories. Your choices are saved to `.tally-config.toml` so subsequent runs are instant.
 - **Gitignore-aware** - Tallyman follows the same rules as Git: every `.gitignore` in your tree, plus the repository's `info/exclude` (in worktrees and submodules too), scoped and prioritised the way Git does it. Git repositories inside your project are counted with their own rules (see [Git repositories inside your project](#git-repositories-inside-your-project)). It skips virtual environments, `node_modules`, build artifacts, and anything else you've already told Git to ignore.
 - **Visual composition bar** - A colored percentage bar at the bottom shows you the language distribution of your project in a single glance.
 
@@ -82,13 +82,15 @@ Tallyman recognizes **43 languages** across six categories:
 |----------|-----------|
 | **Code** | Python, Rust, Go, JavaScript, TypeScript, Java, C, C/C++ Header, C++, C#, Swift, Kotlin, Ruby, Shell, Lua, PHP, Perl, R, Dart, Scala, Elixir, Zig, Haskell, Erlang, OCaml, Nim, V, Solidity |
 | **DevOps** | Terraform, Makefile, Docker |
-| **Design** | CSS, SCSS, LESS, HTML (+ 8 template formats), SVG |
+| **Design** | CSS, SCSS, LESS, HTML (+ 8 template extensions), SVG |
 | **Docs** | Markdown, reStructuredText |
 | **Specs** | Markdown and reStructuredText files auto-detected in spec directories |
 | **Data** | TOML, YAML, JSON, XML, SQL |
 
 <details>
 <summary>Full language details with file extensions</summary>
+
+Extensions match in any case, so `analysis.R` is R and `README.MD` is Markdown.
 
 ### Code
 
@@ -111,7 +113,7 @@ Tallyman recognizes **43 languages** across six categories:
 | Lua | `.lua` |
 | PHP | `.php` |
 | Perl | `.pl`, `.pm` |
-| R | `.r`, `.R` |
+| R | `.r` |
 | Dart | `.dart` |
 | Scala | `.scala` |
 | Elixir | `.ex`, `.exs` |
@@ -199,7 +201,7 @@ Where Tallyman and Git differ:
 
 ## Configuration
 
-On first run, Tallyman launches an interactive TUI where you can browse your project tree and configure which directories to exclude or mark as spec directories. Your choices are saved to `.tally-config.toml` in the directory you scanned.
+When no `.tally-config.toml` applies yet, Tallyman starts with an interactive TUI where you can browse your project tree and configure which directories to exclude or mark as spec directories. Your choices are saved to `.tally-config.toml` in the directory you scanned. A config in the scanned directory or any directory above it (see **Which configs apply** below) means setup is skipped; one in a subdirectory doesn't. So once the repository root has a config, `tallyman src/` counts straight away, using it; run `tallyman --setup src/` to give `src/` its own config.
 
 To re-run setup at any time:
 

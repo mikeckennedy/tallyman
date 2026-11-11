@@ -51,6 +51,9 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - In setup, `x` now works on a directory whose spec setting comes from a nested config; only exclusions set in another config are locked. The walker already honoured such an exclusion.
 - Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/walker.py`, `src/tallyman/tui/setup_app.py`, `tests/test_config.py`, `tests/test_cli.py`, `tests/test_walker.py`, `tests/test_setup_app.py`
 - Plan: `plans/007-exclude-patterns/phase-01-merge-config-chain.plan.md`
+- README, `CLAUDE.md` and `gitignore.py`'s docstring describe worktrees, submodules and nested repositories. The README has a new "Git repositories inside your project" section listing the differences users meet, including the global excludes file and symlinked `.gitignore` files (tallyman reads them; git skips them). The docstring has the full list, including the `GIT_DIR` and `GIT_COMMON_DIR` environment variables.
+- Files: `README.md`, `CLAUDE.md`, `src/tallyman/gitignore.py`, `plans/006-tallyman-architect.plan.md`
+- Plan: `plans/010-git-fidelity/phase-03-docs.plan.md`
 
 ### Fixed
 - Setup shows directory names exactly as they are on disk. A directory named `:rocket:` no longer turns into an emoji, and a name ending in a backslash is no longer doubled, in the tree and on the root. The labels are built as Rich `Text`, never markup.
@@ -83,9 +86,6 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - A gitignore or `[exclude]` pattern ending in a lone backslash (`a\`) now matches nothing, as in git, instead of matching a name ending in `\`; `!a\` no longer re-includes anything. An escaped backslash before trailing spaces (`a\\ `) no longer keeps the spaces.
 - Files: `src/tallyman/gitignore.py`, `tests/test_gitignore.py`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
 - Plan: `plans/010-git-fidelity/phase-01-gitdir-and-escapes.plan.md`
-- README, `CLAUDE.md` and `gitignore.py`'s docstring describe worktrees, submodules and nested repositories. The README has a new "Git repositories inside your project" section listing the differences users meet, including the global excludes file and symlinked `.gitignore` files (tallyman reads them; git skips them). The docstring has the full list, including the `GIT_DIR` and `GIT_COMMON_DIR` environment variables.
-- Files: `README.md`, `CLAUDE.md`, `src/tallyman/gitignore.py`, `plans/006-tallyman-architect.plan.md`
-- Plan: `plans/010-git-fidelity/phase-03-docs.plan.md`
 - An empty `NO_COLOR` no longer disables colour; per no-color.org only a non-empty value does.
 - Solidity's colour changed from `bright_cyan`, which SQL also uses, to `slate_blue1`, so the two are distinguishable in the bar.
 - README and `CLAUDE.md` describe the current behaviour: config search and rebasing, `[specs] ignore`, `"."`, no-terminal runs, what is never counted, and the language count (43, not 41).
@@ -112,7 +112,6 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - If setup can't save the config, tallyman warns and still counts with the chosen settings instead of crashing. A closed stdin no longer crashes, and a path typed in the wrong case on macOS (`proj/SRC`) no longer defeats config matching.
 - Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/walker.py`, `tests/test_config.py`, `tests/test_cli.py`
 - Plan: `plans/005-hardening/phase-02-config-handling.plan.md`
-
 - Gitignore handling rewritten to follow git's rules, in the walker and the setup TUI alike:
   - `.gitignore` files below the scanned directory are honoured, including the `*` file uv and virtualenv write inside a venv.
   - Each file's patterns are anchored to the directory it lives in, and a deeper file wins, so `!pattern` can re-include.

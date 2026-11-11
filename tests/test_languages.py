@@ -70,6 +70,12 @@ class TestIdentifyLanguage:
         assert lang is not None
         assert lang.name == 'Markdown'
 
+    def test_uppercase_r_extension(self) -> None:
+        """R files are often saved as .R; lookup lowercases the suffix, so no '.R' key is needed."""
+        lang = identify_language(Path('analysis.R'))
+        assert lang is not None
+        assert lang.name == 'R'
+
 
 class TestFilenameIdentification:
     def test_makefile(self) -> None:
@@ -155,6 +161,12 @@ class TestLanguageRegistry:
         for lang in LANGUAGES:
             for ext in lang.extensions:
                 assert ext.startswith('.'), f'{lang.name} extension {ext!r} missing leading dot'
+
+    def test_every_extension_is_lowercase(self) -> None:
+        """identify_language() looks up the lowercased suffix, so an extension with a capital would never match."""
+        for lang in LANGUAGES:
+            for ext in lang.extensions:
+                assert ext == ext.lower(), f'{lang.name} extension {ext!r} is never looked up; use {ext.lower()!r}'
 
     def test_valid_categories(self) -> None:
         valid = {'code', 'devops', 'design', 'docs', 'data'}

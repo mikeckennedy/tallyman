@@ -40,7 +40,7 @@ LANGUAGES: tuple[Language, ...] = (
     Language('Lua',          'code',   'blue',            '--', ('.lua',)),
     Language('PHP',          'code',   'medium_purple3',  '//', ('.php',)),
     Language('Perl',         'code',   'grey62',          '#',  ('.pl', '.pm')),
-    Language('R',            'code',   'dodger_blue3',    '#',  ('.r', '.R')),
+    Language('R',            'code',   'dodger_blue3',    '#',  ('.r',)),
     Language('Dart',         'code',   'cyan3',           '//', ('.dart',)),
     Language('Scala',        'code',   'red3',            '//', ('.scala',)),
     Language('Elixir',       'code',   'dark_violet',     '#',  ('.ex', '.exs')),

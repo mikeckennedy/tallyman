@@ -147,7 +147,7 @@ Each stage feeds the next and knows nothing about the stages after it. Keep it t
 ### Always
 
 - ✅ **Style:** single quotes, `from __future__ import annotations` in every module with code, type hints on every signature, 120-character lines, `_prefixed` module-private helpers, and direct imports (`from tallyman.walker import walk_project`).
-- ✅ **Data:** frozen `slots=True` dataclasses for values (`Language`), mutable `slots=True` dataclasses for accumulators (`FileCount`, `LanguageStats`). `TallyConfig` is a plain dataclass; `SpecState` is a `NamedTuple`.
+- ✅ **Data:** frozen `slots=True` dataclasses for values (`Language`), mutable `slots=True` dataclasses for accumulators (`FileCount`, `LanguageStats`). `TallyConfig` and `ConfigChain` are plain dataclasses; `SpecState` is a `NamedTuple`.
 - ✅ **Before calling a change done:** `ruff check src/ tests/`, `ruff format --check src/ tests/`, `uvx ty check`, `uvx pyrefly check` and `pytest` are all clean.
 - ✅ **Prove gitignore behaviour against real git.** Build the case in a temp repo and compare `git ls-files -o --exclude-standard` (or `git check-ignore`) with what `walk_project()` yields. Git lists a nested repo as one entry (`sub/`), so run it inside each nested repo too, as `_git_view()` in `tests/test_gitignore.py` does.
 - ✅ **Prove counting changes against an independent count.** `wc -l` misses a final line with no newline and doesn't split on a lone `\r`, so add those back or count with a short script that splits the same way.
@@ -296,7 +296,7 @@ Shape it for `plans/planning-rules.md`: a numbered plan, split into phase files 
 
 ## Tech stack and tooling
 
-- **Python 3.14+.** `match`, dataclass slots, `tomllib`, and PEP 758 unparenthesised `except A, B:` (in `display.py`) are all in use.
+- **Python 3.14+.** Dataclass slots, `tomllib`, and PEP 758 unparenthesised `except A, B:` (in `display.py`) are in use. There are no `match` statements.
 - **Runtime dependencies:** `rich` (terminal output), `textual` (setup TUI), `Pillow` (image export, imported lazily). Gitignore matching is in-house (`gitignore.py`), checked against real git by `tests/test_gitignore.py`.
 - **Dev tooling:** `pytest`, Ruff (lint and format, configured only in `ruff.toml`: rules `E`, `F`, `W`, `I`, `ANN`), ty (`ty.toml`) and Pyrefly (`pyrefly.toml`, which promotes `unnecessary-type-conversion` to an error), kept consistent with each other.
 - **Environment:** uv with a `venv/` directory (not `.venv/`). Install with `uv pip install -e ".[dev]"`.

@@ -29,7 +29,7 @@ tallyman --with-spaces      # totals and bar use total lines, not effective line
 tallyman --image            # PNG summary card on the Desktop (--image-light for the light theme)
 
 # Tests
-pytest                      # all 673 tests (about 20 s, mostly the Textual pilot tests)
+pytest                      # all 676 tests (about 35 s, mostly the Textual pilot tests)
 pytest -v                   # verbose
 pytest tests/test_walker.py # single module
 
@@ -42,7 +42,7 @@ uvx pyrefly check           # pyrefly.toml, kept consistent with ty.toml; also c
 
 ## Tech Stack
 
-- **Python 3.14+** (uses match statements, dataclass slots, `tomllib`)
+- **Python 3.14+** (uses dataclass slots, `tomllib`, and PEP 758's unparenthesised `except A, B:`)
 - **textual**  -  TUI framework for the setup wizard, imported only when setup runs (`cli.run_setup()`)
 - **rich**  -  colored terminal output
 - **Pillow**  -  PNG export, imported lazily so a plain run never loads it
@@ -73,7 +73,7 @@ cli.main()
 | `src/tallyman/walker.py` | Directory traversal. Respects gitignore, config exclusions and `[exclude] patterns`. Detects spec dirs. Yields `(Path, Language)`; fills `WalkStats` |
 | `src/tallyman/gitignore.py` | Gitignore rules (`GitIgnoreSpec`, `load_gitignore`, `find_git_root`). Own pattern compiler that follows gitignore(5). Finds `info/exclude` through `gitdir:`/`commondir`. `add_directory()` notices nested repos, whose own rules replace the outer ones inside them. `GitIgnoreSpec.for_patterns()` + `add_rules()` hold `[exclude] patterns` |
 | `src/tallyman/encoding.py` | BOM detection: `text_encoding()`, `has_wide_bom()`. Shared by walker (binary check), counter and config loading |
-| `src/tallyman/paths.py` | `relative_posix()`: `/`-separated relative paths, safe on Windows |
+| `src/tallyman/paths.py` | `relative_posix()`: `/`-separated relative paths, safe on Windows. `canonical_case()`: the scan root spelled as the filesystem stores it |
 | `src/tallyman/counter.py` | Reads files, classifies lines as code/comment/blank. Returns `FileCount` |
 | `src/tallyman/aggregator.py` | Accumulates FileCount into LanguageStats, groups by category. Produces `TallyResult`, and the report model both outputs draw: `active_categories()`, `bar_segments()`, `segment_widths()`, `percent_label()`, `language_display_names()` |
 | `src/tallyman/display.py` | Rich-based rendering; draws the shared report model. Per-language stats, category totals, percentage bar, the "Excluded by [exclude] patterns" line |
@@ -87,7 +87,7 @@ cli.main()
 ## Core Data Structures
 
 ```python
-# Dataclasses use slots=True (TallyConfig is a plain dataclass; SpecState is a NamedTuple)
+# Dataclasses use slots=True (TallyConfig and ConfigChain are plain dataclasses; SpecState is a NamedTuple)
 
 Language(frozen=True)         # name, category, color, single_line_comment, extensions; spec_color (docs only, keyword-only)
 FileCount                     # total_lines, code_lines, comment_lines, blank_lines
@@ -98,7 +98,8 @@ BarSegment(frozen=True)       # language (None for Other), label, color, percent
 TallyResult                   # by_language, by_category, grand_total_lines
 TallyConfig                   # excluded_dirs, spec_dirs, non_spec_dirs ([specs] ignore): set[str]; '.' = this dir;
                               # patterns: list[str], raw, in file order, relative to the config's own directory
-ConfigChain                   # inherited (configs above the scan root, merged + rebased), local, paths, pattern_layers
+ConfigChain                   # inherited (configs above the scan root, merged + rebased), local, paths, pattern_layers;
+                              # .effective is inherited overridden by local, what the walker applies
 WalkStats                     # pattern_files, pattern_dirs: what [exclude] patterns removed, for the report
 SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's spec status (walker.spec_state)
 ```
@@ -128,7 +129,7 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 | Test File | Tests | Covers |
 |---|---|---|
 | `tests/test_counter.py` | 29 | Line counting, line endings, BOMs and wide encodings |
-| `tests/test_languages.py` | 65 | Language registry, extension map, Docker/Compose variants, valid and unshared colours (languages, spec variants, Other), `as_spec` |
+| `tests/test_languages.py` | 67 | Language registry, extension map (lowercase extensions, any-case lookup), Docker/Compose variants, valid and unshared colours (languages, spec variants, Other), `as_spec` |
 | `tests/test_display.py` | 38 | Terminal rendering: header escaping, wording, labels, bar width and cells, bar colour runs, no bar for nothing, pattern note, Unicode probe |
 | `tests/test_image.py` | 27 | Slugs, image paths, themes, PNG generation, title fitting, bar segments, agreement with the terminal |
 | `tests/test_walker.py` | 59 | Walking, exclusions, spec detection, nested configs, exclude patterns, `WalkStats`, FIFOs and sockets, settings inside nested repos |
@@ -137,7 +138,7 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 | `tests/test_aggregator.py` | 56 | Stats aggregation, categories, percentages, effective lines, the report model: bar segments, widths, labels |
 | `tests/test_config.py` | 84 | Config find/load/save, `[specs] ignore`, `[exclude] patterns`, normalisation, rebasing, chain merging, dropping copies, escaping, directory cleanup, BOMs, saving over a FIFO |
 | `tests/test_setup_app.py` | 89 | Setup TUI via Textual pilot: toggles, saved exclusions, labels (shown literally, with their styles), parent/nested locks, dropped copies, exclusion precedence, patterns, nested configs read exactly where the walker reads them, leaves, agreement with the walker (also across nested repos) |
-| `tests/test_cli.py` | 48 | End-to-end CLI: config chain, errors, no-terminal runs, setup pre-fill and pattern preservation, the real setup TUI dropping copies and skipping configs under gitignored directories, flags, colour, narrow stdout encodings, BOM config, the lazy setup import (no Textual or Pillow on a plain run) |
+| `tests/test_cli.py` | 49 | End-to-end CLI: config chain (a parent config alone skips first-run setup), errors, no-terminal runs, setup pre-fill and pattern preservation, the real setup TUI dropping copies and skipping configs under gitignored directories, flags, colour, narrow stdout encodings, BOM config, the lazy setup import (no Textual or Pillow on a plain run) |
 | `tests/test_conventions.py` | 1 | Code conventions no linter checks: `Optional[X]`, not `X \| None` |
 
 Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` create test Language instances. `tests/conftest.py` holds the `make_fifo` fixture: it creates a FIFO and, if a reader blocks on it, writes to it after 2 s (with `for_writer=True`, if a writer blocks on it, opens it for reading and drains it after 2 s), so a regression fails instead of hanging the suite (skip FIFO tests where `os.mkfifo` is missing).
@@ -156,7 +157,7 @@ Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` creat
 
 Add a `Language(...)` instance to `languages.py` and include it in the `LANGUAGES` tuple. The `EXTENSION_MAP` is built automatically. Then:
 
-- Check the extensions don't collide with an existing language.
+- Check the extensions don't collide with an existing language. Extensions are lowercase; lookup lowercases the suffix.
 - Pick a colour no other language uses. `test_languages.py` checks every colour parses and that no new colour is shared, comparing resolved colours (the card's RGB and the 256-colour index) across languages, spec variants and Other (only C and its header may share one). No language may drop to ANSI `90` on a 16-colour terminal: that is Other's.
 - A new docs language must set `spec_color`: a colour no other entry uses, and one that differs from its docs colour on a 16-colour terminal.
 - Update the README's category table, the per-language extension table, and both "N languages" counts. Recount them against `LANGUAGES`.

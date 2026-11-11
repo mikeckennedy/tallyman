@@ -162,6 +162,22 @@ class TestConfigFromParentDirectory:
         assert tally is not None
         assert _files_by_category(tally) == {'Markdown/specs': 2}
 
+    def test_a_parent_config_alone_skips_first_run_setup(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """In a terminal, a repo-root config is enough: `tallyman src/` counts straight away, as the README says."""
+        (tmp_path / '.git').mkdir()
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: '[exclude]\ndirectories = ["src/vendor"]\n',
+                'src/app.py': 'x = 1\n',
+                'src/vendor/v.py': 'x = 1\n',
+            },
+        )
+        tally = _run(monkeypatch, str(tmp_path / 'src'), interactive=True)  # the fake setup fails the test if it runs
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}  # the parent's exclusion applied
+        assert not (tmp_path / 'src' / CONFIG_FILENAME).exists()
+
     def test_config_above_the_git_root_is_ignored(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _make(tmp_path, {CONFIG_FILENAME: '[exclude]\ndirectories = ["repo"]\n', 'repo/a.py': 'x = 1\n'})
         (tmp_path / 'repo' / '.git').mkdir()
