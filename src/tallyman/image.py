@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,7 +25,9 @@ BAR_HEIGHT = 28
 BAR_GAP = 2  # px gap between bar segments (filled with background)
 MIN_SEGMENT_PX = 4  # the narrowest a bar segment gets; must stay above BAR_GAP or a segment would have no width
 MAX_LEGEND_ITEMS = 5  # name at most this many languages, in the bar and the legend; the rest are grouped as "Other"
-LEGEND_SEPARATOR = '  \u00b7  '
+LEGEND_SWATCH_PX = 12  # the coloured square before each legend entry, in its bar segment's colour
+LEGEND_SWATCH_GAP = 8  # px from a swatch to its label
+LEGEND_ENTRY_GAP = 28  # px from one legend entry to the next swatch
 
 
 @dataclass(slots=True)
@@ -109,6 +112,26 @@ def _fit_text(text: str, font: Union[FreeTypeFont, ImageFont], max_width: int) -
     return text.rstrip() + '…'
 
 
+def _legend_rows(
+    entries: list[str], font: Union[FreeTypeFont, ImageFont], max_width: int
+) -> list[list[tuple[int, int]]]:
+    """Lay the legend out in rows no wider than *max_width*: each row holds (entry index, x offset) pairs.
+
+    An entry is its swatch, a gap and its label. Entries stay in bar order and wrap to a new row only when
+    the next one would cross the right edge, so a legend that fits stays on one line.
+    """
+    rows: list[list[tuple[int, int]]] = [[]]
+    x = 0
+    for index, entry in enumerate(entries):
+        width = LEGEND_SWATCH_PX + LEGEND_SWATCH_GAP + math.ceil(font.getlength(entry))
+        if rows[-1] and x + width > max_width:
+            rows.append([])
+            x = 0
+        rows[-1].append((index, x))
+        x += width + LEGEND_ENTRY_GAP
+    return rows
+
+
 def generate_image(
     result: TallyResult,
     directory: str,
@@ -135,6 +158,8 @@ def generate_image(
     num_category_lines = len(categories) + 1 if categories else 0  # +1 for Combined
     segments = bar_segments(result, with_spaces=with_spaces, max_languages=MAX_LEGEND_ITEMS)
     has_bar = bool(segments)  # no effective lines: no bar, and no room left for one
+    legend_entries = [f'{s.label} {percent_label(s.percent)}' for s in segments]
+    legend_rows = _legend_rows(legend_entries, font_legend, IMAGE_WIDTH - 2 * PADDING)
 
     content_lines = 1 + num_category_lines + 1  # title, categories, attribution
     if not result.by_language:
@@ -142,7 +167,7 @@ def generate_image(
 
     title_gap = 40  # extra space below the title
     separator_gap = 14 if categories else 0  # space for the line above "Total:"
-    bar_section = (BAR_HEIGHT + 16 + LEGEND_LINE_HEIGHT) if has_bar else 0
+    bar_section = (BAR_HEIGHT + 16 + LEGEND_LINE_HEIGHT * len(legend_rows)) if has_bar else 0
     height = PADDING * 2 + content_lines * LINE_HEIGHT + title_gap + separator_gap + bar_section + LINE_HEIGHT
     img = Image.new('RGB', (IMAGE_WIDTH, height), bg_rgb)
     draw = ImageDraw.Draw(img)
@@ -169,7 +194,9 @@ def generate_image(
                 lang_list = ' + '.join(cat.languages[:3]) + ', etc'
             lines = cat.shown_lines(with_spaces=with_spaces)
             line = f'{cat.name}:'.ljust(max_name_len + 1) + f'{lines:>10,} lines ({lang_list})'
-            draw.text((PADDING, y), line, font=font_body, fill=text_rgb)
+            draw.text(
+                (PADDING, y), _fit_text(line, font_body, IMAGE_WIDTH - 2 * PADDING), font=font_body, fill=text_rgb
+            )
             y += LINE_HEIGHT
 
         if categories:
@@ -195,10 +222,19 @@ def generate_image(
                 x += width
             y = bar_bottom + 12
 
-            # Legend -- single line, one entry per segment (at most MAX_LEGEND_ITEMS languages + Other)
-            legend = LEGEND_SEPARATOR.join(f'{s.label} {percent_label(s.percent)}' for s in segments)
-            draw.text((PADDING, y), legend, font=font_legend, fill=dim_rgb)
-            y += LEGEND_LINE_HEIGHT
+            # Legend -- one entry per segment (at most MAX_LEGEND_ITEMS languages + Other), each after a swatch
+            # of its segment's colour, wrapping onto more rows only when one row can't hold them
+            _, digit_top, _, digit_bottom = font_legend.getbbox('0')
+            swatch_top = (digit_top + digit_bottom - LEGEND_SWATCH_PX) // 2  # centred on the label's digits
+            for row in legend_rows:
+                for index, offset in row:
+                    x = PADDING + offset
+                    fill = _rich_color_to_rgb(segments[index].color)
+                    swatch = (x, y + swatch_top, x + LEGEND_SWATCH_PX - 1, y + swatch_top + LEGEND_SWATCH_PX - 1)
+                    draw.rectangle(swatch, fill=fill)
+                    label_x = x + LEGEND_SWATCH_PX + LEGEND_SWATCH_GAP
+                    draw.text((label_x, y), legend_entries[index], font=font_legend, fill=dim_rgb)
+                y += LEGEND_LINE_HEIGHT
 
     y += 28
     # Attribution -- each line right-aligned to the bar's right edge

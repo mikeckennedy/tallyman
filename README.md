@@ -72,7 +72,7 @@ The image is saved to your Desktop (or the current directory if no Desktop is fo
 
 ![Tallyman image export showing code stats for the CommandBook app - category breakdown with colored language composition bar](https://mkennedy-shared.nyc3.digitaloceanspaces.com/github/commandbookapp-code-stats-example.png)
 
-The card includes category totals with effective line counts, a colored language composition bar, and a compact legend - everything you need to show the shape of your project at a glance.
+The card includes category totals with effective line counts, a colored language composition bar, and a legend that marks each language with a swatch of its bar color - everything you need to show the shape of your project at a glance. The bar and legend name up to five of the largest languages (each at least 2% of the total) and group the rest as Other, and a legend too long for one row wraps onto more rows.
 
 ## Supported Languages
 

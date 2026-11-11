@@ -29,7 +29,7 @@ tallyman --with-spaces      # totals and bar use total lines, not effective line
 tallyman --image            # PNG summary card on the Desktop (--image-light for the light theme)
 
 # Tests
-pytest                      # all 676 tests (about 35 s, mostly the Textual pilot tests)
+pytest                      # all 681 tests (about 35 s, mostly the Textual pilot tests)
 pytest -v                   # verbose
 pytest tests/test_walker.py # single module
 
@@ -78,7 +78,7 @@ cli.main()
 | `src/tallyman/aggregator.py` | Accumulates FileCount into LanguageStats, groups by category. Produces `TallyResult`, and the report model both outputs draw: `active_categories()`, `bar_segments()`, `segment_widths()`, `percent_label()`, `language_display_names()` |
 | `src/tallyman/display.py` | Rich-based rendering; draws the shared report model. Per-language stats, category totals, percentage bar, the "Excluded by [exclude] patterns" line |
 | `src/tallyman/config.py` | `.tally-config.toml` find (every one up to the git root), load with validation and normalisation, merge the chain and rebase onto the scan root (`ConfigChain`), save with TOML escaping (refusing a path that exists but isn't a regular file, such as a FIFO, rather than block on it). A config may start with a UTF-8/16/32 BOM (`text_encoding()`); save writes UTF-8 without one. `ConfigError` (with `.path`) for unreadable configs |
-| `src/tallyman/image.py` | Pillow PNG summary card; draws the shared report model (bar folded after five languages). Themes, output path (Desktop or cwd, slug capped at 100 chars) |
+| `src/tallyman/image.py` | Pillow PNG summary card; draws the shared report model (bar folded after five languages). Legend swatches in each segment's colour, wrapped onto more rows when needed (`_legend_rows()`); title and category lines shortened to fit. Themes, output path (Desktop or cwd, slug capped at 100 chars) |
 | `src/tallyman/fonts/` | Bundled JetBrains Mono for the image |
 | `src/tallyman/tui/setup_app.py` | Textual App for interactive directory selection (exclude/spec marking). Reads nested configs as it builds the tree (`_populate()`), where the walker would. Drops scan-root copies of parent and nested settings when it opens and on save; labels follow the walker's exclusion order |
 | `src/tallyman/__main__.py` | Enables `python -m tallyman` |
@@ -131,7 +131,7 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 | `tests/test_counter.py` | 29 | Line counting, line endings, BOMs and wide encodings |
 | `tests/test_languages.py` | 67 | Language registry, extension map (lowercase extensions, any-case lookup), Docker/Compose variants, valid and unshared colours (languages, spec variants, Other), `as_spec` |
 | `tests/test_display.py` | 38 | Terminal rendering: header escaping, wording, labels, bar width and cells, bar colour runs, no bar for nothing, pattern note, Unicode probe |
-| `tests/test_image.py` | 27 | Slugs, image paths, themes, PNG generation, title fitting, bar segments, agreement with the terminal |
+| `tests/test_image.py` | 32 | Slugs, image paths, themes, PNG generation, title and category-line fitting, bar segments, legend swatches and wrapping, agreement with the terminal |
 | `tests/test_walker.py` | 59 | Walking, exclusions, spec detection, nested configs, exclude patterns, `WalkStats`, FIFOs and sockets, settings inside nested repos |
 | `tests/test_gitignore.py` | 171 | Git root, gitignore loading and scoping, `info/exclude` in worktrees and submodules, negation, line-end escapes, nested repos, TUI agreement, parity with `git`, config pattern layers, FIFO ignore files |
 | `tests/test_paths.py` | 6 | POSIX relative paths, canonical case |

@@ -22,6 +22,14 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - Plan: `plans/005-hardening/phase-03-spec-overrides-and-tui.plan.md`
 
 ### Changed
+- The image card's legend marks each entry with a square swatch in its bar segment's colour, so a language can be matched to its block by colour rather than by position. The `·` separators are gone; the terminal legend already coloured each label and is unchanged.
+- Files: `src/tallyman/image.py`, `tests/test_image.py`, `README.md`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
+- Every optional type hint is `Optional[X]`, and `tests/test_conventions.py` fails the suite on any `X | None`, `None | X` or `Union[..., None]` annotation, including quoted ones. Ruff's whole `ANN` rule set is on for `src/` and `tests/`, so every function, each test included, has full annotations, and Pyrefly treats `unnecessary-type-conversion` as an error. Annotations only; nothing a user sees changes.
+- Files: `ruff.toml`, `pyrefly.toml`, `src/tallyman/image.py`, `src/tallyman/languages.py`, `src/tallyman/walker.py`, `tests/`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
+- Plan: `plans/012-housekeeping/phase-01-type-hints.plan.md`
+- R's extension list drops `.R`, which never matched anything because lookup lowercases the suffix; `analysis.R` still counts as R, and a test keeps every registered extension lowercase. The README says extensions match in any case and spells out when first-run setup launches (no config in the scanned directory or above it, and a terminal), and a test checks that a parent config alone skips setup. `CLAUDE.md` and `.cursor/rules/` describe the current code again.
+- Files: `src/tallyman/languages.py`, `tests/test_languages.py`, `tests/test_cli.py`, `README.md`, `CLAUDE.md`, `.cursor/rules/`, `plans/006-tallyman-architect.plan.md`
+- Plan: `plans/012-housekeeping/phase-02-docs-and-recount.plan.md`
 - A plain run no longer imports Textual; only setup loads it. That roughly halves start-up: importing `tallyman.cli` went from about 75 ms to about 33 ms. A test checks that a plain run, with or without a config, loads neither Textual nor Pillow.
 - Files: `src/tallyman/cli.py`, `tests/test_cli.py`, `CLAUDE.md`
 - Plan: `plans/011-setup-tui/phase-01-lazy-textual-and-text-labels.plan.md`
@@ -56,6 +64,8 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - Plan: `plans/010-git-fidelity/phase-03-docs.plan.md`
 
 ### Fixed
+- An image card legend too long for one row, such as five long names like `reStructuredText (specs)`, wraps onto more rows instead of running off the card's right edge, and the card grows to fit. A category line whose language list is too wide is shortened with an ellipsis, as the title already was.
+- Files: `src/tallyman/image.py`, `tests/test_image.py`, `README.md`, `CLAUDE.md`
 - Setup shows directory names exactly as they are on disk. A directory named `:rocket:` no longer turns into an emoji, and a name ending in a backslash is no longer doubled, in the tree and on the root. The labels are built as Rich `Text`, never markup.
 - Files: `src/tallyman/tui/setup_app.py`, `tests/test_setup_app.py`
 - Plan: `plans/011-setup-tui/phase-01-lazy-textual-and-text-labels.plan.md`

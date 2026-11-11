@@ -175,14 +175,22 @@ class TestGenerateImage:
 
 
 def _record_drawing(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
-    """Record what generate_image() draws: 'text' holds each string, 'rectangles' each (x0, y0, x1, y1),
-    and 'fills' each rectangle's fill colour.
+    """Record what generate_image() draws.
 
-    Only the bar's segments are drawn as rectangles. The originals still run, so Pillow's own checks apply.
+    'text' holds each string and 'text_xy' where it starts. 'rectangles' holds the bar's segments as
+    (x0, y0, x1, y1) and 'fills' their colours; 'swatches' and 'swatch_fills' do the same for the legend's
+    swatches. The two are told apart by height. The originals still run, so Pillow's own checks apply.
     """
     from PIL import ImageDraw, ImageFont
 
-    drawn: dict[str, list] = {'text': [], 'rectangles': [], 'fills': []}
+    drawn: dict[str, list] = {
+        'text': [],
+        'text_xy': [],
+        'rectangles': [],
+        'fills': [],
+        'swatches': [],
+        'swatch_fills': [],
+    }
     original_text = ImageDraw.ImageDraw.text
     original_rectangle = ImageDraw.ImageDraw.rectangle
 
@@ -195,13 +203,17 @@ def _record_drawing(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
         font: Optional[Union[ImageFont.FreeTypeFont, ImageFont.ImageFont]] = None,
     ) -> None:
         drawn['text'].append(text)
+        drawn['text_xy'].append(tuple(xy))
         original_text(self, xy, text, fill=fill, font=font)
 
     def rectangle(
         self: ImageDraw.ImageDraw, xy: tuple[float, float, float, float], fill: Optional[tuple[int, int, int]] = None
     ) -> None:
-        drawn['rectangles'].append(tuple(xy))
-        drawn['fills'].append(fill)
+        height = xy[3] - xy[1]
+        assert height in (image.LEGEND_SWATCH_PX - 1, image.BAR_HEIGHT), f'unexpected rectangle {xy}'
+        is_swatch = height == image.LEGEND_SWATCH_PX - 1
+        drawn['swatches' if is_swatch else 'rectangles'].append(tuple(xy))
+        drawn['swatch_fills' if is_swatch else 'fills'].append(fill)
         original_rectangle(self, xy, fill=fill)
 
     monkeypatch.setattr(ImageDraw.ImageDraw, 'text', text)
@@ -209,10 +221,14 @@ def _record_drawing(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     return drawn
 
 
+def _legend_indexes(drawn: dict[str, list]) -> list[int]:
+    """Where each legend entry sits in drawn['text']: the legend is the only text with a percentage in it."""
+    return [i for i, t in enumerate(drawn['text']) if '%' in t]
+
+
 def _image_legend(drawn: dict[str, list]) -> list[str]:
-    """The legend entries the image drew: the only text with a percentage in it."""
-    (legend,) = [t for t in drawn['text'] if '%' in t]
-    return legend.split(image.LEGEND_SEPARATOR)
+    """The legend entries the image drew, in order."""
+    return [drawn['text'][i] for i in _legend_indexes(drawn)]
 
 
 def _code_tally(sizes: list[int]) -> TallyResult:
@@ -266,6 +282,76 @@ class TestBar:
         for left, right in zip(rects, rects[1:]):
             assert right[0] == left[2] + image.BAR_GAP  # each segment starts where the last one's gap ends
         assert all(x1 - x0 >= image.MIN_SEGMENT_PX - image.BAR_GAP for x0, _, x1, _ in rects)
+
+
+def _long_name_tally(name: str = 'Some Quite Long Language') -> TallyResult:
+    """Six languages (five plus Other) whose legend entries can't share one row when *name* is long."""
+    colors = ['dodger_blue1', 'orange1', 'green3', 'magenta', 'yellow', 'red']
+    langs = [Language(f'{name} {i}', 'code', colors[i], '#', (f'.x{i}',)) for i in range(6)]
+    return aggregate(
+        [(lang, FileCount(total_lines=n, code_lines=n)) for lang, n in zip(langs, [30, 25, 20, 15, 10, 6])]
+    )
+
+
+class TestLegend:
+    def test_each_entry_has_a_swatch_in_its_segment_colour(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The card's legend named languages in plain grey, so a segment matched its name only by position."""
+        _, digit_top, _, digit_bottom = _load_font(image.LEGEND_FONT_SIZE).getbbox('0')
+        drawn = _record_drawing(monkeypatch)
+        generate_image(_code_tally([300, 200, 150, 120, 100, 80, 50]), 'proj', tmp_path / 'out.png', DARK_THEME)
+        legend = _legend_indexes(drawn)
+        assert len(drawn['swatches']) == len(legend) == len(drawn['rectangles'])
+        assert drawn['swatch_fills'] == drawn['fills']  # same colours, same order as the bar
+        for (x0, y0, x1, y1), i in zip(drawn['swatches'], legend):
+            label_x, label_y = drawn['text_xy'][i]
+            assert x1 - x0 == y1 - y0 == image.LEGEND_SWATCH_PX - 1  # square
+            assert label_x == x1 + 1 + image.LEGEND_SWATCH_GAP  # just before its own label
+            assert abs((y0 + y1) / 2 - (label_y + (digit_top + digit_bottom - 1) / 2)) <= 0.5  # centred on the digits
+
+    def test_a_legend_that_fits_stays_on_one_row(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        drawn = _record_drawing(monkeypatch)
+        generate_image(_code_tally([300, 200, 150, 120, 100, 80, 50]), 'proj', tmp_path / 'out.png', DARK_THEME)
+        assert len({drawn['text_xy'][i][1] for i in _legend_indexes(drawn)}) == 1
+
+    def test_a_long_legend_wraps_instead_of_running_off_the_card(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Five long names ran the one-line legend past the card's right edge."""
+        font = _load_font(image.LEGEND_FONT_SIZE)
+        drawn = _record_drawing(monkeypatch)
+        generate_image(_long_name_tally(), 'proj', tmp_path / 'long.png', DARK_THEME)
+        legend = _legend_indexes(drawn)
+        positions = [drawn['text_xy'][i] for i in legend]
+        for (x, _), i in zip(positions, legend):
+            assert x + font.getlength(drawn['text'][i]) <= image.IMAGE_WIDTH - image.PADDING
+        rows = sorted({y for _, y in positions})
+        assert len(rows) == 2
+        assert positions == sorted(positions, key=lambda xy: (xy[1], xy[0]))  # bar order: across, then down
+        assert [label.rsplit(' ', 1)[0] for label in _image_legend(drawn)] == [
+            s.label for s in bar_segments(_long_name_tally(), max_languages=MAX_LEGEND_ITEMS)
+        ]
+
+        generate_image(_long_name_tally('L'), 'proj', tmp_path / 'short.png', DARK_THEME)
+        assert _height(tmp_path / 'long.png') == _height(tmp_path / 'short.png') + image.LEGEND_LINE_HEIGHT
+
+    def test_rows_never_start_empty(self) -> None:
+        """An entry wider than the card still gets a row of its own rather than an empty one before it."""
+        font = _load_font(image.LEGEND_FONT_SIZE)
+        assert image._legend_rows(['x' * 200, 'y'], font, 100) == [[(0, 0)], [(1, 0)]]
+        assert image._legend_rows([], font, 100) == [[]]
+
+
+class TestCategoryLines:
+    def test_a_long_language_list_is_shortened_to_fit(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The category line's language list ran off the card's right edge."""
+        font = _load_font(image.BODY_FONT_SIZE)
+        drawn = _record_drawing(monkeypatch)
+        generate_image(_long_name_tally(), 'proj', tmp_path / 'out.png', DARK_THEME)
+        (line,) = [t for t in drawn['text'] if t.startswith('Code:')]
+        assert line.endswith('…')
+        assert font.getlength(line) <= image.IMAGE_WIDTH - 2 * image.PADDING
 
 
 def _specs_and_docs_tree(tmp_path: Path) -> Path:
