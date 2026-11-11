@@ -41,7 +41,7 @@ When `TallyResult.rust_test_lines > 0`, the report ends with a dim line:
 
 ## 3. `CLAUDE.md`
 
-- **Module map:** add `src/tallyman/rust_tests.py` (`test_code_lines()`: the Rust test-code scanner, a pure function on normalised text). Update `config.py` (`[rust]`, `NestedConfig`), `walker.py` (`walk_files()`, `SourceFile`, per-directory `exclude_rust_tests`), `counter.py` (`exclude_rust_tests`, `test_lines`), `display.py` (the Rust note), `languages.py` (`RUST`).
+- **Module map:** add `src/tallyman/rust_tests.py` (`rust_test_lines()`: the Rust test-code scanner, a pure function on normalised text). Update `config.py` (`[rust]`, `NestedConfig`), `walker.py` (`walk_files()`, `SourceFile`, per-directory `exclude_rust_tests`), `counter.py` (`exclude_rust_tests`, `test_lines`), `display.py` (the Rust note), `languages.py` (`RUST`).
 - **Core data structures:** `FileCount.test_lines`; `TallyResult.rust_test_lines`, `.rust_test_files`; `TallyConfig.rust_exclude_test_modules`; `ConfigChain.rust_exclude_test_modules`; `SourceFile`.
 - **Key design decisions:** a new numbered entry, "Rust test code (opt-in)", covering: brace tracking with the lexing rules; item positions only (containers: top level, `mod`, `impl`, `trait`, `extern` bodies); the cfg predicate rule (`all` needs one test-only argument, `any` needs all); inner `#![cfg(test)]`; when in doubt, count; the per-directory value that must never go through `merge_configs()` (the sibling-leak trap); setup preserves the value without a toggle.
 - **Architecture** diagram: `walker.walk_files()` yields `SourceFile`; `counter.count_lines()` takes the flag.

@@ -7,15 +7,17 @@ Covers decisions 2, 3, 4, 8 and 9 from `00-plan-introduction.plan.md`. Nothing c
 A new module, `src/tallyman/rust_tests.py`, with one public function:
 
 ```python
-def test_code_lines(text: str) -> frozenset[int]:
+def rust_test_lines(text: str) -> frozenset[int]:
     """0-based indexes of the lines in *text* that belong to test-only Rust code."""
 ```
 
 *text* is already decoded and newline-normalised (only `\n` separates lines), exactly as `count_lines()` splits it, so the indexes line up with `count_lines()`'s `lines` list. An empty result means "count everything". The function never raises on any input.
 
+(The name was `test_code_lines()` in the first draft. pytest collects any function named `test*` in a test module, imported ones included, so the tests would have tried to run it.)
+
 ## Fast path
 
-Most `.rs` files have no test code. Before scanning, run one compiled regex search for an attribute that mentions `cfg`, e.g. `#\s*!?\s*\[\s*cfg\s*\(`. No match: return the empty set. This keeps the cost of the option close to zero on files without tests. The full scan still has to handle a match that turns out to sit in a string or comment.
+Most `.rs` files have no test code. Before scanning, check that the text contains both `cfg` and `test` (two substring searches). If not, return the empty set. This keeps the cost of the option close to zero on files without tests. (A regex for `#[cfg(` would miss an attribute with a comment between its tokens; substrings can't miss.) The full scan still has to handle a match that turns out to sit in a string or comment.
 
 ## Scanner design
 
@@ -88,7 +90,7 @@ A test-only outer attribute drops the **whole item it is attached to**, from the
 An inner attribute `#![...]` with a test-only predicate makes its **enclosing container** test-only:
 
 - At the top of the file (after an optional BOM, shebang, comments, `//!` docs and other inner attributes): every line of the file.
-- As the first thing in a `mod name { ... }` body: the whole `mod` item, from its outer attributes to its closing `}`.
+- As the first thing in a `mod`, `impl`, `trait` or `extern` body: that whole item, from its outer attributes to its closing `}`. (rustc removes an `impl` or `trait` under an inner `#![cfg(test)]` too; checked in the phase 1 review.)
 
 An inner attribute anywhere else is not valid Rust; ignore it.
 
@@ -108,10 +110,10 @@ Nested regions (a `#[cfg(test)] fn` inside a `#[cfg(test)] mod`) need no special
 Return the empty set (count the whole file normally) when the scan:
 
 - reaches the end of the text inside a string, char literal or block comment;
-- reaches the end of the text inside a dropped item, with its brackets still open;
-- finds a closing bracket below depth 0 inside a dropped item.
+- finds brackets anywhere in the file that don't balance or don't pair up (`(]`), outside strings and comments;
+- reaches the end of the text (or of the enclosing block) inside a test item with no `;` or body to end it. This cancels the whole file, not just that item.
 
-Unbalanced brackets *outside* any test item don't matter and don't cancel anything: the scanner only needs to be right about the items it drops. (Rule of thumb: the scanner may miss test code; it must never drop real code.)
+Real Rust always balances: every source file, macro bodies included, is a sequence of balanced token trees. So the scanner pairs every bracket up front and bails out on the whole file if it can't, instead of guessing which brackets are wrong. (Rule of thumb: the scanner may miss test code; it must never drop real code.)
 
 ## Tests
 
@@ -162,11 +164,21 @@ New file `tests/test_rust_tests.py`. Most tests are one table (`pytest.mark.para
 - Unbalanced brackets in real code outside any test item (a stray `{` or `}` before the test module): no exception and no real code dropped. Dropping nothing is fine; a stray bracket can hide the container the test module sits in.
 
 **Robustness**
-- Property-style check: for a few hundred random strings built from Rust-ish fragments (`{`, `}`, `"`, `'`, `r#"`, `/*`, `#[cfg(test)]`, `mod t`, newlines), `test_code_lines()` never raises and returns indexes within range.
+- Property-style check: for a few hundred random strings built from Rust-ish fragments (`{`, `}`, `"`, `'`, `r#"`, `/*`, `#[cfg(test)]`, `mod t`, newlines), `rust_test_lines()` never raises and returns indexes within range.
+
+## Review findings (phase 1, 2026-11-11)
+
+The architect review built a reference with syn 2 (Rust's own parser crate, with span locations) that finds the same regions, and compared it with `rust_test_lines()`. On 41,390 files from the local cargo registry (18.8M lines) the two agreed exactly: 995,370 lines, no extra lines dropped, none missed. On 20,000 generated files they also agreed exactly, and a second fuzz set with items sharing lines produced no false drops. This is a scratchpad tool, not a test dependency, but it is the way to re-check the scanner after any change to its lexing or item rules.
+
+Fixed from the review:
+- `#[cfg(test)] const trait` / `const impl` (nightly syntax) were read as `const` items, which end only at `;`, so the real items after them were dropped. `const` is now a const item only when a name or `_` follows it; after a keyword it is a modifier. A wrong semicolon kind drops real code, while a wrong brace kind only misses test code, so that rule leans to brace kinds.
+- `#[cfg(test,)]` (valid Rust) is test-only.
+
+Known safe misses, left alone: const-generic braces before an item's body (`impl Foo<{ N }> {`) end the item early, and nesting deeper than about 500 levels gives up on the file. Speed: about 0.3 s per MB, roughly 4x `count_lines()` on files that contain both `cfg` and `test`; tens of milliseconds on a typical workspace. A single master regex could speed up `_tokenize()` if it ever matters.
 
 ## Done when
 
-- `test_code_lines()` passes the table above.
+- `rust_test_lines()` passes the table above.
 - On a real Rust file of about 1 MB (generate one by concatenating snippets if no real one is to hand), it runs in well under a second; note the time in the commit message.
 - All checks in "Rules for every phase" are clean, and the architect review's valid findings are addressed.
 - Commit: `Plan 013 phase 1: Rust test-code scanner`.

@@ -73,7 +73,7 @@ Crossing a nested git repo boundary changes nothing here: tallyman settings cros
 
 - In `languages.py`, give the Rust entry a module-level name, `RUST = Language('Rust', ...)`, and use that name in `LANGUAGES`. Language identity is how tallyman tells languages apart (design decision 1), so the counter checks `language is RUST`, not the name string.
 - `FileCount` gains `test_lines: int = 0`: lines left out as Rust test code. They are **not** in `total_lines`, `code_lines`, `comment_lines` or `blank_lines`.
-- `count_lines(path, language, exclude_rust_tests: bool = False)`. When the flag is set and `language is RUST`, call `rust_tests.test_code_lines()` on the normalised text (the same string that is split into `lines`), then skip those indexes in the loop, adding them to `test_lines` instead. Any other language, or the flag off: behaviour unchanged, and `rust_tests` is never called.
+- `count_lines(path, language, exclude_rust_tests: bool = False)`. When the flag is set and `language is RUST`, call `rust_tests.rust_test_lines()` on the normalised text (the same string that is split into `lines`), then skip those indexes in the loop, adding them to `test_lines` instead. Any other language, or the flag off: behaviour unchanged, and `rust_tests` is never called.
 - Update the `count_lines()` docstring.
 
 ## 4. Aggregation (`aggregator.py`)
