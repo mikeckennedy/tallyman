@@ -37,6 +37,10 @@ A scan-root entry is a **copy** when a parent config (`inherited`) or a nested c
 
 - Save what setup returns: `local = TallyConfig(*result)`. Drop the `without_inherited` import and its comment. The comment moves to `_drop_copies()`, which is now the one place that knows every source of locked settings.
 
+### Added after the plan 008 phase 2 review: `save_config()` must not block
+
+A `.tally-config.toml` at the scan root that exists but isn't a regular file (a FIFO, say) is skipped by `find_configs()` (`is_file()`), so setup launches, and then `save_config()`'s `write_text()` opens the FIFO for writing and blocks forever. A directory with that name already fails with `OSError` and a warning. In `save_config()`, if the path exists and isn't a regular file (`lstat()` + `S_ISREG`, or a symlink to one via `is_file()`), raise `OSError` naming the path without opening it, so the CLI's existing save-failure handling reports it. Test with the `make_fifo` fixture from `tests/conftest.py`, calling `save_config()` directly (no terminal needed); it must fail on the old code without hanging.
+
 ## Precedence (item 10)
 
 ### `src/tallyman/tui/setup_app.py`
