@@ -29,7 +29,7 @@ tallyman --with-spaces      # totals and bar use total lines, not effective line
 tallyman --image            # PNG summary card on the Desktop (--image-light for the light theme)
 
 # Tests
-pytest                      # all 529 tests (about 15 s, mostly the Textual pilot tests)
+pytest                      # all 547 tests (about 20 s, mostly the Textual pilot tests)
 pytest -v                   # verbose
 pytest tests/test_walker.py # single module
 
@@ -68,16 +68,16 @@ cli.main()
 
 | Module | Role |
 |---|---|
-| `src/tallyman/cli.py` | Entry point. Arg parsing, config loading and errors, no-terminal handling, orchestrates the pipeline |
+| `src/tallyman/cli.py` | Entry point. Sets stdout to replace characters it can't encode, arg parsing, config loading and errors, no-terminal handling, orchestrates the pipeline |
 | `src/tallyman/languages.py` | Language registry (40+ languages). Frozen dataclasses with name, category, color, comment marker, extensions. `EXTENSION_MAP` for O(1) lookup. `OTHER_COLOR` for the bar's "Other" segment |
 | `src/tallyman/walker.py` | Directory traversal. Respects gitignore, config exclusions and `[exclude] patterns`. Detects spec dirs. Yields `(Path, Language)`; fills `WalkStats` |
 | `src/tallyman/gitignore.py` | Gitignore rules (`GitIgnoreSpec`, `load_gitignore`, `find_git_root`). Own pattern compiler that follows gitignore(5). `GitIgnoreSpec.for_patterns()` + `add_rules()` hold `[exclude] patterns` |
-| `src/tallyman/encoding.py` | BOM detection: `text_encoding()`, `has_wide_bom()`. Shared by walker (binary check) and counter |
+| `src/tallyman/encoding.py` | BOM detection: `text_encoding()`, `has_wide_bom()`. Shared by walker (binary check), counter and config loading |
 | `src/tallyman/paths.py` | `relative_posix()`: `/`-separated relative paths, safe on Windows |
 | `src/tallyman/counter.py` | Reads files, classifies lines as code/comment/blank. Returns `FileCount` |
 | `src/tallyman/aggregator.py` | Accumulates FileCount into LanguageStats, groups by category. Produces `TallyResult`, and the report model both outputs draw: `active_categories()`, `bar_segments()`, `segment_widths()`, `percent_label()`, `language_display_names()` |
 | `src/tallyman/display.py` | Rich-based rendering; draws the shared report model. Per-language stats, category totals, percentage bar, the "Excluded by [exclude] patterns" line |
-| `src/tallyman/config.py` | `.tally-config.toml` find (every one up to the git root), load with validation and normalisation, merge the chain and rebase onto the scan root (`ConfigChain`), save with TOML escaping. `ConfigError` (with `.path`) for unreadable configs |
+| `src/tallyman/config.py` | `.tally-config.toml` find (every one up to the git root), load with validation and normalisation, merge the chain and rebase onto the scan root (`ConfigChain`), save with TOML escaping. A config may start with a UTF-8/16/32 BOM (`text_encoding()`); save writes UTF-8 without one. `ConfigError` (with `.path`) for unreadable configs |
 | `src/tallyman/image.py` | Pillow PNG summary card; draws the shared report model (bar folded after five languages). Themes, output path (Desktop or cwd, slug capped at 100 chars) |
 | `src/tallyman/fonts/` | Bundled JetBrains Mono for the image |
 | `src/tallyman/tui/setup_app.py` | Textual App for interactive directory selection (exclude/spec marking) |
@@ -111,7 +111,7 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 
 3. **Comment detection is single-line only.** Strips the line, checks `startswith(marker)`. Multi-line comments (`/* */`, `""" """`) are NOT detected.
 
-4. **Binary detection** checks the first 8KB for a `\x00` byte, unless the file starts with a UTF-16/32 BOM. Lines end only at `\n`, `\r\n` or a lone `\r`, and a final line without a newline counts. BOMs pick the encoding (`encoding.py`). Tallyman's own config, npm/pnpm lockfiles, `*.min.js`/`*.min.css` and symlinked files are never counted.
+4. **Binary detection** checks the first 8KB for a `\x00` byte, unless the file starts with a UTF-16/32 BOM. Lines end only at `\n`, `\r\n` or a lone `\r`, and a final line without a newline counts. BOMs pick the encoding (`encoding.py`). Tallyman's own config, npm/pnpm lockfiles and `*.min.js`/`*.min.css` are never counted. Symlinks and other non-regular files (FIFOs, sockets, devices) are never counted or opened (`walker._is_regular_file()`, one `lstat()`, checked before anything opens the file); `.gitignore` files are read only if they are a regular file, or a symlink to one.
 
 5. **Every config from the git root down to the scan root applies.** `find_configs()` lists them shallowest first (outside a repo, only the scan root's). `load_config_chain()` folds the ones above the scan root with `merge_configs()` (exclusions add up; the deeper config wins on the same path) and rebases the result onto the scan root with `rebase_config()`: that is `ConfigChain.inherited`. The scan root's own config is `local`, and the walker uses `effective`. Nested configs below the scan root merge the same way as the walk descends. Setup edits only `local`: parent and nested settings are shown locked and never copied (`without_inherited()` drops old copies on save). A malformed config at or above the scan root exits 1 naming the file; `--setup` skips it with a warning. A malformed nested config is skipped silently, since it is often third-party code. Entries are normalised on load. In `[specs] directories` and `[specs] ignore`, `"."` means the config's own directory. With no config and no terminal, tallyman runs with defaults and writes nothing.
 
@@ -129,17 +129,17 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 |---|---|---|
 | `tests/test_counter.py` | 29 | Line counting, line endings, BOMs and wide encodings |
 | `tests/test_languages.py` | 58 | Language registry, extension map, Docker/Compose variants, valid and unshared colours, `as_spec` |
-| `tests/test_display.py` | 28 | Terminal rendering: header escaping, wording, labels, bar width and cells, no bar for nothing, pattern note |
+| `tests/test_display.py` | 32 | Terminal rendering: header escaping, wording, labels, bar width and cells, no bar for nothing, pattern note, Unicode probe |
 | `tests/test_image.py` | 27 | Slugs, image paths, themes, PNG generation, title fitting, bar segments, agreement with the terminal |
-| `tests/test_walker.py` | 52 | Walking, exclusions, spec detection, nested configs, exclude patterns, `WalkStats` |
-| `tests/test_gitignore.py` | 100 | Git root, gitignore loading and scoping, negation, TUI agreement, parity with `git`, config pattern layers |
+| `tests/test_walker.py` | 55 | Walking, exclusions, spec detection, nested configs, exclude patterns, `WalkStats`, FIFOs and sockets |
+| `tests/test_gitignore.py` | 101 | Git root, gitignore loading and scoping, negation, TUI agreement, parity with `git`, config pattern layers, FIFO `.gitignore` |
 | `tests/test_paths.py` | 6 | POSIX relative paths, canonical case |
 | `tests/test_aggregator.py` | 56 | Stats aggregation, categories, percentages, effective lines, the report model: bar segments, widths, labels |
-| `tests/test_config.py` | 83 | Config find/load/save, `[specs] ignore`, `[exclude] patterns`, normalisation, rebasing, chain merging, escaping, directory cleanup |
+| `tests/test_config.py` | 90 | Config find/load/save, `[specs] ignore`, `[exclude] patterns`, normalisation, rebasing, chain merging, escaping, directory cleanup, BOMs |
 | `tests/test_setup_app.py` | 51 | Setup TUI via Textual pilot: toggles, labels, parent/nested locks, patterns, agreement with the walker |
-| `tests/test_cli.py` | 39 | End-to-end CLI: config chain, errors, no-terminal runs, setup pre-fill and pattern preservation, flags, colour |
+| `tests/test_cli.py` | 42 | End-to-end CLI: config chain, errors, no-terminal runs, setup pre-fill and pattern preservation, flags, colour, narrow stdout encodings, BOM config |
 
-Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` create test Language instances.
+Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` create test Language instances. `tests/conftest.py` holds the `make_fifo` fixture: it creates a FIFO and, if a reader blocks on it, writes to it after 2 s, so a regression fails instead of hanging the suite (skip FIFO tests where `os.mkfifo` is missing).
 
 ## Code Conventions
 

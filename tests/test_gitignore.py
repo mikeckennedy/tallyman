@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 from typing import Optional
 
@@ -112,6 +113,16 @@ class TestLoadGitignore:
         (tmp_path / 'sub' / '.gitignore').mkdir(parents=True)
         (tmp_path / 'sub' / 'a.py').write_text(X)
         assert _walked(tmp_path) == {'sub/a.py'}
+
+    @pytest.mark.skipif(not hasattr(os, 'mkfifo'), reason='named pipes need os.mkfifo (not on Windows)')
+    def test_fifo_gitignore_is_not_read(self, tmp_path: Path, make_fifo: Callable[..., Path]) -> None:
+        """Opening a FIFO blocks until something writes to it; only regular files are read."""
+        sub = tmp_path / 'sub'
+        make_fifo(sub / '.gitignore', payload=b'a.py\n')
+        (sub / 'a.py').write_text(X)
+        spec = load_gitignore(tmp_path)
+        spec.add_directory('sub', sub)
+        assert not spec.match_file('sub/a.py')
 
     def test_bom_does_not_break_first_pattern(self, tmp_path: Path):
         (tmp_path / '.gitignore').write_text('\ufeff*.md\n')

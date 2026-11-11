@@ -48,6 +48,15 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - `--image` no longer crashes with `ValueError: x1 must be greater than or equal to x0` when "Other" is under about 0.1% of the lines; every image segment is at least 4 px wide.
 - Files: `src/tallyman/aggregator.py`, `src/tallyman/languages.py`, `src/tallyman/display.py`, `src/tallyman/image.py`, `tests/test_aggregator.py`, `tests/test_display.py`, `tests/test_image.py`, `CLAUDE.md`
 - Plan: `plans/008-output-hardening/phase-01-shared-report-model.plan.md`
+- A named pipe (FIFO) with a source-file extension, or named `.gitignore`, no longer hangs the scan. Only regular files are read: FIFOs, sockets and devices are skipped like symlinks, and a `.gitignore` or `.git/info/exclude` that isn't a regular file, or a symlink to one, is treated as absent.
+- Files: `src/tallyman/walker.py`, `src/tallyman/gitignore.py`, `tests/conftest.py`, `tests/test_walker.py`, `tests/test_gitignore.py`, `README.md`, `CLAUDE.md`
+- Plan: `plans/008-output-hardening/phase-02-files-stdout-config.plan.md`
+- A terminal whose encoding can't show a character (Windows cp1252, `PYTHONIOENCODING=ascii`) gets `?` instead of a crash, and the legend separator falls back to `|` with the rest of the ASCII output. An encoding with box drawing but no `·` (such as cp852) now gets the ASCII report too.
+- Files: `src/tallyman/cli.py`, `src/tallyman/display.py`, `tests/test_cli.py`, `tests/test_display.py`, `CLAUDE.md`
+- Plan: `plans/008-output-hardening/phase-02-files-stdout-config.plan.md`
+- A `.tally-config.toml` saved with a byte-order mark loads instead of failing with "Invalid statement". A UTF-8, UTF-16 or UTF-32 mark picks the encoding, as it does for source files; `--setup` rewrites the file as UTF-8 without one.
+- Files: `src/tallyman/config.py`, `tests/test_config.py`, `tests/test_cli.py`, `README.md`, `CLAUDE.md`
+- Plan: `plans/008-output-hardening/phase-02-files-stdout-config.plan.md`
 - An empty `NO_COLOR` no longer disables colour; per no-color.org only a non-empty value does.
 - Solidity's colour changed from `bright_cyan`, which SQL also uses, to `slate_blue1`, so the two are distinguishable in the bar.
 - README and `CLAUDE.md` describe the current behaviour: config search and rebasing, `[specs] ignore`, `"."`, no-terminal runs, what is never counted, and the language count (43, not 41).

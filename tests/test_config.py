@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 from pathlib import Path
 
 import pytest
@@ -179,6 +180,44 @@ class TestLoadConfig:
         config.write_text('[specs]\nignore = "plans"\n')
         with pytest.raises(ConfigError, match='specs.ignore'):
             load_config(config)
+
+
+_BOM_TEXT = '[exclude]\ndirectories = ["vendor"]\n'
+
+
+class TestByteOrderMark:
+    """Some editors (and Windows PowerShell's ``>``) start a file with a byte-order mark; it picks the encoding."""
+
+    @pytest.mark.parametrize(
+        'payload',
+        [
+            codecs.BOM_UTF8 + _BOM_TEXT.encode('utf-8'),
+            codecs.BOM_UTF16_LE + _BOM_TEXT.encode('utf-16-le'),
+            codecs.BOM_UTF16_BE + _BOM_TEXT.encode('utf-16-be'),
+            codecs.BOM_UTF32_LE + _BOM_TEXT.encode('utf-32-le'),
+            codecs.BOM_UTF32_BE + _BOM_TEXT.encode('utf-32-be'),
+        ],
+        ids=['utf-8', 'utf-16-le', 'utf-16-be', 'utf-32-le', 'utf-32-be'],
+    )
+    def test_bom_is_accepted(self, tmp_path: Path, payload: bytes) -> None:
+        config = tmp_path / CONFIG_FILENAME
+        config.write_bytes(payload)
+        assert load_config(config).excluded_dirs == {'vendor'}
+
+    def test_invalid_utf8_still_raises(self, tmp_path: Path) -> None:
+        config = tmp_path / CONFIG_FILENAME
+        config.write_bytes(b'\xc3\x28')  # not b'\xff\xfe': that is a UTF-16 byte-order mark
+        with pytest.raises(ConfigError) as info:
+            load_config(config)
+        assert info.value.path == config
+
+    def test_setup_rewrite_drops_the_bom(self, tmp_path: Path) -> None:
+        config = tmp_path / CONFIG_FILENAME
+        config.write_bytes(codecs.BOM_UTF8 + _BOM_TEXT.encode('utf-8'))
+        loaded = load_config(config)
+        save_config(config, loaded.excluded_dirs, loaded.spec_dirs, loaded.non_spec_dirs, patterns=loaded.patterns)
+        assert not config.read_bytes().startswith(codecs.BOM_UTF8)
+        assert load_config(config) == loaded
 
 
 class TestRebaseConfig:

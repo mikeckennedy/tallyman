@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from tallyman.encoding import text_encoding
 from tallyman.gitignore import find_git_root
 from tallyman.paths import relative_posix
 
@@ -124,14 +125,18 @@ def _patterns(data: dict[str, Any]) -> list[str]:
 def load_config(config_path: Path) -> TallyConfig:
     """Load a .tally-config.toml and return the configuration.
 
+    A UTF-8, UTF-16 or UTF-32 byte-order mark picks the encoding, as it does for
+    source files; without one the file must be UTF-8.
+
     Raises ConfigError, with ``path`` set to *config_path*, if the file can't be
-    read, isn't valid UTF-8 TOML, or has the wrong shape.
+    read or decoded, isn't valid TOML, or has the wrong shape.
     """
     try:
-        with config_path.open('rb') as f:
-            data = tomllib.load(f)
+        raw = config_path.read_bytes()
     except OSError as e:
         raise ConfigError(e.strerror or str(e), config_path) from e
+    try:
+        data = tomllib.loads(raw.decode(text_encoding(raw[:4])))
     except (ValueError, RecursionError) as e:  # TOMLDecodeError and UnicodeDecodeError are both ValueErrors
         raise ConfigError(str(e) or type(e).__name__, config_path) from e
     try:

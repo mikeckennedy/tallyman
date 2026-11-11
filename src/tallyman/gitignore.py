@@ -16,6 +16,8 @@ Known differences from git:
   ``?`` does not match a multi-byte character such as ``é`` there.
 - Git never ignores a file it already tracks. Tallyman can't see the index, so
   a force-added file under an ignored pattern is skipped.
+- A ``.gitignore`` or ``info/exclude`` that isn't a regular file (or a symlink
+  to one) is treated as absent; git opens it, and blocks on a FIFO.
 """
 
 from __future__ import annotations
@@ -333,9 +335,16 @@ class GitIgnoreSpec:
         return self._is_ignored(full, is_dir)
 
     def _add_file(self, base: str, ignore_file: Path) -> None:
-        """Register *ignore_file*, scoped to *base* (relative to the git root)."""
+        """Register *ignore_file*, scoped to *base* (relative to the git root).
+
+        Only a regular file is read (``is_file()``, which follows a symlink), so a FIFO
+        named ``.gitignore`` or ``info/exclude`` can't block the walk.
+        """
         if (base, ignore_file.name) in self._loaded:
             return
+        if not ignore_file.is_file():
+            self._loaded.add((base, ignore_file.name))
+            return  # missing, or not a regular file: treated as absent
         try:
             lines = _split_lines(ignore_file.read_bytes().decode('utf-8-sig', errors='replace'))
         except OSError:

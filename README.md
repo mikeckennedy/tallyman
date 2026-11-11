@@ -178,7 +178,7 @@ Some files are never counted, whatever your `.gitignore` says:
 
 - Hidden directories such as `.git/`, `.venv/` and `.github/`
 - Binary files (a NUL byte in the first 8 KB)
-- Symlinks, so a linked file is never counted twice
+- Symlinks, so a linked file is never counted twice, and special files such as named pipes and sockets
 - Generated files: `.tally-config.toml`, `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `*.min.js` and `*.min.css`
 
 Comment detection covers single-line comment styles (`#`, `//`, `--`, `%`). Multi-line comment blocks (`/* */`, `""" """`) are not currently detected - lines inside them are counted as code.
@@ -207,6 +207,7 @@ ignore = ["src/myapp/agents"]      # never specs, even if named plans/, agents/,
 ```
 
 - Paths are relative to the directory the config file lives in. An entry covers everything beneath it.
+- A config saved with a byte-order mark (some Windows editors add one) is read fine.
 - In `[specs]`, `"."` means that directory itself.
 - When `directories` and `ignore` disagree, the deeper entry wins, so you can ignore `agents/` but still count `agents/plans/`. If both list the same directory, `directories` wins.
 

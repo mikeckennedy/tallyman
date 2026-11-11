@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import shlex
 import sys
@@ -116,7 +117,18 @@ def _pattern_spec(root: Path, layers: list[PatternLayer]) -> GitIgnoreSpec:
     return spec
 
 
+def _tolerate_unencodable_stdout() -> None:
+    """Print '?' for characters stdout's encoding can't represent, instead of crashing.
+
+    Directory names, language display names and the image path can hold any character; a cp1252 or ascii
+    stdout can't show them all. stderr needs nothing: Python already opens it with errors='backslashreplace'.
+    """
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(errors='replace')
+
+
 def main() -> None:
+    _tolerate_unencodable_stdout()
     parser = build_parser()
     args = parser.parse_args()
     root = canonical_case(Path(args.path).resolve())

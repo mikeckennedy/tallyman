@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import sys
+from types import SimpleNamespace
 from typing import Optional
 
 import pytest
@@ -8,7 +10,7 @@ from rich.console import Console
 
 from tallyman.aggregator import aggregate, bar_segments
 from tallyman.counter import FileCount
-from tallyman.display import BAR_WIDTH, BLOCK_CHAR, _bar_text, display_results
+from tallyman.display import BAR_WIDTH, BLOCK_CHAR, _bar_text, _can_encode_unicode, display_results
 from tallyman.languages import EXTENSION_MAP, as_spec
 from tallyman.walker import WalkStats
 
@@ -199,3 +201,15 @@ class TestPatternNote:
         out = _render_with_stats(WalkStats(3, 0), files=False)
         assert 'No recognized source files found.' in out
         assert 'Excluded by [exclude] patterns: 3 files' in out
+
+
+class TestUnicodeProbe:
+    @pytest.mark.parametrize(
+        ('encoding', 'expected'),
+        [('utf-8', True), ('cp1252', False), ('ascii', False), ('cp852', False)],
+        ids=['utf-8', 'cp1252 has no box drawing', 'ascii', 'cp852 has no middle dot'],
+    )
+    def test_unicode_probe(self, monkeypatch: pytest.MonkeyPatch, encoding: str, expected: bool) -> None:
+        """Every non-ASCII character the report prints must encode, or the whole report goes ASCII."""
+        monkeypatch.setattr(sys, 'stdout', SimpleNamespace(encoding=encoding))
+        assert _can_encode_unicode() is expected

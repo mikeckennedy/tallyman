@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -98,6 +99,19 @@ def _is_binary(path: Path) -> bool:
     except OSError:
         return True
     return b'\x00' in chunk and not has_wide_bom(chunk)
+
+
+def _is_regular_file(path: Path) -> bool:
+    """True for a regular file that is not a symlink, from one lstat().
+
+    FIFOs, sockets and devices are skipped: opening a FIFO blocks until something writes to it.
+    Symlinks are skipped too: the walk doesn't follow linked directories either, and a link to a
+    file in the tree would count that file twice.
+    """
+    try:
+        return stat.S_ISREG(path.lstat().st_mode)
+    except OSError:
+        return False  # vanished or unreadable mid-walk
 
 
 @dataclass(slots=True)
@@ -201,9 +215,9 @@ def walk_project(
             if gitignore_spec.match_file(file_rel):
                 continue
 
-            # Skip generated files, and symlinks: the walk doesn't follow linked directories either,
-            # and a link to a file in the tree would count that file twice
-            if _is_generated(filename) or file_path.is_symlink():
+            # Skip generated files, and anything but a regular file. This comes before the pattern
+            # check, whose stats path opens the file.
+            if _is_generated(filename) or not _is_regular_file(file_path):
                 continue
 
             if exclude_patterns.match_file(file_rel):

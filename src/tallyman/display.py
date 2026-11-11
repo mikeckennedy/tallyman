@@ -23,14 +23,15 @@ from tallyman.walker import WalkStats
 
 
 def _can_encode_unicode() -> bool:
-    """Check whether stdout can handle Unicode box-drawing characters.
+    """Check whether stdout can encode every non-ASCII character the report draws: rule, bar block and legend dot.
 
     On Windows with Git Bash (cp1252 encoding), the box-drawing and block
-    characters cause UnicodeEncodeError.  Fall back to ASCII in that case.
+    characters cause UnicodeEncodeError. Fall back to ASCII for all of them in
+    that case, so the report never mixes the two.
     """
     encoding = getattr(sys.stdout, 'encoding', None) or 'ascii'
     try:
-        '─█'.encode(encoding)
+        '─█·'.encode(encoding)
         return True
     except UnicodeEncodeError, LookupError:
         return False
@@ -41,7 +42,7 @@ HORIZONTAL_RULE = '─' if _USE_UNICODE else '-'
 BLOCK_CHAR = '█' if _USE_UNICODE else '#'
 
 BAR_WIDTH = 60
-LEGEND_SEPARATOR = '  ·  '
+LEGEND_SEPARATOR = '  ·  ' if _USE_UNICODE else '  |  '
 
 
 def display_results(

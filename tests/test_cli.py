@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import os
 import re
 import subprocess
@@ -112,6 +113,16 @@ class TestConfigFromParentDirectory:
         _make(tmp_path, {CONFIG_FILENAME: '[exclude]\ndirectories = ["repo"]\n', 'repo/a.py': 'x = 1\n'})
         (tmp_path / 'repo' / '.git').mkdir()
         tally = _run(monkeypatch, str(tmp_path / 'repo'))
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+
+
+class TestConfigWithByteOrderMark:
+    def test_config_with_bom_applies(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Some editors save a UTF-8 byte-order mark; the config must load, not fail with "Invalid statement"."""
+        _make(tmp_path, {'a.py': 'x = 1\n', 'vendor/x.py': 'x = 1\n'})
+        (tmp_path / CONFIG_FILENAME).write_bytes(codecs.BOM_UTF8 + b'[exclude]\ndirectories = ["vendor"]\n')
+        tally = _run(monkeypatch, str(tmp_path))
         assert tally is not None
         assert _files_by_category(tally) == {'Python/code': 1}
 
@@ -289,15 +300,22 @@ _SRC = str(Path(__file__).resolve().parent.parent / 'src')
 _COLOUR_CODE = re.compile(r'\x1b\[(?:\d+;)*(?:3[0-8]|4[0-8]|9[0-7]|10[0-7])[;m]')
 
 
-def _run_process(directory: Path, preexec_fn: Optional[Callable[[], None]] = None) -> subprocess.CompletedProcess[str]:
-    """Run the real CLI in a subprocess with stdin at /dev/null: no monkeypatching, so the real terminal check runs."""
+def _run_process(
+    directory: Path, preexec_fn: Optional[Callable[[], None]] = None, env: Optional[dict[str, str]] = None
+) -> subprocess.CompletedProcess[str]:
+    """Run the real CLI in a subprocess with stdin at /dev/null: no monkeypatching, so the real terminal check runs.
+
+    *env* is merged over the current environment. Output is decoded as UTF-8, with anything else shown as U+FFFD.
+    """
     return subprocess.run(
         [sys.executable, '-m', 'tallyman', str(directory)],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        encoding='utf-8',
+        errors='replace',
         timeout=60,
-        env={**os.environ, 'PYTHONPATH': _SRC, 'NO_COLOR': '1'},
+        env={**os.environ, 'PYTHONPATH': _SRC, 'NO_COLOR': '1', **(env or {})},
         preexec_fn=preexec_fn,
     )
 
@@ -325,6 +343,22 @@ class TestRealProcess:
         result = _run_process(tmp_path, preexec_fn=lambda: os.close(0))
         assert result.returncode == 0, result.stderr
         assert 'Traceback' not in result.stderr
+
+    @pytest.mark.parametrize('encoding', ['ascii', 'cp1252'])
+    def test_narrow_stdout_encoding_does_not_crash(self, tmp_path: Path, encoding: str) -> None:
+        """Characters stdout can't encode print as '?', and the report falls back to ASCII throughout."""
+        project = tmp_path / '日本'
+        try:
+            project.mkdir()
+        except OSError:
+            pytest.skip('the filesystem refuses a non-ASCII directory name')
+        (project / 'a.py').write_text('x = 1\n')
+        (project / 'b.rs').write_text('fn a() {}\n')  # two languages, so the legend has a separator
+        result = _run_process(project, env={'PYTHONIOENCODING': encoding})
+        assert result.returncode == 0, result.stderr
+        assert '??' in result.stdout  # the directory name
+        assert '#' * 10 in result.stdout  # the ASCII bar
+        assert '  |  ' in result.stdout  # the ASCII legend separator
 
 
 class TestSpecIgnoreEndToEnd:

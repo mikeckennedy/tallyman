@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+import socket
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Optional
 
@@ -531,3 +534,42 @@ class TestExcludePatterns:
         stats = WalkStats()
         _walk_with_patterns(tmp_path, ['fixtures/'], stats=stats)
         assert stats == WalkStats()
+
+
+_NO_FIFO = pytest.mark.skipif(not hasattr(os, 'mkfifo'), reason='named pipes need os.mkfifo (not on Windows)')
+
+
+class TestSpecialFiles:
+    """Only regular files are opened: opening a FIFO blocks until something writes to it."""
+
+    @_NO_FIFO
+    def test_fifo_is_not_counted(self, tmp_path: Path, make_fifo: Callable[..., Path]) -> None:
+        (tmp_path / 'a.py').write_text('x = 1\n')
+        make_fifo(tmp_path / 'pipe.py')
+        found = {p.relative_to(tmp_path).as_posix() for p, _ in walk_project(tmp_path, set())}
+        assert found == {'a.py'}
+
+    @_NO_FIFO
+    def test_fifo_matched_by_a_pattern_is_not_counted_in_stats(
+        self, tmp_path: Path, make_fifo: Callable[..., Path]
+    ) -> None:
+        make_fifo(tmp_path / 'pipe.py')
+        stats = WalkStats()
+        assert _walk_with_patterns(tmp_path, ['pipe.py'], stats=stats) == set()
+        assert stats.pattern_files == 0
+
+    @pytest.mark.skipif(not hasattr(socket, 'AF_UNIX'), reason='needs Unix domain sockets')
+    def test_socket_is_not_counted(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A guard test: old and new code behave the same, since opening a socket fails (ENXIO) and the
+        binary check already skipped it. Now the regular-file check skips it before anything opens it."""
+        (tmp_path / 'a.py').write_text('x = 1\n')
+        # A relative name: tmp_path can exceed the 104-byte socket path limit on macOS
+        monkeypatch.chdir(tmp_path)
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.bind('s.py')
+            found = {p.relative_to(tmp_path).as_posix() for p, _ in walk_project(tmp_path, set())}
+        finally:
+            sock.close()
+            (tmp_path / 's.py').unlink(missing_ok=True)  # no socket files left in pytest's tmp dirs
+        assert found == {'a.py'}
