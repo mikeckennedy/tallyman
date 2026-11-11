@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import codecs
 from pathlib import Path
 from typing import Optional
 
 import pytest
 
 from tallyman.counter import FileCount, count_lines
-from tallyman.languages import Language
+from tallyman.languages import RUST, Language, identify_language
 
 
 def _lang(comment: Optional[str] = '#') -> Language:
@@ -133,3 +134,53 @@ class TestLineEndingsAndEncodings:
             data = (b'\xfe\xff' if encoding == 'utf-16-be' else b'\x00\x00\xfe\xff') + data  # -be codecs write no BOM
         f.write_bytes(data)
         assert count_lines(f, _lang('--')) == FileCount(total_lines=3, code_lines=1, comment_lines=1, blank_lines=1)
+
+
+# RUST_LIB: 4 lines of code and a blank, then a 7-line test module
+RUST_LIB = (
+    'pub fn a() -> u8 {\n'
+    '    1\n'
+    '}\n'
+    '\n'
+    '#[cfg(test)]\n'
+    'mod tests {\n'
+    '    #[test]\n'
+    '    fn t() {\n'
+    '        assert_eq!(super::a(), 1);\n'
+    '    }\n'
+    '}\n'
+)
+
+
+class TestRustTestCode:
+    """[rust] exclude_test_modules (issue #8)."""
+
+    def test_flag_leaves_the_test_module_out(self, tmp_path: Path) -> None:
+        f = tmp_path / 'lib.rs'
+        f.write_text(RUST_LIB)
+        result = count_lines(f, RUST, exclude_rust_tests=True)
+        assert result == FileCount(total_lines=4, code_lines=3, comment_lines=0, blank_lines=1, test_lines=7)
+
+    def test_without_the_flag_nothing_changes(self, tmp_path: Path) -> None:
+        f = tmp_path / 'lib.rs'
+        f.write_text(RUST_LIB)
+        assert count_lines(f, RUST) == FileCount(total_lines=11, code_lines=10, comment_lines=0, blank_lines=1)
+
+    @pytest.mark.parametrize('newline', ['\r\n', '\r'])
+    def test_line_endings(self, tmp_path: Path, newline: str) -> None:
+        f = tmp_path / 'lib.rs'
+        f.write_bytes(RUST_LIB.replace('\n', newline).encode())
+        result = count_lines(f, RUST, exclude_rust_tests=True)
+        assert result == FileCount(total_lines=4, code_lines=3, comment_lines=0, blank_lines=1, test_lines=7)
+
+    def test_byte_order_mark(self, tmp_path: Path) -> None:
+        f = tmp_path / 'lib.rs'
+        f.write_bytes(codecs.BOM_UTF8 + b'#![cfg(test)]\nfn t() {}\n')
+        assert count_lines(f, RUST, exclude_rust_tests=True) == FileCount(test_lines=2)
+
+    def test_only_rust_is_scanned(self, tmp_path: Path) -> None:
+        f = tmp_path / 'lib.go'  # another '//' language, holding the same text
+        f.write_text(RUST_LIB)
+        go = identify_language(f)
+        assert go is not None and go.name == 'Go'
+        assert count_lines(f, go, exclude_rust_tests=True).test_lines == 0

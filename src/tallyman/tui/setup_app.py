@@ -159,9 +159,9 @@ class SetupApp(App[Optional[SetupResult]]):
         # config that can name a child is merged before the child is judged, and a deeper one merges later and wins.
         config_file = dir_path / CONFIG_FILENAME
         if rel_path and config_file.is_file() and (loaded := load_nested_config(config_file, rel_path)) is not None:
-            nested, patterns = loaded  # a malformed config is None: skipped silently, as in the walker
-            self.nested = merge_configs(self.nested, nested)
-            self.exclude_patterns.add_rules(dir_path, patterns)
+            # A malformed config is None: skipped silently, as in the walker. [rust] doesn't change what setup shows.
+            self.nested = merge_configs(self.nested, loaded.config)
+            self.exclude_patterns.add_rules(dir_path, loaded.patterns)
 
         for entry in entries:
             if not entry.is_dir(follow_symlinks=False) or entry.name.startswith('.'):

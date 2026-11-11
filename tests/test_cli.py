@@ -799,3 +799,104 @@ class TestFlags:
         monkeypatch.setattr('tallyman.image.resolve_image_path', lambda *a, **kw: tmp_path / 'out.png')
         cli.main()
         assert seen == [True]
+
+
+# RUST_LIB: 4 lines, then a 7-line test module
+RUST_LIB = (
+    'pub fn a() -> u8 {\n'
+    '    1\n'
+    '}\n'
+    '\n'
+    '#[cfg(test)]\n'
+    'mod tests {\n'
+    '    #[test]\n'
+    '    fn t() {\n'
+    '        assert_eq!(super::a(), 1);\n'
+    '    }\n'
+    '}\n'
+)
+RUST_ON = '[rust]\nexclude_test_modules = true\n'
+
+
+def _rust_lines(tally: Optional[TallyResult]) -> int:
+    assert tally is not None
+    return sum(s.total_lines for s in tally.by_language if s.language.name == 'Rust')
+
+
+class TestRustTestCode:
+    """[rust] exclude_test_modules end to end (issue #8)."""
+
+    def test_option_leaves_the_test_module_out(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make(tmp_path, {CONFIG_FILENAME: '[exclude]\ndirectories = []\n', 'src/lib.rs': RUST_LIB})
+        assert _rust_lines(_run(monkeypatch, str(tmp_path))) == 11
+        (tmp_path / CONFIG_FILENAME).write_text(RUST_ON)
+        tally = _run(monkeypatch, str(tmp_path))
+        assert _rust_lines(tally) == 4
+        assert tally is not None
+        assert (tally.rust_test_lines, tally.rust_test_files) == (7, 1)
+
+    def test_parent_config_applies_to_a_subdirectory_scan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / '.git').mkdir()
+        _make(tmp_path, {CONFIG_FILENAME: RUST_ON, 'crate/src/lib.rs': RUST_LIB})
+        assert _rust_lines(_run(monkeypatch, str(tmp_path / 'crate'))) == 4
+
+    def test_nested_config_applies_to_its_crate(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: '[exclude]\ndirectories = []\n',
+                'a/.tally-config.toml': RUST_ON,
+                'a/lib.rs': RUST_LIB,
+                'b/lib.rs': RUST_LIB,
+            },
+        )
+        assert _rust_lines(_run(monkeypatch, str(tmp_path))) == 4 + 11
+
+    def test_no_config_and_no_terminal_counts_everything(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make(tmp_path, {'lib.rs': RUST_LIB})
+        assert _rust_lines(_run(monkeypatch, str(tmp_path))) == 11
+
+    @pytest.mark.parametrize('value', ['true', 'false'])
+    def test_setup_keeps_the_value(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+        (tmp_path / '.git').mkdir()
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: RUST_ON,
+                'crate/.tally-config.toml': f'[rust]\nexclude_test_modules = {value}\n',
+                'crate/lib.rs': RUST_LIB,
+            },
+        )
+        tally = _run(monkeypatch, '--setup', str(tmp_path / 'crate'), interactive=True, setup_result=ECHO)
+        assert _rust_lines(tally) == (4 if value == 'true' else 11)
+        assert load_config(tmp_path / 'crate' / CONFIG_FILENAME).rust_exclude_test_modules is (value == 'true')
+
+    def test_setup_never_copies_a_parent_value(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The parent's true applies, but the scan root's config, which didn't say, still doesn't after setup."""
+        (tmp_path / '.git').mkdir()
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: RUST_ON,
+                'crate/.tally-config.toml': '[exclude]\ndirectories = []\n',
+                'crate/lib.rs': RUST_LIB,
+            },
+        )
+        tally = _run(monkeypatch, '--setup', str(tmp_path / 'crate'), interactive=True, setup_result=ECHO)
+        assert _rust_lines(tally) == 4
+        saved = tmp_path / 'crate' / CONFIG_FILENAME
+        assert '[rust]' not in saved.read_text()
+        assert load_config(saved).rust_exclude_test_modules is None
+
+    def test_malformed_rust_table_exits_naming_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _make(tmp_path, {CONFIG_FILENAME: '[rust]\nexclude_test_modules = "yes"\n', 'lib.rs': RUST_LIB})
+        with pytest.raises(SystemExit) as exc:
+            _run(monkeypatch, str(tmp_path))
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert str(tmp_path / CONFIG_FILENAME) in err
+        assert 'rust.exclude_test_modules must be true or false' in err

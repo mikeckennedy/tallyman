@@ -127,6 +127,14 @@ class WalkStats:
     pattern_dirs: int = 0
 
 
+class SourceFile(NamedTuple):
+    """A file to count, and how: what :func:`walk_files` yields."""
+
+    path: Path
+    language: Language
+    exclude_rust_tests: bool  # [rust] exclude_test_modules as it applies in this file's directory
+
+
 def walk_project(
     root: Path,
     excluded_dirs: set[str],
@@ -135,8 +143,38 @@ def walk_project(
     non_spec_dirs: Optional[set[str]] = None,
     exclude_patterns: Optional[GitIgnoreSpec] = None,
     stats: Optional[WalkStats] = None,
+    exclude_rust_tests: bool = False,
 ) -> Iterator[tuple[Path, Language]]:
     """Yield (file_path, language) for every countable source file under root.
+
+    The files :func:`walk_files` yields, without how to count them; its
+    docstring describes the arguments. *exclude_rust_tests* is accepted so the
+    two take the same arguments, but can't change which files are yielded.
+    """
+    for source in walk_files(
+        root,
+        excluded_dirs,
+        gitignore_spec,
+        spec_dirs=spec_dirs,
+        non_spec_dirs=non_spec_dirs,
+        exclude_patterns=exclude_patterns,
+        stats=stats,
+        exclude_rust_tests=exclude_rust_tests,
+    ):
+        yield source.path, source.language
+
+
+def walk_files(
+    root: Path,
+    excluded_dirs: set[str],
+    gitignore_spec: Optional[GitIgnoreSpec] = None,
+    spec_dirs: Optional[set[str]] = None,
+    non_spec_dirs: Optional[set[str]] = None,
+    exclude_patterns: Optional[GitIgnoreSpec] = None,
+    stats: Optional[WalkStats] = None,
+    exclude_rust_tests: bool = False,
+) -> Iterator[SourceFile]:
+    """Yield a :class:`SourceFile` for every countable source file under root.
 
     Args:
         root: Project root directory.
@@ -152,6 +190,9 @@ def walk_project(
             (:meth:`GitIgnoreSpec.for_patterns`). An empty one is made if None. Patterns from
             nested configs found while walking are registered on it as each directory is entered.
         stats: Filled with what the patterns excluded, if given.
+        exclude_rust_tests: ``[rust] exclude_test_modules`` at *root*
+            (``ConfigChain.rust_exclude_test_modules``). A nested config found while walking
+            that sets it changes it for its directory and everything below.
     """
     if gitignore_spec is None:
         gitignore_spec = load_gitignore(root)
@@ -160,6 +201,9 @@ def walk_project(
 
     active = TallyConfig(set(excluded_dirs), set(spec_dirs or ()), set(non_spec_dirs or ()))
     states: dict[str, SpecState] = {}
+    # Per directory, like states. Never folded into `active`: that is shared by the whole walk, so a value
+    # set in one crate would leak into the sibling crates walked after it.
+    rust_tests: dict[str, bool] = {}
 
     for dirpath_str, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
         dirpath = Path(dirpath_str)
@@ -170,14 +214,17 @@ def walk_project(
         gitignore_spec.add_directory(rel_dir_str, dirpath)
 
         # Discover nested config files in subdirectories
+        dir_rust_tests = rust_tests[rel_dir_str.rpartition('/')[0]] if rel_dir_str else exclude_rust_tests
         if rel_dir_str:
             config_file = dirpath / CONFIG_FILENAME
             if config_file.is_file() and (loaded := load_nested_config(config_file, rel_dir_str)) is not None:
-                nested, patterns = loaded
                 # os.walk is top-down, so an ancestor's config is merged first and the deeper config wins
-                active = merge_configs(active, nested)
+                active = merge_configs(active, loaded.config)
                 # Like a .gitignore, its patterns govern this directory's children, so register them first
-                exclude_patterns.add_rules(dirpath, patterns)
+                exclude_patterns.add_rules(dirpath, loaded.patterns)
+                if loaded.rust_exclude_test_modules is not None:
+                    dir_rust_tests = loaded.rust_exclude_test_modules
+        rust_tests[rel_dir_str] = dir_rust_tests
 
         # Prune excluded and gitignored subdirectories in-place
         filtered_dirs: list[str] = []
@@ -240,4 +287,4 @@ def walk_project(
             if dir_is_spec and language.category == 'docs':
                 language = as_spec(language)
 
-            yield file_path, language
+            yield SourceFile(file_path, language, dir_rust_tests)

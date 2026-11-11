@@ -12,7 +12,7 @@ from rich.text import Text
 from textual.widgets.tree import TreeNode
 
 from tallyman import walker
-from tallyman.config import TallyConfig, load_nested_config, merge_configs
+from tallyman.config import NestedConfig, TallyConfig, load_nested_config, merge_configs
 from tallyman.gitignore import GitIgnoreSpec, load_gitignore
 from tallyman.tui import setup_app
 from tallyman.tui.setup_app import NodeInfo, SetupApp, SetupResult, SetupTree
@@ -662,7 +662,7 @@ def _spy_on_nested_loads(monkeypatch: pytest.MonkeyPatch, module: ModuleType) ->
     """Record the directory of every nested config *module* loads, in order, still loading it for real."""
     read: list[str] = []
 
-    def spy(config_file: Path, rel_dir: str) -> Optional[tuple[TallyConfig, list[str]]]:
+    def spy(config_file: Path, rel_dir: str) -> Optional[NestedConfig]:
         read.append(rel_dir)
         return load_nested_config(config_file, rel_dir)
 

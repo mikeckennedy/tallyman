@@ -11,7 +11,7 @@ import pytest
 
 from tallyman.config import save_config
 from tallyman.gitignore import GitIgnoreSpec
-from tallyman.walker import WalkStats, _is_binary, inside_auto_spec_dir, walk_project
+from tallyman.walker import WalkStats, _is_binary, inside_auto_spec_dir, walk_files, walk_project
 
 
 class TestIsBinary:
@@ -604,3 +604,78 @@ class TestNestedReposKeepConfigSemantics:
         (tmp_path / 'plans' / 'sub' / '.git').mkdir(parents=True)
         _tree(tmp_path, {'plans/sub/a.md': '# a\n'})
         assert [lang.category for _, lang in walk_project(tmp_path, set())] == ['specs']
+
+
+def _rust_flags(root: Path, exclude_rust_tests: bool = False) -> dict[str, bool]:
+    return {
+        f.path.relative_to(root).as_posix(): f.exclude_rust_tests
+        for f in walk_files(root, set(), exclude_rust_tests=exclude_rust_tests)
+    }
+
+
+class TestRustTestSetting:
+    """Which files [rust] exclude_test_modules applies to (issue #8)."""
+
+    def test_scan_root_value_on_every_file(self, tmp_path: Path) -> None:
+        _tree(tmp_path, {'src/lib.rs': '', 'src/a/b.rs': '', 'main.rs': ''})
+        assert _rust_flags(tmp_path, True) == {'main.rs': True, 'src/a/b.rs': True, 'src/lib.rs': True}
+        assert set(_rust_flags(tmp_path).values()) == {False}
+
+    def test_nested_config_turns_it_on_for_one_crate_only(self, tmp_path: Path) -> None:
+        """A sibling walked after the crate keeps the root's value: the setting must not leak."""
+        _tree(
+            tmp_path,
+            {
+                'a/.tally-config.toml': '[rust]\nexclude_test_modules = true\n',
+                'a/src/lib.rs': '',
+                'b/src/lib.rs': '',
+                'c.rs': '',
+            },
+        )
+        assert _rust_flags(tmp_path) == {'a/src/lib.rs': True, 'b/src/lib.rs': False, 'c.rs': False}
+
+    def test_nested_config_turns_it_off(self, tmp_path: Path) -> None:
+        _tree(
+            tmp_path,
+            {'vendor/.tally-config.toml': '[rust]\nexclude_test_modules = false\n', 'vendor/v.rs': '', 'lib.rs': ''},
+        )
+        assert _rust_flags(tmp_path, True) == {'lib.rs': True, 'vendor/v.rs': False}
+
+    def test_nested_config_without_the_key_inherits(self, tmp_path: Path) -> None:
+        _tree(tmp_path, {'a/.tally-config.toml': '[exclude]\ndirectories = ["gen"]\n', 'a/x.rs': ''})
+        assert _rust_flags(tmp_path, True) == {'a/x.rs': True}
+
+    def test_nested_config_inside_a_nested_config(self, tmp_path: Path) -> None:
+        _tree(
+            tmp_path,
+            {
+                'a/.tally-config.toml': '[rust]\nexclude_test_modules = true\n',
+                'a/b/.tally-config.toml': '[rust]\nexclude_test_modules = false\n',
+                'a/b/c/x.rs': '',
+                'a/d/y.rs': '',  # walked after a/b
+                'a/z.rs': '',
+            },
+        )
+        assert _rust_flags(tmp_path) == {'a/b/c/x.rs': False, 'a/d/y.rs': True, 'a/z.rs': True}
+
+    def test_setting_crosses_into_a_nested_repo(self, tmp_path: Path) -> None:
+        """Tallyman settings cross repo boundaries on the way down; the nested repo's own config can change it."""
+        (tmp_path / '.git').mkdir()
+        (tmp_path / 'inner' / '.git').mkdir(parents=True)
+        (tmp_path / 'other' / '.git').mkdir(parents=True)
+        _tree(
+            tmp_path,
+            {
+                'inner/.tally-config.toml': '[rust]\nexclude_test_modules = false\n',
+                'inner/a.rs': '',
+                'other/b.rs': '',
+                'c.rs': '',
+            },
+        )
+        assert _rust_flags(tmp_path, True) == {'c.rs': True, 'inner/a.rs': False, 'other/b.rs': True}
+
+    def test_walk_project_yields_the_same_files(self, tmp_path: Path) -> None:
+        _tree(tmp_path, {'a/.tally-config.toml': '[rust]\nexclude_test_modules = true\n', 'a/x.rs': '', 'y.py': ''})
+        pairs = list(walk_project(tmp_path, set()))
+        assert pairs == [(f.path, f.language) for f in walk_files(tmp_path, set())]
+        assert all(len(pair) == 2 for pair in pairs)
