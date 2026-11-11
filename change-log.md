@@ -68,6 +68,9 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - A gitignore or `[exclude]` pattern ending in a lone backslash (`a\`) now matches nothing, as in git, instead of matching a name ending in `\`; `!a\` no longer re-includes anything. An escaped backslash before trailing spaces (`a\\ `) no longer keeps the spaces.
 - Files: `src/tallyman/gitignore.py`, `tests/test_gitignore.py`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
 - Plan: `plans/010-git-fidelity/phase-01-gitdir-and-escapes.plan.md`
+- README, `CLAUDE.md` and `gitignore.py`'s docstring describe worktrees, submodules and nested repositories. The README has a new "Git repositories inside your project" section listing the differences users meet, including the global excludes file and symlinked `.gitignore` files (tallyman reads them; git skips them). The docstring has the full list, including the `GIT_DIR` and `GIT_COMMON_DIR` environment variables.
+- Files: `README.md`, `CLAUDE.md`, `src/tallyman/gitignore.py`, `plans/006-tallyman-architect.plan.md`
+- Plan: `plans/010-git-fidelity/phase-03-docs.plan.md`
 - An empty `NO_COLOR` no longer disables colour; per no-color.org only a non-empty value does.
 - Solidity's colour changed from `bright_cyan`, which SQL also uses, to `slate_blue1`, so the two are distinguishable in the bar.
 - README and `CLAUDE.md` describe the current behaviour: config search and rebasing, `[specs] ignore`, `"."`, no-terminal runs, what is never counted, and the language count (43, not 41).

@@ -8,8 +8,13 @@ paths blur that distinction, which matters once several ``.gitignore`` files
 and ``!`` negations combine, so the patterns are compiled here following
 gitignore(5).
 
-Nested repositories, submodules and worktrees inside the tree are walked with
-their own rules, as if git were run inside each.
+Repositories nest. Nested repositories, submodules and worktrees inside the
+tree are walked with their own rules, as if git were run inside each: the
+enclosing repo's rules stop at a nested repo's root, while the nested repo's
+own directory entry is still judged by them, so one the enclosing repo ignores
+stays out. ``info/exclude`` is found the way git finds it: in the ``.git``
+directory, or through a ``.git`` file's ``gitdir:`` and that git directory's
+``commondir`` (so a worktree uses its main repo's ``info/exclude``).
 
 Known differences from git:
 
@@ -19,18 +24,23 @@ Known differences from git:
   ``?`` does not match a multi-byte character such as ``é`` there.
 - Git never ignores a file it already tracks. Tallyman can't see the index, so
   a force-added file under an ignored pattern is skipped.
-- A ``.gitignore`` or ``info/exclude`` that isn't a regular file (or a symlink
-  to one) is treated as absent; git opens it, and blocks on a FIFO.
-- A worktree whose ``commondir`` file can't be read uses the ``info/exclude``
-  in its own git directory; git refuses to run there.
+- Only the repo's own ignore files are read: ``info/exclude`` and the
+  ``.gitignore`` files. The global excludes file (``core.excludesFile``,
+  by default ``~/.config/git/ignore``) is not, so counts don't depend on the
+  machine. Nor are the ``GIT_DIR`` and ``GIT_COMMON_DIR`` environment
+  variables, which git honours (inside hooks, for example); the git directory
+  is always found from ``.git``.
 - Any ``.git`` (directory or file) marks a repository root, the same test
   :func:`find_git_root` uses. Git requires a valid repository, so to git an
   empty ``.git`` directory or a ``.git`` file pointing nowhere is an ordinary
   directory and the enclosing rules continue inside it; here they stop.
-- Only the repo's own ignore files are read: ``info/exclude`` and the
-  ``.gitignore`` files. The global excludes file (``core.excludesFile``,
-  by default ``~/.config/git/ignore``) is not, so counts don't depend on the
-  machine.
+- A ``.gitignore`` or ``info/exclude`` that isn't a regular file (or a symlink
+  to one) is treated as absent; git opens it, and blocks on a FIFO.
+- A ``.gitignore`` that is a symlink to a regular file is read. Git (since
+  2.32) won't follow a symlinked ``.gitignore`` in the working tree and treats
+  it as absent, with a warning; a symlinked ``info/exclude`` it does follow.
+- A worktree whose ``commondir`` file can't be read uses the ``info/exclude``
+  in its own git directory; git refuses to run there.
 """
 
 from __future__ import annotations

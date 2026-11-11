@@ -41,7 +41,7 @@ A few things that set it apart:
 - **Category-aware analysis** - Results grouped by intent, not just by file extension. You see *what kind* of work your project contains, not just how many lines of each language.
 - **Automatic spec detection** - Markdown and reStructuredText files in directories like `specs/`, `plans/`, or `agents/` are automatically reclassified from Docs to Specs. If you're using planning documents to drive development (especially with AI-assisted workflows), Tallyman tracks that separately.
 - **Interactive first-run setup** - On first run, Tallyman launches a TUI where you can walk your project's directory tree and mark directories to exclude or flag as spec directories. Your choices are saved to `.tally-config.toml` so subsequent runs are instant.
-- **Gitignore-aware** - Tallyman follows the same rules as Git: every `.gitignore` in your tree, plus `.git/info/exclude`, scoped and prioritised the way Git does it. (Differences: matching is case-sensitive, the global excludes file isn't read, and a tracked file under an ignored pattern is skipped.) It skips virtual environments, `node_modules`, build artifacts, and anything else you've already told Git to ignore.
+- **Gitignore-aware** - Tallyman follows the same rules as Git: every `.gitignore` in your tree, plus the repository's `info/exclude` (in worktrees and submodules too), scoped and prioritised the way Git does it. Git repositories inside your project are counted with their own rules (see [Git repositories inside your project](#git-repositories-inside-your-project)). It skips virtual environments, `node_modules`, build artifacts, and anything else you've already told Git to ignore.
 - **Visual composition bar** - A colored percentage bar at the bottom shows you the language distribution of your project in a single glance.
 
 
@@ -183,6 +183,20 @@ Some files are never counted, whatever your `.gitignore` says:
 
 Comment detection covers single-line comment styles (`#`, `//`, `--`, `%`). Multi-line comment blocks (`/* */`, `""" """`) are not currently detected - lines inside them are counted as code.
 
+### Git repositories inside your project
+
+Tallyman counts Git repositories nested inside your project, including submodules and worktrees, with their own rules, as if you ran Git inside each one. A nested repository's own `.gitignore` files and `info/exclude` apply, and your outer repository's `.gitignore` stops at the nested repository's folder. If the outer repository ignores that folder itself, the nested repository stays out (`tallyman path/to/it` still counts it). A folder of checkouts that isn't a repository works the same way: its `.gitignore` stops at each repository inside it.
+
+Your `.tally-config.toml` settings are different. `[exclude]` and `[specs]` settings, and configs in subdirectories, apply inside nested repositories too, since they're your instructions for the scan, not Git's. Scanning inside a nested repository uses only its own configs (see "Which configs apply" under [Configuration](#configuration)).
+
+Where Tallyman and Git differ:
+
+- Matching is always case-sensitive, even where Git ignores case (the macOS default).
+- Your global Git excludes file (`core.excludesFile`, usually `~/.config/git/ignore`) isn't read, so counts are the same on every machine.
+- A tracked file under an ignored pattern is skipped. Git keeps files it already tracks, but Tallyman doesn't read Git's index.
+- Any `.git` folder or file starts a nested repository, even an empty or broken one that Git would treat as an ordinary folder.
+- A `.gitignore` that is a symlink is read. Git (2.32 and later) skips it with a warning.
+
 ## Configuration
 
 On first run, Tallyman launches an interactive TUI where you can browse your project tree and configure which directories to exclude or mark as spec directories. Your choices are saved to `.tally-config.toml` in the directory you scanned.
@@ -211,7 +225,7 @@ ignore = ["src/myapp/agents"]      # never specs, even if named plans/, agents/,
 - In `[specs]`, `"."` means that directory itself.
 - When `directories` and `ignore` disagree, the deeper entry wins, so you can ignore `agents/` but still count `agents/plans/`. If both list the same directory, `directories` wins.
 
-**Which configs apply.** Every `.tally-config.toml` from the root of the Git repository down to the directory you scan applies, not just the nearest one. Outside a repository, Tallyman only looks in the scanned directory itself.
+**Which configs apply.** Every `.tally-config.toml` from the root of the Git repository down to the directory you scan applies, not just the nearest one. That is the nearest repository, so scanning inside a nested repository doesn't pick up the outer project's configs. Outside a repository, Tallyman only looks in the scanned directory itself.
 
 - Each config is applied relative to where it lives, so `tallyman src/` honours the project's exclusions as well as any config in `src/`.
 - Exclusions from every config add up. For specs, the deeper entry wins, and when two configs name the same directory, the deeper config wins.
@@ -240,6 +254,7 @@ patterns = [
 ```
 
 - Patterns use `.gitignore` syntax and are matched relative to the directory of the config that declares them.
+- Patterns, like directory excludes, apply inside nested Git repositories too, when you scan from outside them.
 - A pattern without a slash, like `tests.rs`, matches at any depth, so `**/tests.rs` isn't needed.
 - A pattern with a slash at the start or in the middle, like `/tests.rs` or `src/routing/tests.rs`, is matched from the config's directory. Use `**/routing/tests.rs` to match at any depth.
 - A trailing `/` matches directories only, such as `fixtures/`.
