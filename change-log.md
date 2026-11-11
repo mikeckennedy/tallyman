@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and never resets (see `CLAUDE.md`).
 
+## 0.5.4 - UNRELEASED
+
+### Added
+- New `[rust] exclude_test_modules = true` config key leaves Rust test-only code out of the count, so Tallyman measures the code that ships (issue #8). It drops any item marked `#[cfg(test)]` or `#[cfg(all(test, ...))]` (a test module, helper fn, `use`, `impl`, or a test-only method inside an `impl` or `trait`), with its attributes and doc comments, and whole files or modules under `#![cfg(test)]`. Code after a test module still counts. `cfg(any(test, ...))` isn't test-only and stays. Off by default. It follows the config chain like every other setting: a nested config (one per crate) can turn it on or off for its subtree, and `false` overrides a parent's `true`. Setup keeps the value when it rewrites the config. A file Tallyman can't follow (unbalanced brackets, an unterminated string) is counted in full.
+- A Rust-aware scanner finds the test-only items: it skips brackets inside strings, raw strings, char literals and nested comments, tells char literals from lifetimes, and pairs every bracket before trusting any of them.
+- Files: `src/tallyman/rust_tests.py`, `tests/test_rust_tests.py`
+- Plan: `plans/013-rust-test-code/phase-01-scanner.plan.md`
+- The setting reaches the counter through the config chain, nested configs and the walker, and `--setup` keeps it.
+- Files: `src/tallyman/config.py`, `src/tallyman/walker.py`, `src/tallyman/counter.py`, `src/tallyman/aggregator.py`, `src/tallyman/languages.py`, `src/tallyman/cli.py`, `src/tallyman/tui/setup_app.py`, `tests/test_config.py`, `tests/test_walker.py`, `tests/test_counter.py`, `tests/test_aggregator.py`, `tests/test_cli.py`, `tests/test_setup_app.py`
+- Plan: `plans/013-rust-test-code/phase-02-config-and-counting.plan.md`
+- `--setup` shows a `Rust test code: counted` (or `excluded`) line when the project has Rust code, and `r` switches it. It saves the setting in the scanned directory's config only when it differs from what parent configs give, so pressing `r` twice changes nothing. Without Rust code, the line and the key don't appear.
+- Files: `src/tallyman/tui/setup_app.py`, `src/tallyman/config.py`, `src/tallyman/cli.py`, `tests/test_setup_app.py`, `tests/test_config.py`, `tests/test_cli.py`, `README.md`, `CLAUDE.md`
+- Plan: `plans/013-rust-test-code/phase-04-setup-toggle.plan.md`
+- When Rust test code is left out, the report ends with a dim line such as `Excluded Rust test code: 2,412 lines in 37 files`, after the patterns line and under the same blank line, also shown when nothing else was counted. A file of only test code isn't counted as a Rust file. The image card shows the reduced numbers and no extra line.
+- README and `CLAUDE.md` describe the option.
+- Files: `src/tallyman/display.py`, `tests/test_display.py`, `tests/test_cli.py`, `README.md`, `CLAUDE.md`, `.cursor/rules/project-rules.mdc`, `.cursor/rules/coding-guidelines.mdc`, `plans/006-tallyman-architect.plan.md`, `pyproject.toml`, `uv.lock`
+- Plan: `plans/013-rust-test-code/phase-03-report-and-docs.plan.md`
+
 ## 0.4.3 - 2026-11-11
 
 ### Added

@@ -54,6 +54,7 @@ A few things that set it apart:
 - **Realistic metrics** - Only counts files *you* wrote, not third-party dependencies or generated code
 - **Persistent config** - Your setup choices are saved to `.tally-config.toml` and reused on every run
 - **File patterns** - Gitignore-style `[exclude] patterns` for files a directory exclude can't reach, such as Rust tests beside the code they test
+- **Rust test code** - Opt in with `[rust] exclude_test_modules` to leave inline `#[cfg(test)]` modules and helpers out of the count
 - **Image export** - Generate a shareable PNG summary card with `--image` (dark) or `--image-light` (light theme)
 - **Interactive TUI setup** - Visual directory tree for configuring exclusions and spec directories, powered by [Textual](https://github.com/Textualize/textual)
 
@@ -168,7 +169,7 @@ Tallyman runs a simple pipeline:
 
 1. **Walk** your project directory, respecting `.gitignore` and your config's exclusions and patterns
 2. **Identify** each file's language by extension or filename
-3. **Count** lines, classifying each as code, comment, or blank
+3. **Count** lines, classifying each as code, comment, or blank (with `[rust] exclude_test_modules`, Rust test-only code is left out first)
 4. **Aggregate** results by language and category
 5. **Display** a colored report with per-language stats, category totals, and a composition bar
 
@@ -189,7 +190,7 @@ Comment detection covers single-line comment styles (`#`, `//`, `--`, `%`). Mult
 
 Tallyman counts Git repositories nested inside your project, including submodules and worktrees, with their own rules, as if you ran Git inside each one. A nested repository's own `.gitignore` files and `info/exclude` apply, and your outer repository's `.gitignore` stops at the nested repository's folder. If the outer repository ignores that folder itself, the nested repository stays out (`tallyman path/to/it` still counts it). A folder of checkouts that isn't a repository works the same way: its `.gitignore` stops at each repository inside it.
 
-Your `.tally-config.toml` settings are different. `[exclude]` and `[specs]` settings, and configs in subdirectories, apply inside nested repositories too, since they're your instructions for the scan, not Git's. Scanning inside a nested repository uses only its own configs (see "Which configs apply" under [Configuration](#configuration)).
+Your `.tally-config.toml` settings are different. `[exclude]`, `[specs]` and `[rust]` settings, and configs in subdirectories, apply inside nested repositories too, since they're your instructions for the scan, not Git's. Scanning inside a nested repository uses only its own configs (see "Which configs apply" under [Configuration](#configuration)).
 
 Where Tallyman and Git differ:
 
@@ -209,7 +210,7 @@ To re-run setup at any time:
 tallyman --setup
 ```
 
-In the TUI, `x` excludes or includes a directory, and `s` marks or unmarks it as specs. Pressing `s` on a directory Tallyman detected as specs (such as `plans/`) records that it isn't one.
+In the TUI, `x` excludes or includes a directory, and `s` marks or unmarks it as specs. Pressing `s` on a directory Tallyman detected as specs (such as `plans/`) records that it isn't one. In a project with Rust code, `r` switches Rust test code between counted and left out (see [Leaving out Rust test code](#leaving-out-rust-test-code)).
 
 The config is plain TOML, and you can edit it by hand:
 
@@ -267,7 +268,44 @@ patterns = [
 - Setup shows directories a pattern excludes as "(excluded by pattern)", unless a config's `directories` list excludes them too: that is checked first, so they show as excluded by that config, and an entry in the scanned directory's config can still be toggled off. It doesn't edit patterns, but keeps them, in order, when it rewrites the config. Because setup can't re-create them, re-running `tallyman --setup` to replace a broken config loses its patterns. Fix the file by hand if it has any.
 - When patterns remove anything, the report ends with a line such as `Excluded by [exclude] patterns: 12 files, 1 directory`. It counts files Tallyman would otherwise have counted, plus the directories a pattern skipped. Files inside a skipped directory aren't looked at, so they aren't in the file count.
 
-Inline Rust test modules (`#[cfg(test)] mod tests { ... }`) share a file with the code they test, so no pattern can reach them. That is tracked in [issue #8](https://github.com/mikeckennedy/tallyman/issues/8).
+Inline Rust test modules (`#[cfg(test)] mod tests { ... }`) share a file with the code they test, so no pattern can reach them. For those, see the next section.
+
+### Leaving out Rust test code
+
+Rust keeps most unit tests in a module at the bottom of the file it tests. To count only the code that ships, turn this on:
+
+```toml
+[rust]
+exclude_test_modules = true
+```
+
+With it on, the test module below drops out of the count, and the three lines of `parse` still count:
+
+```rust
+pub fn parse(input: &str) -> usize {
+    input.len()
+}
+
+#[cfg(test)]          // from here to the closing brace: not counted
+mod tests {
+    #[test]
+    fn parses() {
+        assert_eq!(super::parse("ab"), 2);
+    }
+}
+```
+
+- **What counts as test code.** Any item marked `#[cfg(test)]`, not just `mod tests`: a test-only `fn`, `use`, `struct` or `impl`, and test-only methods inside an `impl` or `trait`. Doc comments and other attributes on that item go with it, and code after it still counts.
+- `#[cfg(all(test, ...))]` counts too, since it is test-only. `#[cfg(any(test, ...))]` doesn't: that code also builds outside tests.
+- A file or module that starts with `#![cfg(test)]` is test code from top to bottom.
+- **What it leaves alone.**
+  - `#[cfg(test)]` on a statement inside a function, on a struct field, an enum variant or a match arm, and inside `macro_rules!` bodies.
+  - `#[cfg(test)] mod tests;`: only that declaration drops. The file it points at counts as usual, unless it starts with `#![cfg(test)]`. Otherwise exclude it with a pattern such as `patterns = ["tests.rs"]`.
+  - Integration tests in `tests/`, benches and examples: exclude those directories.
+- **Where it applies.** It applies by directory, like every other setting. A config in a crate's directory can turn it on or off for that crate, and `false` overrides a parent's `true`.
+- **Setup.** When the project has Rust code, `--setup` shows a `Rust test code: counted` (or `excluded`) line under the tree, and `r` switches it. Pressing `r` saves the setting only when it differs from what parent configs give, so pressing it twice leaves the config as it was; untouched, the config's value is kept as written. Rust in a directory whose own config sets `[rust]` follows that config: the line says so, and `r` changes only the rest. Without Rust code the line and the key don't appear.
+- When something is left out, the report ends with a line such as `Excluded Rust test code: 2,412 lines in 37 files`. It counts every line left out, blank and comment lines included, so the totals, which leave those out by default, drop by less. A file that was all test code isn't counted as a Rust file.
+- If Tallyman can't follow a file (an unterminated string, brackets that don't balance), it counts the whole file. It may miss some test code, but it never leaves out real code.
 
 ## Requirements
 

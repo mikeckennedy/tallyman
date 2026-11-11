@@ -363,3 +363,30 @@ class TestPercentLabel:
     )
     def test_labels(self, percent: float, label: str) -> None:
         assert percent_label(percent) == label
+
+
+class TestRustTestCode:
+    def test_sums_test_lines_and_files(self) -> None:
+        rust = _lang('Rust', comment='//')
+        tally = aggregate(
+            [
+                (rust, FileCount(total_lines=4, code_lines=4, test_lines=7)),
+                (rust, FileCount(total_lines=2, code_lines=2)),
+                (rust, FileCount(total_lines=3, code_lines=3, test_lines=1)),
+            ]
+        )
+        assert (tally.rust_test_lines, tally.rust_test_files) == (8, 2)
+        assert tally.grand_total_lines == 9
+        assert tally.by_language[0].file_count == 3
+
+    def test_a_file_of_only_test_code_is_not_a_file_of_its_language(self) -> None:
+        rust = _lang('Rust', comment='//')
+        tally = aggregate([(rust, FileCount(test_lines=5)), (rust, FileCount(total_lines=2, code_lines=2))])
+        assert tally.by_language[0].file_count == 1
+        assert (tally.rust_test_lines, tally.rust_test_files) == (5, 1)
+
+    def test_an_empty_file_still_counts(self) -> None:
+        rust = _lang('Rust', comment='//')
+        tally = aggregate([(rust, FileCount())])
+        assert tally.by_language[0].file_count == 1
+        assert (tally.rust_test_lines, tally.rust_test_files) == (0, 0)

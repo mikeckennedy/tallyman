@@ -22,8 +22,8 @@ Linear pipeline - each stage feeds the next:
 ```
 cli.main()
   → Load every .tally-config.toml from the git root down (or launch TUI)
-  → walker.walk_project()    yields (path, Language) tuples
-  → counter.count_lines()    returns FileCount per file
+  → walker.walk_files()      yields SourceFile(path, Language, exclude_rust_tests)
+  → counter.count_lines()    returns FileCount per file (Rust test code left out when the flag is set)
   → aggregator.aggregate()   produces TallyResult
   → display.display_results() renders to terminal
   → image.generate_image()   optional PNG (--image / --image-light)

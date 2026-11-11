@@ -253,6 +253,49 @@ class TestPatternNote:
         assert 'Excluded by [exclude] patterns: 3 files' in out
 
 
+def _render_rust(test_lines: int, test_files: int, stats: Optional[WalkStats] = None, files: bool = True) -> str:
+    out = io.StringIO()
+    entries = [(EXTENSION_MAP['.rs'], FileCount(total_lines=4, code_lines=4))] if files else []
+    tally = aggregate(entries)
+    tally.rust_test_lines, tally.rust_test_files = test_lines, test_files
+    display_results(tally, 'proj', console=Console(file=out, no_color=True, width=100), stats=stats)
+    return out.getvalue()
+
+
+class TestRustTestNote:
+    """[rust] exclude_test_modules (issue #8): what the report says it left out."""
+
+    def test_nothing_left_out_prints_nothing(self) -> None:
+        assert 'Rust test code' not in _render_rust(0, 0)
+
+    @pytest.mark.parametrize(
+        ('lines', 'files', 'line'),
+        [
+            (1, 1, 'Excluded Rust test code: 1 line in 1 file'),
+            (2412, 37, 'Excluded Rust test code: 2,412 lines in 37 files'),
+            (7, 1, 'Excluded Rust test code: 7 lines in 1 file'),
+        ],
+    )
+    def test_wording(self, lines: int, files: int, line: str) -> None:
+        out = _render_rust(lines, files)
+        assert f'\n\n  {line}\n' in out  # one blank line above it
+        assert out.rstrip().endswith(line)
+
+    def test_after_the_pattern_note_under_one_blank_line(self) -> None:
+        out = _render_rust(7, 1, stats=WalkStats(12, 1))
+        expected = (
+            '\n\n  Excluded by [exclude] patterns: 12 files, 1 directory\n'
+            '  Excluded Rust test code: 7 lines in 1 file\n'
+        )
+        assert out.endswith(expected)
+
+    def test_printed_even_when_nothing_was_counted(self) -> None:
+        """A crate of only #![cfg(test)] files counts nothing; the note says why."""
+        out = _render_rust(5, 1, files=False)
+        assert 'No recognized source files found.' in out
+        assert out.rstrip().endswith('Excluded Rust test code: 5 lines in 1 file')
+
+
 class TestUnicodeProbe:
     @pytest.mark.parametrize(
         ('encoding', 'expected'),

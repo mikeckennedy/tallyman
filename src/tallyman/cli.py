@@ -23,13 +23,14 @@ from tallyman.config import (
     find_configs,
     load_config_chain,
     merge_configs,
+    rust_setting,
     save_config,
 )
 from tallyman.counter import count_lines
 from tallyman.display import display_results
 from tallyman.gitignore import GitIgnoreSpec, load_gitignore
 from tallyman.paths import canonical_case, relative_posix
-from tallyman.walker import WalkStats, inside_auto_spec_dir, walk_project
+from tallyman.walker import WalkStats, inside_auto_spec_dir, walk_files
 
 if TYPE_CHECKING:  # Textual is imported only when setup runs: see run_setup()
     from tallyman.tui.setup_app import SetupResult
@@ -128,6 +129,7 @@ def run_setup(
     root_auto_spec: bool = False,
     inherited: Optional[TallyConfig] = None,
     exclude_patterns: Optional[GitIgnoreSpec] = None,
+    existing_rust: Optional[bool] = None,
 ) -> Optional[SetupResult]:
     """Launch the setup TUI (tui.setup_app.run_setup). Textual is imported here, so a plain run never loads it."""
     from tallyman.tui.setup_app import run_setup as launch
@@ -141,6 +143,7 @@ def run_setup(
         root_auto_spec=root_auto_spec,
         inherited=inherited,
         exclude_patterns=exclude_patterns,
+        existing_rust=existing_rust,
     )
 
 
@@ -181,6 +184,7 @@ def main() -> None:
         chain = _load_chain_or_exit(config_paths, root)
         config = chain.effective
         exclude_patterns = _pattern_spec(root, chain.pattern_layers)
+        exclude_rust_tests = chain.rust_exclude_test_modules
     elif not interactive:
         # First run with no terminal (CI, pipes): count with defaults rather than hang in the TUI
         print(
@@ -190,6 +194,7 @@ def main() -> None:
         )
         config = TallyConfig()
         exclude_patterns = _pattern_spec(root, [])
+        exclude_rust_tests = False
     else:
         # First run or --setup: launch TUI. --setup is how a broken config gets repaired, so skip
         # a malformed one with a warning rather than refuse.
@@ -206,20 +211,30 @@ def main() -> None:
             inherited=chain.inherited,
             root_auto_spec=root_auto_spec,
             exclude_patterns=exclude_patterns,
+            existing_rust=chain.local.rust_exclude_test_modules,
         )
         if result is None:
             print('Setup cancelled.')
             sys.exit(0)
-        local = TallyConfig(*result)  # only the scan root's own settings: setup drops copies of the others
+        # Only the scan root's own settings: setup drops copies of the others
+        local = TallyConfig(result.excluded_dirs, result.spec_dirs, result.non_spec_dirs)
+        local_rust = result.rust_exclude_test_modules
         try:
             # Setup doesn't edit patterns: keep the scan-root config's own, as written and in order
             save_config(
-                config_path, local.excluded_dirs, local.spec_dirs, local.non_spec_dirs, patterns=chain.local.patterns
+                config_path,
+                local.excluded_dirs,
+                local.spec_dirs,
+                local.non_spec_dirs,
+                patterns=chain.local.patterns,
+                rust_exclude_test_modules=local_rust,
             )
         except (OSError, UnicodeEncodeError) as e:
             # Don't throw away the user's selections: warn, then count with them anyway
             print(f'Warning: could not save {config_path} ({e}); using this run only.', file=sys.stderr)
         config = merge_configs(chain.inherited, local)
+        # The scan root's value from setup, else the parents'
+        exclude_rust_tests = rust_setting(local_rust, chain.inherited.rust_exclude_test_modules)
 
     excluded_dirs, spec_dirs, non_spec_dirs = config.excluded_dirs, config.spec_dirs, config.non_spec_dirs
 
@@ -231,7 +246,7 @@ def main() -> None:
     # Walk and count
     file_results = []
     stats = WalkStats()
-    for file_path, language in walk_project(
+    for source in walk_files(
         root,
         excluded_dirs,
         gitignore_spec,
@@ -239,9 +254,10 @@ def main() -> None:
         non_spec_dirs=non_spec_dirs,
         exclude_patterns=exclude_patterns,
         stats=stats,
+        exclude_rust_tests=exclude_rust_tests,
     ):
-        counts = count_lines(file_path, language)
-        file_results.append((language, counts))
+        counts = count_lines(source.path, source.language, source.exclude_rust_tests)
+        file_results.append((source.language, counts))
 
     # Aggregate
     tally = aggregate(file_results)

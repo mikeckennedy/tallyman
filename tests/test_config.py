@@ -5,16 +5,19 @@ import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
 from tallyman.config import (
     CONFIG_FILENAME,
     ConfigError,
+    NestedConfig,
     TallyConfig,
     find_configs,
     load_config,
     load_config_chain,
+    load_nested_config,
     merge_configs,
     prefixed,
     rebase_config,
@@ -518,3 +521,109 @@ class TestSaveConfig:
         save_config(config, {'vendor'}, set())
         assert config.is_symlink()
         assert load_config(target).excluded_dirs == {'vendor'}
+
+
+class TestRustOption:
+    """[rust] exclude_test_modules (issue #8)."""
+
+    @pytest.mark.parametrize(
+        ('text', 'expected'),
+        [
+            ('[rust]\nexclude_test_modules = true\n', True),
+            ('[rust]\nexclude_test_modules = false\n', False),
+            ('[rust]\n', None),
+            ('[exclude]\ndirectories = []\n', None),
+            ('[rust]\nsomething_else = 1\n', None),
+        ],
+    )
+    def test_load(self, tmp_path: Path, text: str, expected: Optional[bool]) -> None:
+        path = _write(tmp_path / CONFIG_FILENAME, text)
+        assert load_config(path).rust_exclude_test_modules is expected
+
+    @pytest.mark.parametrize(
+        'text',
+        ['rust = 3\n', '[rust]\nexclude_test_modules = 1\n', '[rust]\nexclude_test_modules = "true"\n'],
+    )
+    def test_wrong_shape_is_an_error_naming_the_file(self, tmp_path: Path, text: str) -> None:
+        path = _write(tmp_path / CONFIG_FILENAME, text)
+        with pytest.raises(ConfigError) as info:
+            load_config(path)
+        assert info.value.path == path
+        assert 'rust' in str(info.value)
+
+    def test_functions_that_move_entries_drop_it(self, tmp_path: Path) -> None:
+        on = TallyConfig({'a'}, rust_exclude_test_modules=True)
+        assert merge_configs(on, on).rust_exclude_test_modules is None
+        assert prefixed(on, 'sub').rust_exclude_test_modules is None
+        assert rebase_config(on, tmp_path, tmp_path / 'sub').rust_exclude_test_modules is None
+        assert without_copies(on, TallyConfig()).rust_exclude_test_modules is None
+
+    def test_nested_config_carries_it(self, tmp_path: Path) -> None:
+        path = _write(tmp_path / 'crate' / CONFIG_FILENAME, '[rust]\nexclude_test_modules = true\n')
+        assert load_nested_config(path, 'crate') == NestedConfig(TallyConfig(), [], True)
+
+
+class TestRustOptionChain:
+    def _chain(self, tmp_path: Path, configs: dict[str, str], root: str) -> bool:
+        (tmp_path / '.git').mkdir(exist_ok=True)
+        for rel, text in configs.items():
+            _write(tmp_path / rel / CONFIG_FILENAME, text)
+        scan_root = tmp_path / root
+        scan_root.mkdir(parents=True, exist_ok=True)
+        return load_config_chain(find_configs(scan_root), scan_root).rust_exclude_test_modules
+
+    def test_no_config_sets_it(self, tmp_path: Path) -> None:
+        assert self._chain(tmp_path, {'': '[exclude]\ndirectories = []\n'}, 'src') is False
+
+    def test_parent_value_applies(self, tmp_path: Path) -> None:
+        assert self._chain(tmp_path, {'': '[rust]\nexclude_test_modules = true\n'}, 'src') is True
+
+    def test_local_false_overrides_parent_true(self, tmp_path: Path) -> None:
+        configs = {'': '[rust]\nexclude_test_modules = true\n', 'src': '[rust]\nexclude_test_modules = false\n'}
+        assert self._chain(tmp_path, configs, 'src') is False
+
+    def test_deeper_parent_wins(self, tmp_path: Path) -> None:
+        configs = {'': '[rust]\nexclude_test_modules = false\n', 'a': '[rust]\nexclude_test_modules = true\n'}
+        assert self._chain(tmp_path, configs, 'a/b') is True
+
+    def test_inherited_holds_only_the_parents_value(self, tmp_path: Path) -> None:
+        """Setup shows the parents' part: the deepest parent's value, ignoring the scan root's own."""
+        (tmp_path / '.git').mkdir()
+        _write(tmp_path / CONFIG_FILENAME, '[rust]\nexclude_test_modules = false\n')
+        _write(tmp_path / 'a' / CONFIG_FILENAME, '[rust]\nexclude_test_modules = true\n')
+        _write(tmp_path / 'a' / 'b' / CONFIG_FILENAME, '[rust]\nexclude_test_modules = false\n')
+        root = tmp_path / 'a' / 'b'
+        chain = load_config_chain(find_configs(root), root)
+        assert chain.inherited.rust_exclude_test_modules is True
+        assert chain.local.rust_exclude_test_modules is False
+        assert chain.rust_exclude_test_modules is False
+
+    def test_inherited_is_none_without_a_parent_value(self, tmp_path: Path) -> None:
+        _write(tmp_path / CONFIG_FILENAME, '[rust]\nexclude_test_modules = true\n')
+        chain = load_config_chain(find_configs(tmp_path), tmp_path)
+        assert chain.inherited.rust_exclude_test_modules is None
+        assert chain.rust_exclude_test_modules is True
+
+    def test_parent_that_does_not_say_keeps_the_shallower_value(self, tmp_path: Path) -> None:
+        configs = {'': '[rust]\nexclude_test_modules = true\n', 'a': '[exclude]\ndirectories = ["x"]\n'}
+        assert self._chain(tmp_path, configs, 'a') is True
+
+
+class TestSaveRustOption:
+    @pytest.mark.parametrize('value', [True, False])
+    def test_round_trip(self, tmp_path: Path, value: bool) -> None:
+        path = tmp_path / CONFIG_FILENAME
+        save_config(path, {'build'}, {'docs'}, {'plans'}, patterns=['*.gen.rs'], rust_exclude_test_modules=value)
+        assert load_config(path) == TallyConfig({'build'}, {'docs'}, {'plans'}, ['*.gen.rs'], value)
+        assert f'exclude_test_modules = {str(value).lower()}' in path.read_text()
+
+    def test_none_writes_no_table(self, tmp_path: Path) -> None:
+        path = tmp_path / CONFIG_FILENAME
+        save_config(path, set(), set())
+        assert '[rust]' not in path.read_text()
+        assert load_config(path).rust_exclude_test_modules is None
+
+    def test_without_specs_table(self, tmp_path: Path) -> None:
+        path = tmp_path / CONFIG_FILENAME
+        save_config(path, set(), set(), rust_exclude_test_modules=True)
+        assert load_config(path) == TallyConfig(rust_exclude_test_modules=True)

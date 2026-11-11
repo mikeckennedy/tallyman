@@ -9,7 +9,7 @@ import tomllib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from tallyman.encoding import text_encoding
 from tallyman.gitignore import find_git_root
@@ -53,12 +53,21 @@ class TallyConfig:
     file they came from, so the functions that move or combine entries
     (:func:`rebase_config`, :func:`prefixed`, :func:`merge_configs`,
     :func:`without_copies`) return none; see :class:`ConfigChain`.
+
+    ``rust_exclude_test_modules`` (``[rust] exclude_test_modules``) is None
+    when the file doesn't set it. Like patterns it belongs to its file, and
+    covers that file's directory and everything below; the same functions
+    return None for it. :class:`ConfigChain` and the walker carry it.
+    :func:`load_config_chain` sets it on ``ConfigChain.inherited`` after
+    rebasing, to the parents' value, so a comparison of ``inherited`` with
+    a ``TallyConfig`` includes it.
     """
 
     excluded_dirs: set[str] = field(default_factory=set)
     spec_dirs: set[str] = field(default_factory=set)
     non_spec_dirs: set[str] = field(default_factory=set)
     patterns: list[str] = field(default_factory=list)
+    rust_exclude_test_modules: Optional[bool] = None
 
 
 def find_configs(root: Path) -> list[Path]:
@@ -123,6 +132,17 @@ def _patterns(data: dict[str, Any]) -> list[str]:
     return list(patterns)
 
 
+def _rust_option(data: dict[str, Any]) -> Optional[bool]:
+    """Read ``[rust] exclude_test_modules``: True, False, or None when the file doesn't set it."""
+    table = data.get('rust', {})
+    if not isinstance(table, dict):
+        raise ConfigError('[rust] must be a table')
+    value = table.get('exclude_test_modules')
+    if value is not None and not isinstance(value, bool):  # TOML booleans only; 1 and "true" are mistakes
+        raise ConfigError('rust.exclude_test_modules must be true or false')
+    return value
+
+
 def load_config(config_path: Path) -> TallyConfig:
     """Load a .tally-config.toml and return the configuration.
 
@@ -146,6 +166,7 @@ def load_config(config_path: Path) -> TallyConfig:
             spec_dirs=_directories(data, 'specs', 'directories', allow_self=True),
             non_spec_dirs=_directories(data, 'specs', 'ignore', allow_self=True),
             patterns=_patterns(data),
+            rust_exclude_test_modules=_rust_option(data),
         )
     except ConfigError as e:
         e.path = config_path
@@ -248,18 +269,25 @@ def rebase_config(config: TallyConfig, config_dir: Path, root: Path) -> TallyCon
     return TallyConfig(excluded, specs, non_specs)
 
 
-def load_nested_config(config_file: Path, rel_dir: str) -> Optional[tuple[TallyConfig, list[str]]]:
-    """Load a config found in the subdirectory *rel_dir*: its entries prefixed by *rel_dir*, and its patterns.
+class NestedConfig(NamedTuple):
+    """A config found below the scan root, as the walker and setup apply it."""
 
-    The patterns are returned as written, relative to the config's own
-    directory. Returns None if the config is malformed: a broken config inside
-    a scanned tree (often third-party code) must not stop the scan.
+    config: TallyConfig  # its directory entries, prefixed by its directory
+    patterns: list[str]  # its [exclude] patterns as written, relative to its own directory
+    rust_exclude_test_modules: Optional[bool]  # its [rust] exclude_test_modules, for its directory and below
+
+
+def load_nested_config(config_file: Path, rel_dir: str) -> Optional[NestedConfig]:
+    """Load a config found in the subdirectory *rel_dir*.
+
+    Returns None if the config is malformed: a broken config inside a scanned
+    tree (often third-party code) must not stop the scan.
     """
     try:
         config = load_config(config_file)
     except ConfigError:
         return None
-    return prefixed(config, rel_dir), config.patterns
+    return NestedConfig(prefixed(config, rel_dir), config.patterns, config.rust_exclude_test_modules)
 
 
 @dataclass
@@ -271,12 +299,19 @@ class ConfigChain:
     scan root's own config, the one setup edits, patterns included. ``paths``
     lists the files that loaded, shallowest first, and ``pattern_layers`` the
     patterns of each one that has any, in the same order.
+    ``rust_exclude_test_modules`` is the value at the scan root: the deepest
+    config that sets ``[rust] exclude_test_modules`` wins (each one is the
+    scan root or an ancestor of it, so each covers it), and it is False when
+    none does. ``inherited.rust_exclude_test_modules`` is the parents' part of
+    that: the deepest config above the scan root that sets it, or None. Setup
+    shows it, as it shows the parents' other settings.
     """
 
     inherited: TallyConfig = field(default_factory=TallyConfig)
     local: TallyConfig = field(default_factory=TallyConfig)
     paths: list[Path] = field(default_factory=list)
     pattern_layers: list[PatternLayer] = field(default_factory=list)
+    rust_exclude_test_modules: bool = False
 
     @property
     def effective(self) -> TallyConfig:
@@ -301,6 +336,7 @@ def load_config_chain(
         return chain
     top = paths[0].parent.resolve()
     merged = TallyConfig()
+    parents_rust: Optional[bool] = None
     for path in paths:
         try:
             config = load_config(path)
@@ -317,8 +353,22 @@ def load_config_chain(
             chain.local = config
         else:
             merged = merge_configs(merged, prefixed(config, relative_posix(config_dir, top)))
+            if config.rust_exclude_test_modules is not None:
+                parents_rust = config.rust_exclude_test_modules  # shallowest first: deeper wins
     chain.inherited = rebase_config(merged, top, root)
+    chain.inherited.rust_exclude_test_modules = parents_rust
+    chain.rust_exclude_test_modules = rust_setting(chain.local.rust_exclude_test_modules, parents_rust)
     return chain
+
+
+def rust_setting(local: Optional[bool], parents: Optional[bool]) -> bool:
+    """``[rust] exclude_test_modules`` at the scan root: its own config's value, else the parents', else off.
+
+    The one rule, shared by the config chain, the CLI after setup, and setup's status line.
+    """
+    if local is not None:
+        return local
+    return bool(parents)
 
 
 def _toml_string(value: str) -> str:
@@ -342,11 +392,15 @@ def save_config(
     spec_dirs: set[str],
     non_spec_dirs: Optional[set[str]] = None,
     patterns: Sequence[str] = (),
+    rust_exclude_test_modules: Optional[bool] = None,
 ) -> None:
     """Write a .tally-config.toml file. Sorts directories for deterministic output.
 
     *patterns* are written in the order given, since a later ``!pattern`` can
     undo an earlier one. Setup passes the loaded config's patterns through.
+    *rust_exclude_test_modules* is written as a ``[rust]`` table when it is not
+    None, ``false`` included, since an explicit false overrides a parent's true.
+    Setup passes the loaded config's value through.
 
     Raises OSError if the file can't be written, or if *config_path* exists but
     isn't a regular file (or a symlink to one): opening a FIFO for writing would
@@ -389,6 +443,12 @@ def save_config(
             for d in sorted(non_spec_dirs):
                 lines.append(f'    {_toml_string(d)},')
             lines.append(']')
+
+    if rust_exclude_test_modules is not None:
+        lines.append('')
+        lines.append('[rust]')
+        lines.append('# Leave #[cfg(test)] items out of the count')
+        lines.append('exclude_test_modules = ' + ('true' if rust_exclude_test_modules else 'false'))
 
     lines.append('')
     config_path.write_text('\n'.join(lines), encoding='utf-8')

@@ -57,7 +57,9 @@ def display_results(
     """Render the full tallyman output to the terminal, or to *console* when given (tests pass one).
 
     *no_color* applies only to the console created here; a passed-in console keeps its own setting.
-    *stats*, when given, adds a closing line saying what ``[exclude] patterns`` removed.
+    The report closes with dim notes on what was left out: what ``[exclude] patterns``
+    removed (from *stats*, when given), and the Rust test code ``[rust] exclude_test_modules``
+    left out (from *result*). They appear even when nothing was counted.
     """
     if console is None:
         console = Console(no_color=no_color, highlight=False)
@@ -66,15 +68,15 @@ def display_results(
 
     if not result.by_language:
         console.print('[dim]No recognized source files found.[/dim]')
-        # A too-broad pattern is one way to get here, so say what the patterns removed
-        _display_pattern_note(console, stats)
+        # A too-broad pattern and a crate of only #![cfg(test)] files are two ways to get here: say what was left out
+        _display_notes(console, result, stats)
         return
 
     _display_languages(console, result, language_display_names(result))
     _display_separator(console)
     _display_category_totals(console, result, with_spaces=with_spaces)
     _display_percentage_bar(console, result, with_spaces=with_spaces)
-    _display_pattern_note(console, stats)
+    _display_notes(console, result, stats)
 
 
 SECTION_WIDTH = 58
@@ -98,10 +100,21 @@ def _pattern_note(stats: Optional[WalkStats]) -> Optional[str]:
     return 'Excluded by [exclude] patterns: ' + ', '.join(parts)
 
 
-def _display_pattern_note(console: Console, stats: Optional[WalkStats]) -> None:
-    note = _pattern_note(stats)
-    if note is not None:
+def _rust_test_note(result: TallyResult) -> Optional[str]:
+    """The report's closing line about Rust test code left out, or None when there was none."""
+    if not result.rust_test_lines:
+        return None
+    lines = _plural(result.rust_test_lines, 'line', 'lines')
+    files = _plural(result.rust_test_files, 'file', 'files')
+    return f'Excluded Rust test code: {lines} in {files}'
+
+
+def _display_notes(console: Console, result: TallyResult, stats: Optional[WalkStats]) -> None:
+    """The closing notes, under one blank line, or nothing when there are none."""
+    notes = [note for note in (_pattern_note(stats), _rust_test_note(result)) if note is not None]
+    if notes:
         console.print()
+    for note in notes:
         console.print(Text(f'  {note}', style='dim'))  # Text, not markup: '[exclude]' would be read as a tag
 
 

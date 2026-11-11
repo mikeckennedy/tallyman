@@ -68,6 +68,8 @@ class TallyResult:
     by_language: list[LanguageStats]  # Sorted by total_lines descending
     by_category: list[CategoryStats]  # In display order: Code, DevOps, Design, Docs, Specs, Data
     grand_total_lines: int = 0
+    rust_test_lines: int = 0  # Rust test code left out ([rust] exclude_test_modules), in no other count
+    rust_test_files: int = 0  # files that lost at least one line to it
 
 
 def aggregate(file_results: Iterable[tuple[Language, FileCount]]) -> TallyResult:
@@ -75,10 +77,21 @@ def aggregate(file_results: Iterable[tuple[Language, FileCount]]) -> TallyResult
 
     Groups by Language object (not name) so that the same language name in
     different categories (e.g. Markdown in docs vs specs) stays separate.
+
+    Rust test code left out by the counter (``FileCount.test_lines``) is summed
+    into ``rust_test_lines``, with ``rust_test_files`` counting the files that
+    lost any. A file that was all test code (``#![cfg(test)]``) is not counted
+    as a file of its language; an empty file still is.
     """
     by_lang: dict[Language, LanguageStats] = {}
+    rust_test_lines = rust_test_files = 0
 
     for language, counts in file_results:
+        if counts.test_lines:
+            rust_test_lines += counts.test_lines
+            rust_test_files += 1
+            if not counts.total_lines:
+                continue  # all test code (#![cfg(test)]): not a file of this language. An empty file still is.
         if language not in by_lang:
             by_lang[language] = LanguageStats(language=language)
         stats = by_lang[language]
@@ -119,6 +132,8 @@ def aggregate(file_results: Iterable[tuple[Language, FileCount]]) -> TallyResult
         by_language=sorted_langs,
         by_category=categories,
         grand_total_lines=grand_total,
+        rust_test_lines=rust_test_lines,
+        rust_test_files=rust_test_files,
     )
 
 

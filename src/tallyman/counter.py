@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tallyman.encoding import text_encoding
-from tallyman.languages import Language
+from tallyman.languages import RUST, Language
+from tallyman.rust_tests import rust_test_lines
 
 
 @dataclass(slots=True)
@@ -15,9 +16,10 @@ class FileCount:
     code_lines: int = 0
     comment_lines: int = 0
     blank_lines: int = 0
+    test_lines: int = 0  # Rust test code left out ([rust] exclude_test_modules); in none of the counts above
 
 
-def count_lines(path: Path, language: Language) -> FileCount:
+def count_lines(path: Path, language: Language, exclude_rust_tests: bool = False) -> FileCount:
     """Read a file and classify each line as blank, comment, or code.
 
     For languages with a single_line_comment marker, a line is a comment if
@@ -29,6 +31,10 @@ def count_lines(path: Path, language: Language) -> FileCount:
     end a line. A final line without a newline still counts. A byte-order mark
     picks the encoding (so it never hides a comment on the first line), and
     undecodable bytes are replaced rather than crashing the run.
+
+    With *exclude_rust_tests*, a Rust file's test-only code
+    (:func:`tallyman.rust_tests.rust_test_lines`) is left out: those lines go
+    to ``test_lines`` and nowhere else. Other languages ignore the flag.
     """
     counts = FileCount()
     comment_marker = language.single_line_comment
@@ -39,11 +45,18 @@ def count_lines(path: Path, language: Language) -> FileCount:
         return counts
 
     text = data.decode(text_encoding(data[:4]), errors='replace')
-    lines = text.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    lines = text.split('\n')
     if lines[-1] == '':
         lines.pop()  # the text ended with a newline (or was empty): no line after it
 
-    for line in lines:
+    # The scanner gets the same normalised text that was split, so its line indexes match these
+    test_lines = rust_test_lines(text) if exclude_rust_tests and language is RUST else frozenset()
+
+    for index, line in enumerate(lines):
+        if index in test_lines:
+            counts.test_lines += 1
+            continue
         counts.total_lines += 1
         stripped = line.strip()
 

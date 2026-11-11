@@ -73,7 +73,7 @@ Crossing a nested git repo boundary changes nothing here: tallyman settings cros
 
 - In `languages.py`, give the Rust entry a module-level name, `RUST = Language('Rust', ...)`, and use that name in `LANGUAGES`. Language identity is how tallyman tells languages apart (design decision 1), so the counter checks `language is RUST`, not the name string.
 - `FileCount` gains `test_lines: int = 0`: lines left out as Rust test code. They are **not** in `total_lines`, `code_lines`, `comment_lines` or `blank_lines`.
-- `count_lines(path, language, exclude_rust_tests: bool = False)`. When the flag is set and `language is RUST`, call `rust_tests.test_code_lines()` on the normalised text (the same string that is split into `lines`), then skip those indexes in the loop, adding them to `test_lines` instead. Any other language, or the flag off: behaviour unchanged, and `rust_tests` is never called.
+- `count_lines(path, language, exclude_rust_tests: bool = False)`. When the flag is set and `language is RUST`, call `rust_tests.rust_test_lines()` on the normalised text (the same string that is split into `lines`), then skip those indexes in the loop, adding them to `test_lines` instead. Any other language, or the flag off: behaviour unchanged, and `rust_tests` is never called.
 - Update the `count_lines()` docstring.
 
 ## 4. Aggregation (`aggregator.py`)
@@ -132,3 +132,17 @@ Run `tallyman` with and without the option on a real Rust workspace (Michael mea
 
 - Everything above is in, all checks in "Rules for every phase" are clean, and the architect review's valid findings are addressed.
 - Commit: `Plan 013 phase 2: [rust] exclude_test_modules through config, walker and counter`.
+
+## Review findings (phase 2, 2026-11-11)
+
+No must-fix findings. The architect checked chain precedence, the per-directory map (no sibling leak, nested repos), every `TallyConfig(...)` and `load_nested_config()` caller, TOML output, and line indexes across UTF-8/16/32, BOMs, CRLF and lone CR, and mutation-tested the new tests.
+
+Manual check, in place of the workspace from the issue (not on this machine):
+- tokio 1.45.1 `src/` (tests, benches and examples excluded): Rust effective lines 44,142 → 42,314.
+- A local Rust repo, via `git archive` (architect): Rust raw lines 29,332 → 24,733, a drop of 4,599 lines across 30 files, which equals `rust_test_lines`; effective 22,586 → 18,704; Rust `file_count` unchanged at 64.
+
+Optional findings, all addressed: a setup test where the parent says `true` and the scan root's config says nothing (setup must not copy the parent's value); the counter's "only Rust" test now uses Go, a real `//` language; `walk_project()` passes keywords to `walk_files()`; walker tests for a nested config inside a nested config, and for the setting crossing into a nested repo; the `aggregate()` docstring.
+
+As built: `SourceFile` is a `NamedTuple`.
+
+For phase 3: the README should say `[rust]` is hand-edited, and that setup, which rewrites a malformed scan-root config, won't restore it.

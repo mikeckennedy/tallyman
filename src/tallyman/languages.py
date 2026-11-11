@@ -21,10 +21,13 @@ class Language:
 
 
 # fmt: off
+# Named so the counter can tell Rust by identity: [rust] exclude_test_modules applies only to it
+RUST = Language('Rust',  'code',   'dark_orange',     '//', ('.rs',))
+
 LANGUAGES: tuple[Language, ...] = (
     # --- Code ---
     Language('Python',       'code',   'yellow',          '#',  ('.py',)),
-    Language('Rust',         'code',   'dark_orange',     '//', ('.rs',)),
+    RUST,
     Language('Go',           'code',   'cyan',            '//', ('.go',)),
     Language('JavaScript',   'code',   'bright_yellow',   '//', ('.js', '.jsx', '.mjs')),
     Language('TypeScript',   'code',   'dodger_blue1',    '//', ('.ts', '.tsx')),
