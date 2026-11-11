@@ -64,3 +64,16 @@ When `TallyResult.rust_test_lines > 0`, the report ends with a dim line:
 
 - The line, docs, changelog and version are in; all checks in "Rules for every phase" are clean; the architect review (this time over the whole branch, `main...rust-test-code`) has its valid findings addressed.
 - Commit: `Plan 013 phase 3: Rust test-code report line, docs, 0.5.4`.
+
+## Review findings (phase 3 and whole branch, 2026-11-11)
+
+No code findings. The architect checked the note on both paths, `--no-color` and forced colour, ran the README example through the CLI (off: 11 raw / 10 effective; on: 4 / 3 plus `7 lines in 1 file`), checked 18 README claims against `count_lines()`, ran the per-crate scope through the CLI (no sibling leak), and compared the branch against `main` with the option off: identical output apart from the version header. The test table in `CLAUDE.md` matches `pytest --collect-only` (802).
+
+Doc fixes from it, all made:
+- The README now says the note counts raw lines (blanks and comments included), so the default effective totals drop by less. On the local repo from phase 2, raw fell by 4,599 (the note) and effective by 3,882. `CLAUDE.md` decision 10 says the same.
+- The architect persona (`plans/006-tallyman-architect.plan.md` and its gitignored copy `.claude/agents/architect-tallyman.md`): module map rows for `rust_tests.py`, `walker.py`, `counter.py`, `config.py` and `display.py`; a Config bullet (the chain value, the per-directory map and the sibling-leak trap, setup writing `local`'s value); a Counting bullet; the Output bullets for the second note.
+- `.cursor/rules/coding-guidelines.mdc`: `rust_tests.py` in the project tree, and decision 10.
+- `[rust]` added to the settings that cross nested repo boundaries (README, `CLAUDE.md` decision 7, the `.cursor` copy).
+- Nits: "only that declaration drops" for `mod tests;`, a description line for each changelog `Files:`/`Plan:` pair, a blank line before decision 10, the `display.py` comment.
+
+Left for a later housekeeping pass (exists on `main`): the per-language block prints `1 lines of code`.

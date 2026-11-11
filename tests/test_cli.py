@@ -505,6 +505,13 @@ class TestRealProcess:
         assert result.returncode == 0, result.stderr
         assert result.stdout.rstrip().endswith('Excluded by [exclude] patterns: 1 file')
 
+    def test_rust_test_note_is_printed(self, tmp_path: Path) -> None:
+        (tmp_path / CONFIG_FILENAME).write_text('[rust]\nexclude_test_modules = true\n')
+        (tmp_path / 'lib.rs').write_text('fn a() {}\n\n#[cfg(test)]\nmod tests {\n    fn t() {}\n}\n')
+        result = _run_process(tmp_path)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.rstrip().endswith('Excluded Rust test code: 4 lines in 1 file')
+
     @pytest.mark.skipif(sys.platform == 'win32', reason='closing stdin in the child is POSIX-only')
     def test_closed_stdin(self, tmp_path: Path) -> None:
         (tmp_path / 'a.py').write_text('x = 1\n')
