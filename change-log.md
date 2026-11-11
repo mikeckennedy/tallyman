@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and never resets (see `CLAUDE.md`).
 
-## 0.4.3 - UNRELEASED
+## 0.4.3 - 2026-11-11
 
 ### Added
 - New `[exclude] patterns = [...]` config key: gitignore-style patterns, matched relative to the directory of the config that declares them, for files a directory exclude can't reach, such as Rust's `src/routing/tests.rs` beside `src/routing.rs` (issue #6). A pattern without a slash matches at any depth, a trailing `/` matches directories, and a deeper config's `!pattern` can bring back what a shallower config's pattern excluded. Patterns never bring back gitignored files, excluded or hidden directories, or the default skips, and a parent config's patterns never exclude the scanned directory itself. Setup shows directories a pattern excludes as locked and keeps the patterns, in order, when it rewrites the config.
