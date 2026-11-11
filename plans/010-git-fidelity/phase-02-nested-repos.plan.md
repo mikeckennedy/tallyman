@@ -151,6 +151,10 @@ Assert labels: `gen` ends with `(gitignored)`, `sub/gen` doesn't, `sub/out` does
 
 `test_nested_repo_counts_with_its_own_gitignore`: an outer fake repo with `.gitignore` `*.md`, a `top.md` of 5 lines, and a nested `sub/.git/` holding a 3-line `sub/README.md`. Run through `main()` the way the existing no-config, no-terminal tests do (patch `_is_interactive`, capture stdout). Markdown appears in the output with 3 lines, so `sub/README.md` is counted and `top.md` is still ignored.
 
+### Added after the phase 1 review: submodule inside a submodule
+
+Add a parity case for a submodule of a submodule, scanned from the middle repo (`mid/leaf`, with `leaf`'s git dir at `../../.git/modules/mid/modules/leaf`). Before this phase, tallyman counts `leaf/deep.py`, which leaf's own `info/exclude` lists, and drops `leaf/secret.py` because mid's `info/exclude` reaches into leaf. After it, both must match `git ls-files` run inside each repo. The phase 1 reviewer's layout script is `scratchpad/review010p1/scripts/layouts.py`.
+
 ## Changelog
 
 Under `0.4.3 - UNRELEASED`, `### Changed`:

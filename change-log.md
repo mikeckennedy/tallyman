@@ -61,6 +61,10 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - The bar's "Other" segment is now dark grey (`grey37`). It no longer merges with TOML, or with Markdown on 16-colour terminals.
 - Files: `src/tallyman/languages.py`, `tests/test_languages.py`, `tests/test_display.py`, `tests/test_image.py`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
 - Plan: `plans/009-spec-colours.plan.md`
+- `.git/info/exclude` is now honoured in git worktrees and submodules, where `.git` is a file pointing at the real git directory. Worktrees use the main repository's `info/exclude`, as git does. A `.git` file that is malformed, over 1 MB, or points at a directory with no `HEAD` (such as `gitdir: ..`) means no `info/exclude`, never an error; git refuses to run in such a checkout.
+- A gitignore or `[exclude]` pattern ending in a lone backslash (`a\`) now matches nothing, as in git, instead of matching a name ending in `\`; `!a\` no longer re-includes anything. An escaped backslash before trailing spaces (`a\\ `) no longer keeps the spaces.
+- Files: `src/tallyman/gitignore.py`, `tests/test_gitignore.py`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
+- Plan: `plans/010-git-fidelity/phase-01-gitdir-and-escapes.plan.md`
 - An empty `NO_COLOR` no longer disables colour; per no-color.org only a non-empty value does.
 - Solidity's colour changed from `bright_cyan`, which SQL also uses, to `slate_blue1`, so the two are distinguishable in the bar.
 - README and `CLAUDE.md` describe the current behaviour: config search and rebasing, `[specs] ignore`, `"."`, no-terminal runs, what is never counted, and the language count (43, not 41).

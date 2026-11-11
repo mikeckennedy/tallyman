@@ -18,6 +18,12 @@ Known differences from git:
   a force-added file under an ignored pattern is skipped.
 - A ``.gitignore`` or ``info/exclude`` that isn't a regular file (or a symlink
   to one) is treated as absent; git opens it, and blocks on a FIFO.
+- A worktree whose ``commondir`` file can't be read uses the ``info/exclude``
+  in its own git directory; git refuses to run there.
+- Only the repo's own ignore files are read: ``info/exclude`` and the
+  ``.gitignore`` files. The global excludes file (``core.excludesFile``,
+  by default ``~/.config/git/ignore``) is not, so counts don't depend on the
+  machine.
 """
 
 from __future__ import annotations
@@ -37,12 +43,78 @@ def find_git_root(start: Path) -> Optional[Path]:
     """
     current = start.resolve()
     while True:
-        if (current / '.git').exists():
+        if _has_git(current):
             return current
         parent = current.parent
         if parent == current:
             return None
         current = parent
+
+
+def _has_git(directory: Path) -> bool:
+    """True if *directory* is a repository root: it holds a ``.git`` directory or file, valid or not."""
+    return (directory / '.git').exists()
+
+
+_MAX_PATH_FILE = 1 << 20  # git refuses a .git file larger than this
+
+
+def _read_path_file(path: Path) -> Optional[str]:
+    """The contents of a one-line file holding a path, without git's trailing ``\\n``/``\\r``, or None.
+
+    Only a regular file of at most 1 MB is read, so a FIFO or a huge file can't stall the scan.
+    Bytes that aren't UTF-8 are kept as surrogates, so the path still opens on POSIX.
+    """
+    try:
+        if not path.is_file():
+            return None
+        with path.open('rb') as f:
+            raw = f.read(_MAX_PATH_FILE + 1)
+    except OSError:
+        return None
+    if len(raw) > _MAX_PATH_FILE:
+        return None
+    return raw.decode('utf-8', errors='surrogateescape').rstrip('\r\n')
+
+
+def _git_dir(repo_root: Path) -> Optional[Path]:
+    """The git directory of the repository at *repo_root*, or None if there is none to be found.
+
+    ``.git`` is either that directory or, in worktrees and submodules, a file holding
+    ``gitdir: <path>``, relative to *repo_root* unless absolute. A ``.git`` file without
+    that exact prefix, over 1 MB, or naming a directory with no ``HEAD`` (the cheapest
+    part of git's own check; ``gitdir: ..`` would otherwise read an ``info/exclude`` outside
+    the repo) gives None. Git refuses to run in such a checkout. A ``.git`` directory is
+    taken as it is, as :func:`find_git_root` takes any ``.git``.
+    """
+    dot_git = repo_root / '.git'
+    if dot_git.is_dir():
+        return dot_git
+    contents = _read_path_file(dot_git)
+    if contents is None or not contents.startswith('gitdir: '):
+        return None  # git's prefix is case-sensitive, and the space is required
+    target = contents.removeprefix('gitdir: ')
+    if not target:
+        return None
+    git_dir = repo_root / target
+    return git_dir if (git_dir / 'HEAD').exists() else None
+
+
+def _info_exclude(repo_root: Path) -> Optional[Path]:
+    """The ``info/exclude`` git reads for the repository at *repo_root*, or None.
+
+    It lives in the common directory: the git directory itself, or, when that holds a
+    ``commondir`` file, the directory named there (relative to the git directory unless
+    absolute). Worktrees share the main repo's ``info/exclude`` that way, and git doesn't
+    read one in a worktree's own git directory (checked against git 2.54). An unreadable
+    ``commondir`` falls back to the git directory; git refuses to run then.
+    """
+    git_dir = _git_dir(repo_root)
+    if git_dir is None:
+        return None
+    commondir = _read_path_file(git_dir / 'commondir')
+    common = git_dir / commondir if commondir is not None else git_dir
+    return common / 'info' / 'exclude'
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,7 +239,9 @@ def _glob_to_regex(glob: str) -> Optional[str]:
                 return None
             regex, i = translated
             out.append(regex)
-        elif c == '\\' and i + 1 < len(glob):
+        elif c == '\\':
+            if i + 1 == len(glob):
+                return None  # a trailing unescaped backslash makes the whole pattern invalid in git
             out.append(re.escape(glob[i + 1]))
             i += 2
         else:
@@ -176,12 +250,35 @@ def _glob_to_regex(glob: str) -> Optional[str]:
     return ''.join(out)
 
 
+def _trim_trailing_spaces(line: str) -> str:
+    """Drop trailing spaces that aren't escaped, following git's ``trim_trailing_spaces()``.
+
+    A backslash escapes exactly the next character, so in ``c\\\\ `` (an escaped backslash,
+    then a space) the space is trailing and goes, while ``foo\\ `` keeps its escaped space.
+    A line ending in a lone backslash is returned as it is; the glob then rejects it.
+    """
+    run_start: Optional[int] = None  # where the current run of unescaped spaces began
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if c == ' ':
+            if run_start is None:
+                run_start = i
+        else:
+            if c == '\\':
+                i += 1
+                if i == len(line):
+                    return line
+            run_start = None
+        i += 1
+    return line if run_start is None else line[:run_start]
+
+
 def _parse_line(line: str) -> Optional[_Pattern]:
     """Compile one .gitignore line, or return None for blanks, comments and patterns that can never match."""
     if not line or line.startswith('#'):
         return None
-    while line.endswith(' ') and not line.endswith('\\ '):
-        line = line[:-1]  # trailing spaces are ignored unless escaped
+    line = _trim_trailing_spaces(line)
 
     negate = line.startswith('!')
     if negate:
@@ -230,7 +327,7 @@ class GitIgnoreSpec:
     Each ignore file applies only to entries beneath the directory that owns it,
     and its patterns are matched relative to that directory. When several files
     have an opinion on an entry, the deepest one wins, so a nested ``!pattern``
-    can re-include what a parent ignored. ``.git/info/exclude`` ranks below every
+    can re-include what a parent ignored. ``info/exclude`` ranks below every
     ``.gitignore``, as in git.
 
     Callers pass paths relative to the analysis root, with a trailing ``/`` for
@@ -256,7 +353,8 @@ class GitIgnoreSpec:
         """Build the rules that apply at *root*, traversing up to find the git repo root.
 
         Registers, in increasing precedence:
-        - ``<git-root>/.git/info/exclude``
+        - The repo's ``info/exclude`` (found through a ``.git`` file's ``gitdir:`` and
+          ``commondir`` in worktrees and submodules)
         - ``<git-root>/.gitignore``
         - Any ``.gitignore`` in directories between the git root and *root*
 
@@ -274,7 +372,8 @@ class GitIgnoreSpec:
             return spec
 
         spec = cls(relative_posix(resolved_root, git_root), git_root)
-        spec._add_file('', git_root / '.git' / 'info' / 'exclude')
+        if (exclude := _info_exclude(git_root)) is not None:
+            spec._add_file('', exclude)
         spec._add_file('', git_root / '.gitignore')
 
         current = git_root

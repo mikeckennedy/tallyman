@@ -51,6 +51,10 @@ Under `0.4.3 - UNRELEASED`, `### Fixed`:
 - Files: `README.md`, `CLAUDE.md`, `src/tallyman/gitignore.py`
 - Plan: `plans/010-git-fidelity/phase-03-docs.plan.md`
 
+### Added after the phase 1 review
+
+The "Known differences" audit should also say that the `GIT_DIR` and `GIT_COMMON_DIR` environment variables aren't read (git honours them, for example inside hooks).
+
 ## Done when
 
 - The README, `CLAUDE.md` decision 7 and the `gitignore.py` docstring make the same claims, and each is true of the code.

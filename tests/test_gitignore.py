@@ -11,7 +11,7 @@ from typing import Optional
 
 import pytest
 
-from tallyman.gitignore import GitIgnoreSpec, find_git_root, load_gitignore
+from tallyman.gitignore import GitIgnoreSpec, _read_path_file, find_git_root, load_gitignore
 from tallyman.tui.setup_app import SetupApp, SetupTree
 from tallyman.walker import walk_project
 
@@ -129,6 +129,164 @@ class TestLoadGitignore:
         (tmp_path / 'a.md').write_text('# a\n')
         (tmp_path / 'a.py').write_text(X)
         assert _walked(tmp_path) == {'a.py'}
+
+
+_HEAD = 'ref: refs/heads/main\n'  # a gitdir: target is used only if it holds a HEAD, as git requires
+
+
+def _worktree_layout(tmp_path: Path, commondir: Optional[str] = None) -> tuple[Path, Path]:
+    """A worktree by hand: ``main/.git`` holds the shared ``info/exclude``; ``wt/.git`` points at its gitdir."""
+    main, wt = tmp_path / 'main', tmp_path / 'wt'
+    gitdir = main / '.git' / 'worktrees' / 'wt'
+    _make(
+        tmp_path,
+        {'main/.git/info/exclude': 'secret.py\n', 'wt/.git': f'gitdir: {gitdir}\n', f'{gitdir}/HEAD': _HEAD},
+    )
+    (gitdir / 'commondir').write_text(commondir if commondir is not None else '../..\n')
+    return main, wt
+
+
+class TestInfoExcludeLocation:
+    """``info/exclude`` is found the way git finds it: through a ``.git`` file's ``gitdir:`` and ``commondir``."""
+
+    def test_git_directory(self, tmp_path: Path) -> None:
+        _make(tmp_path, {'repo/.git/info/exclude': 'secret.py\n'})
+        assert load_gitignore(tmp_path / 'repo').match_file('secret.py')
+
+    def test_gitdir_file_absolute(self, tmp_path: Path) -> None:
+        store = tmp_path / 'store'
+        _make(tmp_path, {'store/info/exclude': 'secret.py\n', 'store/HEAD': _HEAD, 'repo/.git': f'gitdir: {store}\n'})
+        spec = load_gitignore(tmp_path / 'repo')
+        assert spec.match_file('secret.py')
+        assert not spec.match_file('ok.py')
+
+    @pytest.mark.parametrize('newline', ['\n', '\r\n', ''])
+    def test_gitdir_file_relative(self, tmp_path: Path, newline: str) -> None:
+        """The submodule layout: ``sub/.git`` points into the superproject's ``.git/modules``."""
+        _make(
+            tmp_path,
+            {
+                'outer/.git/modules/sub/info/exclude': 'secret.py\n',
+                'outer/.git/modules/sub/HEAD': _HEAD,
+                'outer/sub/.git': f'gitdir: ../.git/modules/sub{newline}',
+            },
+        )
+        assert load_gitignore(tmp_path / 'outer' / 'sub').match_file('secret.py')
+
+    def test_commondir_relative(self, tmp_path: Path) -> None:
+        _, wt = _worktree_layout(tmp_path)
+        assert load_gitignore(wt).match_file('secret.py')
+
+    def test_commondir_absolute(self, tmp_path: Path) -> None:
+        _, wt = _worktree_layout(tmp_path, commondir=f'{tmp_path / "main" / ".git"}\r\n')
+        assert load_gitignore(wt).match_file('secret.py')
+
+    def test_per_worktree_info_exclude_is_not_read(self, tmp_path: Path) -> None:
+        """git 2.54 reads only the common dir's info/exclude, not one in the worktree's own gitdir."""
+        main, wt = _worktree_layout(tmp_path)
+        _make(main, {'.git/worktrees/wt/info/exclude': 'ok.py\n'})
+        spec = load_gitignore(wt)
+        assert spec.match_file('secret.py')
+        assert not spec.match_file('ok.py')
+
+    def test_unreadable_commondir_falls_back_to_the_gitdir(self, tmp_path: Path) -> None:
+        """Git refuses to run in this state; tallyman falls back to the worktree's own git dir rather than fail."""
+        main, wt = _worktree_layout(tmp_path)
+        commondir = main / '.git' / 'worktrees' / 'wt' / 'commondir'
+        commondir.unlink()
+        commondir.mkdir()  # a directory by that name can't be read
+        _make(main, {'.git/worktrees/wt/info/exclude': 'ok.py\n'})
+        spec = load_gitignore(wt)
+        assert spec.match_file('ok.py')
+        assert not spec.match_file('secret.py')
+
+    @pytest.mark.parametrize(
+        'contents',
+        [
+            'nonsense\n',
+            'gitdir: /does/not/exist\n',
+            'GITDIR: x\n',
+            'gitdir:x\n',
+            'gitdir: \n',
+            '',
+            'gitdir: .\n',
+            'gitdir: ..\n',
+        ],
+        ids=['nonsense', 'dangling', 'wrong-case', 'no-space', 'empty-value', 'empty-file', 'self', 'parent'],
+    )
+    def test_malformed_git_file_is_harmless(self, tmp_path: Path, contents: str) -> None:
+        """No error, and no info/exclude read from a target that isn't a git directory (no HEAD), even one that exists.
+
+        Git refuses to run in such a checkout. Without the check, ``gitdir: ..`` would read an ``info/exclude``
+        outside the repo.
+        """
+        _make(
+            tmp_path,
+            {
+                'repo/.git': contents,
+                'repo/.gitignore': 'a.py\n',
+                'repo/info/exclude': 'b.py\n',
+                'info/exclude': 'b.py\n',
+            },
+        )
+        spec = load_gitignore(tmp_path / 'repo')
+        assert spec.match_file('a.py')
+        assert not spec.match_file('b.py')
+
+    @pytest.mark.parametrize(('size', 'read'), [(1 << 20, True), ((1 << 20) + 1, False)])
+    def test_git_file_over_one_megabyte_is_absent(self, tmp_path: Path, size: int, read: bool) -> None:
+        """Git refuses a ``.git`` file over 1 MB; so does tallyman, without reading the rest of it."""
+        store = tmp_path / 'store'
+        line = f'gitdir: {store}'
+        _make(tmp_path, {'store/info/exclude': 'secret.py\n', 'store/HEAD': _HEAD})
+        (tmp_path / 'repo').mkdir()
+        (tmp_path / 'repo' / '.git').write_bytes(line.encode() + b'\n' * (size - len(line.encode())))
+        assert (tmp_path / 'repo' / '.git').stat().st_size == size
+        assert load_gitignore(tmp_path / 'repo').match_file('secret.py') is read
+
+    def test_non_utf8_gitdir_round_trips(self, tmp_path: Path) -> None:
+        """A path that isn't UTF-8 (legal on Linux) keeps its bytes, so it can still be opened."""
+        dot_git = tmp_path / '.git'
+        dot_git.write_bytes(b'gitdir: /x/st\xffore\n')
+        contents = _read_path_file(dot_git)
+        assert contents is not None
+        assert os.fsencode(contents) == b'gitdir: /x/st\xffore'
+
+    def test_non_utf8_gitdir_target_is_found(self, tmp_path: Path) -> None:
+        name = os.fsdecode(b'st\xffore')
+        try:
+            (tmp_path / name).mkdir()
+        except OSError:
+            pytest.skip('this filesystem rejects names that are not UTF-8')
+        _make(tmp_path / name, {'info/exclude': 'secret.py\n', 'HEAD': _HEAD})
+        (tmp_path / 'repo').mkdir()
+        (tmp_path / 'repo' / '.git').write_bytes(b'gitdir: ../st\xffore\n')
+        assert load_gitignore(tmp_path / 'repo').match_file('secret.py')
+
+    @pytest.mark.skipif(not hasattr(os, 'mkfifo'), reason='named pipes need os.mkfifo (not on Windows)')
+    @pytest.mark.parametrize('fifo', ['wt/.git', 'main/.git/worktrees/wt/commondir', 'main/.git/info/exclude'])
+    def test_fifo_on_the_way_is_not_read(self, tmp_path: Path, make_fifo: Callable[..., Path], fifo: str) -> None:
+        """A FIFO named ``.git``, ``commondir`` or ``exclude`` must not block; it is treated as absent.
+
+        Each FIFO, if read anyway, would deliver what makes ``secret.py`` ignored, so a blocking read fails the test.
+        """
+        _, wt = _worktree_layout(tmp_path)
+        (tmp_path / fifo).unlink()
+        payloads = {
+            'wt/.git': f'gitdir: {tmp_path}/main/.git/worktrees/wt\n'.encode(),
+            'main/.git/worktrees/wt/commondir': b'../..\n',
+            'main/.git/info/exclude': b'secret.py\n',
+        }
+        make_fifo(tmp_path / fifo, payload=payloads[fifo])
+        (wt / '.gitignore').write_text('a.py\n')
+        spec = load_gitignore(wt)
+        assert spec.match_file('a.py')
+        assert not spec.match_file('secret.py')
+
+    def test_scan_below_worktree_root(self, tmp_path: Path) -> None:
+        _, wt = _worktree_layout(tmp_path)
+        (wt / 'src').mkdir()
+        assert load_gitignore(wt / 'src').match_file('secret.py')
 
 
 class TestNestedGitignore:
@@ -310,6 +468,15 @@ _PATTERN_CASES = [
     ('[]x', '[]x', False),
     ('a[/]b', 'a/b', False),
     ('/', 'a', False),
+    ('a\\', 'a\\', False),  # a trailing lone backslash matches nothing
+    ('\\', '\\', False),
+    ('*.py\\', 'x.py\\', False),
+    ('a\\/', 'a\\/', False),
+    ('a\\\\\\', 'a\\\\', False),  # escaped backslash, then a lone one
+    ('a\\\\', 'a\\', True),  # an escaped backslash is fine
+    ('c\\\\ ', 'c\\', True),  # escaped backslash: the space after it is trailing and stripped
+    ('c\\\\ ', 'c\\ ', False),
+    ('c\\\\\\ ', 'c\\ ', True),  # escaped backslash, escaped space
 ]
 
 
@@ -328,6 +495,12 @@ def test_only_newline_separates_patterns(tmp_path: Path):
     spec = load_gitignore(tmp_path)
     assert spec.match_file('a\x0cb.py')
     assert not spec.match_file('b.py')
+
+
+def test_negated_trailing_backslash_reincludes_nothing(tmp_path: Path) -> None:
+    """'!a\\' is invalid in git, so it can't bring back what '*' ignored."""
+    (tmp_path / '.gitignore').write_text('*\n!a\\\n')
+    assert load_gitignore(tmp_path).match_file('a\\')
 
 
 # --- Parity with git itself -------------------------------------------------------------------------------------------
@@ -450,7 +623,47 @@ def _git_env(home: Path) -> dict[str, str]:
     """An environment where only the repo's own ignore files apply: no global excludes, no inherited GIT_*."""
     env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
     env.update(HOME=str(home), XDG_CONFIG_HOME=str(home), GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
+    env.update(
+        GIT_AUTHOR_NAME='t',
+        GIT_AUTHOR_EMAIL='t@example.com',
+        GIT_COMMITTER_NAME='t',
+        GIT_COMMITTER_EMAIL='t@example.com',
+    )
     return env
+
+
+def _git(env: dict[str, str], *args: str) -> str:
+    """Run git quietly (hints and progress go to the captured stderr) and return its stdout."""
+    return subprocess.run(['git', *args], check=True, env=env, capture_output=True, text=True).stdout
+
+
+def _git_view(scan: Path, env: dict[str, str]) -> set[str]:
+    """The .py and .md files git shows under *scan*, tracked or untracked and not ignored, as if run in every repo.
+
+    Git lists an untracked nested repo as ``sub/`` and a submodule as the gitlink ``sub``; both are recursed into,
+    with git run there. Fixtures never commit a file an ignore rule matches, since tallyman can't see the index.
+    """
+    seen: set[str] = set()
+    for entry in _git(env, '-C', str(scan), 'ls-files', '-c', '-o', '--exclude-standard', '-z', '.').split('\0'):
+        if not entry:
+            continue
+        name = entry.rstrip('/')
+        if (scan / name).is_dir() and (scan / name / '.git').exists():
+            seen |= {f'{name}/{inner}' for inner in _git_view(scan / name, env)}
+        elif entry.endswith(('.py', '.md')):
+            seen.add(entry)
+    return seen
+
+
+def _git_common_dir(repo: Path, env: dict[str, str]) -> Path:
+    """Where git keeps *repo*'s shared state, including ``info/exclude``; git's own answer, not a guessed layout."""
+    return repo / _git(env, '-C', str(repo), 'rev-parse', '--git-common-dir').strip()
+
+
+def _write_exclude(repo: Path, env: dict[str, str], text: str) -> None:
+    exclude = _git_common_dir(repo, env) / 'info' / 'exclude'
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text(text)
 
 
 def _git_untracked(scan: Path, env: dict[str, str]) -> set[str]:
@@ -465,7 +678,10 @@ def _git_untracked(scan: Path, env: dict[str, str]) -> set[str]:
     return {f for f in out.split('\0') if f.endswith(('.py', '.md'))}
 
 
-@pytest.mark.skipif(shutil.which('git') is None, reason='git is not installed')
+needs_git = pytest.mark.skipif(shutil.which('git') is None, reason='git is not installed')
+
+
+@needs_git
 @pytest.mark.parametrize(('files', 'scan', 'exclude'), _GIT_CASES)
 def test_matches_git(tmp_path: Path, files: dict[str, str], scan: str, exclude: Optional[str]):
     """walk_project() yields exactly the untracked files git does not ignore."""
@@ -476,6 +692,42 @@ def test_matches_git(tmp_path: Path, files: dict[str, str], scan: str, exclude: 
     if exclude is not None:
         (repo / '.git' / 'info' / 'exclude').write_text(exclude)
     assert _walked(repo / scan) == _git_untracked(repo / scan, env)
+
+
+@needs_git
+def test_worktree_matches_git(tmp_path: Path) -> None:
+    """A worktree's ``.git`` is a file; its info/exclude is the main repo's, found through ``commondir``."""
+    env = _git_env(tmp_path)
+    main, wt = tmp_path / 'main', tmp_path / 'wt'
+    _make(main, {'.gitignore': '*.md\n', 'kept.py': X})
+    _git(env, 'init', '-q', str(main))
+    _git(env, '-C', str(main), 'add', '.')
+    _git(env, '-C', str(main), 'commit', '-q', '-m', 'init')
+    _write_exclude(main, env, 'secret.py\n')
+    _git(env, '-C', str(main), 'worktree', 'add', '-q', str(wt))
+    _make(wt, {'secret.py': X, 'ok.py': X, 'a.md': X})
+    assert (wt / '.git').is_file()
+    assert _walked(wt) == _git_view(wt, env) == {'kept.py', 'ok.py'}
+
+
+@needs_git
+def test_submodule_matches_git(tmp_path: Path) -> None:
+    """Scanned from inside, a submodule uses its own info/exclude (in the superproject's ``.git/modules``)."""
+    env = _git_env(tmp_path)
+    subsrc, outer = tmp_path / 'subsrc', tmp_path / 'outer'
+    _make(subsrc, {'.gitignore': '*.log\n', 'kept.py': X})
+    _make(outer, {'.gitignore': '*.md\n', 'top.py': X})
+    for repo in (subsrc, outer):
+        _git(env, 'init', '-q', str(repo))
+        _git(env, '-C', str(repo), 'add', '.')
+        _git(env, '-C', str(repo), 'commit', '-q', '-m', 'init')
+    # Local-path submodules need protocol.file.allow since git 2.38.1; older gits ignore the unknown key
+    _git(env, '-C', str(outer), '-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', str(subsrc), 'sub')
+    sub = outer / 'sub'
+    _write_exclude(sub, env, 'secret.py\n')
+    _make(sub, {'secret.py': X, 'b.py': X, 'a.md': X})
+    assert (sub / '.git').is_file()
+    assert _walked(sub) == _git_view(sub, env) == {'kept.py', 'b.py', 'a.md'}
 
 
 def test_tui_shows_every_directory_as_spec_when_root_is_spec(tmp_path: Path):
@@ -539,6 +791,13 @@ class TestConfigPatterns:
         spec = GitIgnoreSpec.for_patterns(tmp_path)
         spec.add_rules(tmp_path, ['!gen.py'])
         assert {p.name for p, _ in walk_project(tmp_path, set(), exclude_patterns=spec)} == {'a.py'}
+
+    def test_trailing_backslash_pattern_matches_nothing(self, tmp_path: Path) -> None:
+        """Config patterns are compiled by the same parser, so a lone trailing backslash is invalid here too."""
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path, ['a\\', 'c\\\\ '])
+        assert not spec.match_file('a\\')
+        assert spec.match_file('c\\')
 
     def test_add_rules_needs_an_anchored_spec(self, tmp_path: Path):
         with pytest.raises(ValueError):
