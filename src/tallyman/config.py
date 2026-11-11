@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import os
 import posixpath
+import stat
 import tomllib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from tallyman.encoding import text_encoding
 from tallyman.gitignore import find_git_root
 from tallyman.paths import relative_posix
 
@@ -50,7 +52,7 @@ class TallyConfig:
     order, relative to the config's own directory. They stay attached to the
     file they came from, so the functions that move or combine entries
     (:func:`rebase_config`, :func:`prefixed`, :func:`merge_configs`,
-    :func:`without_inherited`) return none; see :class:`ConfigChain`.
+    :func:`without_copies`) return none; see :class:`ConfigChain`.
     """
 
     excluded_dirs: set[str] = field(default_factory=set)
@@ -124,14 +126,18 @@ def _patterns(data: dict[str, Any]) -> list[str]:
 def load_config(config_path: Path) -> TallyConfig:
     """Load a .tally-config.toml and return the configuration.
 
+    A UTF-8, UTF-16 or UTF-32 byte-order mark picks the encoding, as it does for
+    source files; without one the file must be UTF-8.
+
     Raises ConfigError, with ``path`` set to *config_path*, if the file can't be
-    read, isn't valid UTF-8 TOML, or has the wrong shape.
+    read or decoded, isn't valid TOML, or has the wrong shape.
     """
     try:
-        with config_path.open('rb') as f:
-            data = tomllib.load(f)
+        raw = config_path.read_bytes()
     except OSError as e:
         raise ConfigError(e.strerror or str(e), config_path) from e
+    try:
+        data = tomllib.loads(raw.decode(text_encoding(raw[:4])))
     except (ValueError, RecursionError) as e:  # TOMLDecodeError and UnicodeDecodeError are both ValueErrors
         raise ConfigError(str(e) or type(e).__name__, config_path) from e
     try:
@@ -175,18 +181,32 @@ def prefixed(config: TallyConfig, rel_dir: str) -> TallyConfig:
     )
 
 
-def without_inherited(local: TallyConfig, inherited: TallyConfig) -> TallyConfig:
-    """*local* minus entries that *inherited* already has in the same set, so each setting lives in one file.
+def without_copies(local: TallyConfig, *others: TallyConfig) -> TallyConfig:
+    """*local* minus its copies of *others*' settings, so each setting lives in one file.
 
-    A path that *local* lists as both specs and ignored (a contradictory hand
-    edit) keeps both entries, so dropping one can't change which of them wins.
+    All configs share a base directory: *local* is the scan root's own config,
+    *others* the parent configs (``ConfigChain.inherited``) and nested ones. A
+    **copy** is an entry that one of *others* has in the same set: the same path
+    in ``excluded_dirs``, ``spec_dirs`` or ``non_spec_dirs``. Dropping it changes
+    nothing, since that other file still says the same. An entry in the
+    *opposite* spec set stays: over a parent's setting it is an override (the
+    scan root is deeper and wins), and under a nested one it is shadowed but takes
+    effect again if the nested setting goes. An exclusion beneath another
+    config's exclusion isn't a copy either, and stays.
+
+    A path listed as both specs and ignored (a contradictory hand edit, where
+    specs wins) is never a copy: if *local* lists it both ways, both entries
+    stay, so dropping one can't change which wins; if one of *others* does, it
+    doesn't say "ignored" alone, so *local*'s entry for that path stays.
     """
     contradictory = local.spec_dirs & local.non_spec_dirs
-    return TallyConfig(
-        local.excluded_dirs - inherited.excluded_dirs,
-        local.spec_dirs - (inherited.spec_dirs - contradictory),
-        local.non_spec_dirs - (inherited.non_spec_dirs - contradictory),
-    )
+    excluded, specs, non_specs = set(local.excluded_dirs), set(local.spec_dirs), set(local.non_spec_dirs)
+    for other in others:
+        keep = contradictory | (other.spec_dirs & other.non_spec_dirs)
+        excluded -= other.excluded_dirs
+        specs -= other.spec_dirs - keep
+        non_specs -= other.non_spec_dirs - keep
+    return TallyConfig(excluded, specs, non_specs)
 
 
 def rebase_config(config: TallyConfig, config_dir: Path, root: Path) -> TallyConfig:
@@ -301,39 +321,6 @@ def load_config_chain(
     return chain
 
 
-def discover_nested_configs(root: Path, pattern_layers: Optional[list[PatternLayer]] = None) -> TallyConfig:
-    """Scan subdirectories for .tally-config.toml and merge their settings.
-
-    If *pattern_layers* is given, each nested config's patterns are appended to
-    it, shallowest first.
-
-    Paths from nested configs are translated to be relative to *root*, and a
-    deeper config wins on the same path, as in :func:`merge_configs`.
-    Only non-root configs are considered (the root config is loaded separately).
-    Hidden directories are skipped for performance.
-    """
-    merged = TallyConfig()
-
-    for dirpath_str, dirnames, _filenames in os.walk(root, topdown=True, followlinks=False):
-        # Skip hidden directories (e.g. .git, .venv)
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith('.'))
-
-        dirpath = Path(dirpath_str)
-        rel_dir_str = relative_posix(dirpath, root)
-        if not rel_dir_str:
-            continue
-
-        config_file = dirpath / CONFIG_FILENAME
-        if config_file.is_file() and (loaded := load_nested_config(config_file, rel_dir_str)) is not None:
-            nested, patterns = loaded
-            # Top-down, so an ancestor's config is merged before a descendant's and the deeper one wins
-            merged = merge_configs(merged, nested)
-            if pattern_layers is not None and patterns:
-                pattern_layers.append((dirpath, patterns))
-
-    return merged
-
-
 def _toml_string(value: str) -> str:
     """Quote *value* as a TOML basic string, escaping backslashes, quotes and control characters."""
     out: list[str] = []
@@ -361,9 +348,18 @@ def save_config(
     *patterns* are written in the order given, since a later ``!pattern`` can
     undo an earlier one. Setup passes the loaded config's patterns through.
 
-    Raises OSError if the file can't be written, and UnicodeEncodeError if a
-    directory name isn't valid Unicode (possible on Linux, never on macOS).
+    Raises OSError if the file can't be written, or if *config_path* exists but
+    isn't a regular file (or a symlink to one): opening a FIFO for writing would
+    block until something reads it, and a dangling symlink would create its
+    target wherever it points. The caller names the path in its message. Raises UnicodeEncodeError if a directory name
+    isn't valid Unicode (possible on Linux, never on macOS).
     """
+    try:
+        mode: Optional[int] = config_path.lstat().st_mode
+    except FileNotFoundError:
+        mode = None
+    if mode is not None and not stat.S_ISREG(mode) and not config_path.is_file():
+        raise OSError('it exists but is not a regular file')
     lines = [
         '# Generated by tallyman. Edit manually or re-run: tallyman --setup',
         '',

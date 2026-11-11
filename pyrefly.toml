@@ -41,6 +41,7 @@ untyped-def-behavior = "check-and-infer-return-type"
 permissive-ignores = false
 
 [errors]
-# this is an empty table, meaning all errors are enabled by default
+# all errors are on by default; this promotes a warning that would otherwise only show with --min-severity=warn
+unnecessary-type-conversion = "error"
 
 # no `[[sub-config]]` entries are included, since there are none by default

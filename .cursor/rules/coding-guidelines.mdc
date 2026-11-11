@@ -4,16 +4,17 @@ globs: src/tallyman/**,tests/**
 alwaysApply: true
 ---
 
+The data structures, design decisions and "when adding" steps below are copied from `CLAUDE.md`, which is the source of truth. Keep them in step with it.
+
 ## Tech Stack
 
-- **Python 3.14+** (uses match statements, dataclass slots, `tomllib`)
-- **textual** - TUI framework for first-run setup wizard
-- **rich** - colored terminal output
-- **Pillow** - PNG export, imported lazily
-- Gitignore matching is in-house (`gitignore.py`), no pathspec
-- **ty** and **pyrefly** for type checking
-- **pytest** + **ruff** for dev tooling
-- **Build backend**: hatchling
+- **Python 3.14+** (uses dataclass slots, `tomllib`, and PEP 758's unparenthesised `except A, B:`)
+- **textual**  -  TUI framework for the setup wizard, imported only when setup runs (`cli.run_setup()`)
+- **rich**  -  colored terminal output
+- **Pillow**  -  PNG export, imported lazily so a plain run never loads it
+- Gitignore matching is in-house (`gitignore.py`); there is no pathspec dependency
+- **pytest** + **ruff** (configured only in `ruff.toml`) + **ty** + **pyrefly** for dev tooling
+- Build backend: **hatchling**
 
 This is a CLI tool with no web server, no database, and no async code. It runs synchronously as a pipeline.
 
@@ -21,72 +22,92 @@ This is a CLI tool with no web server, no database, and no async code. It runs s
 
 ```
 src/tallyman/
-├── cli.py             # Entry point, arg parsing, orchestrates the pipeline
-├── languages.py       # Language registry (40+ languages), frozen dataclasses
-├── walker.py          # Directory traversal, gitignore + config exclusions
+├── cli.py             # Entry point, arg parsing, config loading and errors, orchestrates the pipeline
+├── languages.py       # Language registry (40+ languages), frozen dataclasses, EXTENSION_MAP
+├── walker.py          # Directory traversal: gitignore, config exclusions, [exclude] patterns, spec dirs
+├── gitignore.py       # In-house gitignore rules (GitIgnoreSpec), info/exclude, nested repos
+├── encoding.py        # BOM detection, shared by walker, counter and config loading
+├── paths.py           # relative_posix(), canonical_case()
 ├── counter.py         # Reads files, classifies lines as code/comment/blank
-├── aggregator.py      # Accumulates stats, groups by category
+├── aggregator.py      # Accumulates stats, groups by category; the report model both outputs draw
 ├── display.py         # Rich-based terminal rendering
-├── config.py          # .tally-config.toml read/write
-├── tui/setup_app.py   # Textual App for interactive directory selection
+├── config.py          # .tally-config.toml find, load, merge (ConfigChain), save
+├── image.py           # Pillow PNG summary card (imported lazily)
+├── fonts/             # Bundled JetBrains Mono for the image
+├── tui/setup_app.py   # Textual App for interactive directory selection (imported only when setup runs)
 ├── __main__.py        # Enables `python -m tallyman`
 └── __init__.py        # Package init, __version__
 ```
 
 ## Python Standards
 
-- **Line Length**: 120 characters max (per ruff.toml)
-- **Quotes**: Single quotes for strings (per ruff.toml)
-- **Linting**: `ruff check src/ tests/` and `ruff format src/ tests/`
+- Single quotes for strings (Ruff enforced)
+- `from __future__ import annotations` in every module
+- Type hints on all function signatures, including `-> None` on every test (Ruff's `ANN` rules)
+- Use `Optional[X]` from `typing` for optional types, not `X | None` (`tests/test_conventions.py` checks it; Ruff's `UP` rules stay off because `UP045` enforces the opposite)
+- `_prefixed` for module-private functions
+- 120-char line length
+- Frozen dataclasses for immutable values, mutable ones for accumulators
+- **Linting and types**: `ruff check src/ tests/`, `ruff format src/ tests/`, `uvx ty check` and `uvx pyrefly check` must all be clean (Ruff is configured only in `ruff.toml`)
 - **Target Python**: 3.14+ features are allowed
-- **Type Hints**: Use modern Python type hints on all function signatures, but `Optional[X]` from `typing` for optional types, not `X | None`
-- **Imports**: `from __future__ import annotations` in every module
-- **Private Functions**: `_prefixed` for module-private functions
-- **Dataclasses**: Frozen for immutable values (Language), mutable for accumulators (LanguageStats)
-- **All dataclasses use `slots=True`** for efficiency
 
 ## Core Data Structures
 
 ```python
-Language(frozen=True)    # name, category, color, single_line_comment, extensions
-FileCount                # total_lines, code_lines, comment_lines, blank_lines
-LanguageStats            # language, file_count, total_lines, code_lines, comment_lines, blank_lines
-CategoryStats            # name, total_lines, effective_lines, languages
-TallyResult              # by_language, by_category, grand_total_lines
-TallyConfig              # excluded_dirs: set[str], spec_dirs: set[str]
+# Dataclasses use slots=True (TallyConfig and ConfigChain are plain dataclasses; SpecState is a NamedTuple)
+
+Language(frozen=True)         # name, category, color, single_line_comment, extensions; spec_color (docs only, keyword-only)
+FileCount                     # total_lines, code_lines, comment_lines, blank_lines
+LanguageStats                 # language, file_count, total_lines, code_lines, comment_lines, blank_lines;
+                              # .effective_lines is the one definition (code lines, or non-blank without a comment marker)
+CategoryStats                 # name, total_lines, effective_lines, languages
+BarSegment(frozen=True)       # language (None for Other), label, color, percent: one bar block and its legend entry
+TallyResult                   # by_language, by_category, grand_total_lines
+TallyConfig                   # excluded_dirs, spec_dirs, non_spec_dirs ([specs] ignore): set[str]; '.' = this dir;
+                              # patterns: list[str], raw, in file order, relative to the config's own directory
+ConfigChain                   # inherited (configs above the scan root, merged + rebased), local, paths, pattern_layers;
+                              # .effective is inherited overridden by local, what the walker applies
+WalkStats                     # pattern_files, pattern_dirs: what [exclude] patterns removed, for the report
+SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's spec status (walker.spec_state)
 ```
 
-## Key Design Patterns
+## Key Design Decisions
 
-### Language Objects Are Frozen and Identity Matters
+1. **Language objects are frozen and identity matters.** `Markdown(docs)` and `Markdown(specs)` are distinct objects. Aggregation groups by Language object, not name alone.
 
-`Markdown(docs)` and `Markdown(specs)` are distinct objects. Aggregation groups by Language object, not name alone.
+2. **Spec variants via `as_spec()`.** When a docs-category file is found in a spec directory, `as_spec()` creates a new Language with `category='specs'` and the docs language's `spec_color` as its colour, so specs and docs never share a bar colour. Results are cached with `@cache`.
 
-### Spec Variants via `as_spec()`
+3. **Comment detection is single-line only.** Strips the line, checks `startswith(marker)`. Multi-line comments (`/* */`, `""" """`) are NOT detected.
 
-When a docs-category file is found in a spec directory, `as_spec()` creates a new Language with `category='specs'`. Results are cached with `@cache`.
+4. **Binary detection** checks the first 8KB for a `\x00` byte, unless the file starts with a UTF-16/32 BOM. Lines end only at `\n`, `\r\n` or a lone `\r`, and a final line without a newline counts. BOMs pick the encoding (`encoding.py`). Tallyman's own config, npm/pnpm lockfiles and `*.min.js`/`*.min.css` are never counted. Symlinks and other non-regular files (FIFOs, sockets, devices) are never counted or opened (`walker._is_regular_file()`, one `lstat()`, checked before anything opens the file); `.gitignore` files are read only if they are a regular file, or a symlink to one.
 
-### Comment Detection Is Single-Line Only
+5. **Every config from the git root down to the scan root applies.** `find_configs()` lists them shallowest first (outside a repo, only the scan root's). `load_config_chain()` folds the ones above the scan root with `merge_configs()` (exclusions add up; the deeper config wins on the same path) and rebases the result onto the scan root with `rebase_config()`: that is `ConfigChain.inherited`. The scan root's own config is `local`, and the walker uses `effective`. Nested configs below the scan root merge the same way as the walk descends. Setup reads nested configs while it builds its tree (`_populate()`), wherever the walker would read them, and also beneath the scan root's own exclusions, which the user can lift. Directories another config excludes are leaves. Setup edits only `local`: parent and nested settings are shown locked and never copied (`without_copies()` drops copies of either, an entry with the same path in the same set, when setup opens and again on save; an opposite-set entry over a parent's is an override and stays editable, one a nested config shadows stays but is locked, and an entry over a path another config lists both ways is never a copy; an exclusion beneath a dropped copy goes with it). A malformed config at or above the scan root exits 1 naming the file; `--setup` skips it with a warning. A malformed nested config is skipped silently, since it is often third-party code. Entries are normalised on load. In `[specs] directories` and `[specs] ignore`, `"."` means the config's own directory. With no config and no terminal, tallyman runs with defaults and writes nothing.
 
-Strips the line, checks `startswith(marker)`. Multi-line comments (`/* */`, `""" """`) are NOT detected.
+6. **Auto-detected spec dirs:** `specs/`, `plans/`, `specifications/`, `agents/`  -  detected even without config, at any depth, unless listed (or beneath a directory listed) in `[specs] ignore`. The deepest explicit setting wins. `walker.spec_state()` is the one rule; the walker and the setup TUI both call it. Scanning from inside one (`tallyman plans/sub`) still counts specs, but a repo that is itself named `agents` does not.
 
-### Binary Detection
+7. **Gitignore follows git, entry by entry.** `info/exclude`, then every `.gitignore` from the repo root down, each scoped to its own directory; the deepest opinion wins. `info/exclude` is found through the `.git` directory, or a `.git` file's `gitdir:` and its `commondir` (worktrees, submodules). Nested files load lazily as the walker and TUI descend, and nothing inside an ignored directory is ever looked at. Callers pass directory paths with a trailing `/`. A nested repo (any `.git` directory or file below the scan root, the same test as `find_git_root()`) is still counted, but `add_directory()` records its root, and inside it only its own `info/exclude` and `.gitignore` files apply, as if git were run there; its own entry is judged by the outer rules, so an ignored nested repo stays out. Outside a repo, the scan root's `.gitignore` stops at each child repo the same way. Any traversal must call `add_directory()` on a directory before judging its children. Tallyman settings (nested configs, `[exclude]` directories and patterns, `[specs]`, spec auto-detection, the default skips) cross repo boundaries on the way down; the config chain above the scan root still stops at the nearest git root (`find_configs()`), so scanning inside a nested repo ignores the outer configs. `tests/test_gitignore.py` checks parity with real `git` (run in every repo), including worktrees, submodules and nested repos; its pattern-compiler table runs without git.
 
-Checks first 8KB for `\x00` byte.
+8. **`[exclude] patterns` are a second `GitIgnoreSpec`.** `GitIgnoreSpec.for_patterns(root)` holds one `add_rules()` layer per config, scoped to that config's directory, so patterns layer like nested `.gitignore` files and a deeper `!` wins. It is separate from the gitignore spec, and the walker checks it last, so `!` never brings back gitignored, hidden, excluded or generated entries. The scan root and its ancestors are never checked, so a parent's pattern can't exclude the scan root. Patterns are kept raw and never rebased, merged or sorted; they travel as `ConfigChain.pattern_layers`, and `--setup` writes `local.patterns` back verbatim. The TUI shows matched directories as "(excluded by pattern)" and locks them, unless a config excludes them: the walker checks config exclusions first, then gitignore, then patterns, and the TUI labels follow that order.
 
-### Config Search Walks Up
-
-`find_config()` walks up from target dir to filesystem root looking for `.tally-config.toml`.
+9. **Terminal and image draw one report model.** `aggregator.py` decides what both outputs show: `active_categories()`, `category_language_list()` (the first three languages, then `, etc`), `bar_segments()` (labels, colours, the 2% threshold, Other; the image passes `max_languages=5`), `segment_widths()` (largest remainder, a minimum per segment, always the full width) and `percent_label()` (`<1%`, `>99%`). `LanguageStats.effective_lines` is the one definition of effective lines. `display.py` and `image.py` only lay this out, so they can't drift; `tests/test_image.py::TestMatchesTerminal` checks they agree.
 
 ## Test Conventions
 
 - Tests use `tmp_path` fixtures extensively
 - Helper functions like `_lang()` create test Language instances
-- Test files map to source modules: `test_walker.py` tests `walker.py`, etc.
+- Test files map to source modules: `test_walker.py` tests `walker.py`, etc.; `test_conventions.py` checks conventions no linter does
+- `tests/conftest.py` holds the `make_fifo` fixture, so a FIFO regression fails instead of hanging the suite
+- Every test function has `-> None`
 
 ## When Adding a New Language
 
-Add a `Language(...)` instance to `languages.py` and include it in the `LANGUAGES` tuple. The `EXTENSION_MAP` is built automatically. Add tests in `test_languages.py`.
+Add a `Language(...)` instance to `languages.py` and include it in the `LANGUAGES` tuple. The `EXTENSION_MAP` is built automatically. Then:
+
+- Check the extensions don't collide with an existing language. Extensions are lowercase; lookup lowercases the suffix.
+- Pick a colour no other language uses. `test_languages.py` checks every colour parses and that no new colour is shared, comparing resolved colours (the card's RGB and the 256-colour index) across languages, spec variants and Other (only C and its header may share one). No language may drop to ANSI `90` on a 16-colour terminal: that is Other's.
+- A new docs language must set `spec_color`: a colour no other entry uses, and one that differs from its docs colour on a 16-colour terminal.
+- Update the README's category table, the per-language extension table, and both "N languages" counts. Recount them against `LANGUAGES`.
+- Add tests in `test_languages.py`.
 
 ## When Adding a New Category
 

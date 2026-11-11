@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Optional
 
@@ -14,8 +14,10 @@ class Language:
     name: str
     category: str  # 'code', 'devops', 'design', 'docs', 'specs' (via as_spec), 'data'
     color: str  # Rich color name
-    single_line_comment: str | None  # e.g. '#', '//', '--'; None if no simple detection
+    single_line_comment: Optional[str]  # e.g. '#', '//', '--'; None if no simple detection
     extensions: tuple[str, ...]
+    # docs languages only: the colour of their as_spec() variant
+    spec_color: Optional[str] = field(default=None, kw_only=True)
 
 
 # fmt: off
@@ -38,7 +40,7 @@ LANGUAGES: tuple[Language, ...] = (
     Language('Lua',          'code',   'blue',            '--', ('.lua',)),
     Language('PHP',          'code',   'medium_purple3',  '//', ('.php',)),
     Language('Perl',         'code',   'grey62',          '#',  ('.pl', '.pm')),
-    Language('R',            'code',   'dodger_blue3',    '#',  ('.r', '.R')),
+    Language('R',            'code',   'dodger_blue3',    '#',  ('.r',)),
     Language('Dart',         'code',   'cyan3',           '//', ('.dart',)),
     Language('Scala',        'code',   'red3',            '//', ('.scala',)),
     Language('Elixir',       'code',   'dark_violet',     '#',  ('.ex', '.exs')),
@@ -63,8 +65,8 @@ LANGUAGES: tuple[Language, ...] = (
     )),
     Language('SVG',          'design', 'gold1',           None, ('.svg',)),
     # --- Docs ---
-    Language('Markdown',     'docs',   'white',           None, ('.md', '.mdx')),
-    Language('reStructuredText', 'docs', 'grey70',        None, ('.rst',)),
+    Language('Markdown',     'docs',   'white',           None, ('.md', '.mdx'), spec_color='violet'),
+    Language('reStructuredText', 'docs', 'grey70',        None, ('.rst',), spec_color='dark_sea_green4'),
     # --- Data ---
     Language('TOML',         'data',   'grey50',          '#',  ('.toml',)),
     Language('YAML',         'data',   'light_pink3',     '#',  ('.yml', '.yaml')),
@@ -73,6 +75,10 @@ LANGUAGES: tuple[Language, ...] = (
     Language('SQL',          'data',   'bright_cyan',     '--', ('.sql',)),
 )
 # fmt: on
+
+# The colour of the bar's and legend's "Other" segment (aggregator.bar_segments). It drops to ANSI 90 on
+# 16-colour terminals, which no language uses, so Other never merges with the segment before it.
+OTHER_COLOR = 'grey37'
 
 
 def _build_extension_map() -> dict[str, Language]:
@@ -143,17 +149,14 @@ def identify_language(path: Path) -> Optional[Language]:
 def as_spec(lang: Language) -> Language:
     """Return a spec-category variant of a docs-category language.
 
-    Creates a Language identical to *lang* but with category='specs'.
+    The variant is identical to *lang* except category 'specs' and colour
+    lang.spec_color, so specs and docs never draw as one bar segment.
     Results are cached since Language is frozen and hashable.
 
-    Raises ValueError if lang.category is not 'docs'.
+    Raises ValueError if lang.category is not 'docs' or lang has no spec_color.
     """
     if lang.category != 'docs':
         raise ValueError(f'as_spec() only applies to docs languages, got {lang.category!r}')
-    return Language(
-        lang.name,
-        'specs',
-        lang.color,
-        lang.single_line_comment,
-        lang.extensions,
-    )
+    if lang.spec_color is None:
+        raise ValueError(f'{lang.name} has no spec_color')
+    return replace(lang, category='specs', color=lang.spec_color, spec_color=None)

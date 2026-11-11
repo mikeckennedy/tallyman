@@ -8,13 +8,13 @@ from tallyman.paths import canonical_case, relative_posix
 
 
 class TestRelativePosix:
-    def test_same_path_is_empty(self):
+    def test_same_path_is_empty(self) -> None:
         assert relative_posix(PurePosixPath('/a/b'), PurePosixPath('/a/b')) == ''
 
-    def test_posix_child(self):
+    def test_posix_child(self) -> None:
         assert relative_posix(PurePosixPath('/a/b/c/d'), PurePosixPath('/a')) == 'b/c/d'
 
-    def test_windows_paths_use_forward_slashes(self):
+    def test_windows_paths_use_forward_slashes(self) -> None:
         """Config and gitignore paths are '/'-separated, so Windows paths must be converted."""
         assert relative_posix(PureWindowsPath('C:\\proj\\src\\vendor'), PureWindowsPath('C:\\proj')) == 'src/vendor'
 
@@ -26,14 +26,14 @@ def _case_insensitive(directory: Path) -> bool:
 
 
 class TestCanonicalCase:
-    def test_existing_spelling_is_unchanged(self, tmp_path: Path):
+    def test_existing_spelling_is_unchanged(self, tmp_path: Path) -> None:
         (tmp_path / 'Src').mkdir()
         assert canonical_case(tmp_path / 'Src') == tmp_path / 'Src'
 
-    def test_missing_path_is_kept_as_typed(self, tmp_path: Path):
+    def test_missing_path_is_kept_as_typed(self, tmp_path: Path) -> None:
         assert canonical_case(tmp_path / 'nope' / 'deeper') == tmp_path / 'nope' / 'deeper'
 
-    def test_mistyped_case_is_corrected(self, tmp_path: Path):
+    def test_mistyped_case_is_corrected(self, tmp_path: Path) -> None:
         if not _case_insensitive(tmp_path):
             pytest.skip('filesystem is case-sensitive')
         (tmp_path / 'src' / 'App').mkdir(parents=True)

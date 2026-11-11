@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -8,13 +9,13 @@ from tallyman.counter import FileCount, count_lines
 from tallyman.languages import Language
 
 
-def _lang(comment: str | None = '#') -> Language:
+def _lang(comment: Optional[str] = '#') -> Language:
     """Helper to build a test language."""
     return Language('Test', 'code', 'white', comment, ('.test',))
 
 
 class TestCountLines:
-    def test_python_style_comments(self, tmp_path: Path):
+    def test_python_style_comments(self, tmp_path: Path) -> None:
         f = tmp_path / 'example.py'
         f.write_text('# comment\ncode = 1\n\nmore_code = 2\n# another comment\n')
         result = count_lines(f, _lang('#'))
@@ -23,7 +24,7 @@ class TestCountLines:
         assert result.blank_lines == 1
         assert result.code_lines == 2
 
-    def test_slash_comments(self, tmp_path: Path):
+    def test_slash_comments(self, tmp_path: Path) -> None:
         f = tmp_path / 'example.js'
         f.write_text('// comment\nlet x = 1;\n\n// another\n')
         result = count_lines(f, _lang('//'))
@@ -32,7 +33,7 @@ class TestCountLines:
         assert result.blank_lines == 1
         assert result.code_lines == 1
 
-    def test_solidity_style_comments(self, tmp_path: Path):
+    def test_solidity_style_comments(self, tmp_path: Path) -> None:
         f = tmp_path / 'Token.sol'
         f.write_text('// SPDX-License-Identifier: MIT\ncontract Token {\n    // storage\n    uint256 totalSupply;\n}\n')
         result = count_lines(f, _lang('//'))
@@ -41,7 +42,7 @@ class TestCountLines:
         assert result.blank_lines == 0
         assert result.code_lines == 3
 
-    def test_dash_comments(self, tmp_path: Path):
+    def test_dash_comments(self, tmp_path: Path) -> None:
         f = tmp_path / 'example.lua'
         f.write_text('-- comment\nprint("hi")\n')
         result = count_lines(f, _lang('--'))
@@ -49,7 +50,7 @@ class TestCountLines:
         assert result.comment_lines == 1
         assert result.code_lines == 1
 
-    def test_no_comment_detection(self, tmp_path: Path):
+    def test_no_comment_detection(self, tmp_path: Path) -> None:
         f = tmp_path / 'example.html'
         f.write_text('<!-- comment -->\n<p>text</p>\n\n')
         result = count_lines(f, _lang(None))
@@ -58,13 +59,13 @@ class TestCountLines:
         assert result.blank_lines == 1
         assert result.code_lines == 2
 
-    def test_empty_file(self, tmp_path: Path):
+    def test_empty_file(self, tmp_path: Path) -> None:
         f = tmp_path / 'empty.py'
         f.write_text('')
         result = count_lines(f, _lang('#'))
         assert result == FileCount(0, 0, 0, 0)
 
-    def test_only_blank_lines(self, tmp_path: Path):
+    def test_only_blank_lines(self, tmp_path: Path) -> None:
         f = tmp_path / 'blanks.py'
         f.write_text('\n\n\n')
         result = count_lines(f, _lang('#'))
@@ -72,19 +73,19 @@ class TestCountLines:
         assert result.blank_lines == 3
         assert result.code_lines == 0
 
-    def test_indented_comment(self, tmp_path: Path):
+    def test_indented_comment(self, tmp_path: Path) -> None:
         f = tmp_path / 'indented.py'
         f.write_text('    # indented comment\n    code()\n')
         result = count_lines(f, _lang('#'))
         assert result.comment_lines == 1
         assert result.code_lines == 1
 
-    def test_nonexistent_file(self, tmp_path: Path):
+    def test_nonexistent_file(self, tmp_path: Path) -> None:
         f = tmp_path / 'nope.py'
         result = count_lines(f, _lang('#'))
         assert result == FileCount(0, 0, 0, 0)
 
-    def test_encoding_errors_handled(self, tmp_path: Path):
+    def test_encoding_errors_handled(self, tmp_path: Path) -> None:
         f = tmp_path / 'bad.py'
         f.write_bytes(b'hello\nworld\xff\n')
         result = count_lines(f, _lang('#'))
@@ -112,19 +113,19 @@ class TestLineEndingsAndEncodings:
             (b'\xff\xfea\x00\n\x00b', 2, 0),  # UTF-16 with an odd byte count
         ],
     )
-    def test_only_real_line_breaks_split_lines(self, tmp_path: Path, data: bytes, total: int, blank: int):
+    def test_only_real_line_breaks_split_lines(self, tmp_path: Path, data: bytes, total: int, blank: int) -> None:
         f = tmp_path / 'x.py'
         f.write_bytes(data)
         result = count_lines(f, _lang('#'))
         assert (result.total_lines, result.blank_lines) == (total, blank)
 
-    def test_utf8_bom_does_not_hide_a_first_line_comment(self, tmp_path: Path):
+    def test_utf8_bom_does_not_hide_a_first_line_comment(self, tmp_path: Path) -> None:
         f = tmp_path / 'bom.py'
         f.write_bytes(b'\xef\xbb\xbf# comment\nx = 1\n')
         assert count_lines(f, _lang('#')) == FileCount(total_lines=2, code_lines=1, comment_lines=1)
 
     @pytest.mark.parametrize('encoding', ['utf-16', 'utf-16-be', 'utf-32', 'utf-32-be'])
-    def test_wide_encodings_with_a_bom(self, tmp_path: Path, encoding: str):
+    def test_wide_encodings_with_a_bom(self, tmp_path: Path, encoding: str) -> None:
         f = tmp_path / 'wide.sql'
         text = '-- comment\nselect 1;\n\n'
         data = text.encode(encoding)

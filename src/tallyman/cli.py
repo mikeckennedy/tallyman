@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import shlex
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
 from tallyman import __version__
 from tallyman.aggregator import aggregate
@@ -18,19 +20,19 @@ from tallyman.config import (
     ConfigError,
     PatternLayer,
     TallyConfig,
-    discover_nested_configs,
     find_configs,
     load_config_chain,
     merge_configs,
     save_config,
-    without_inherited,
 )
 from tallyman.counter import count_lines
 from tallyman.display import display_results
 from tallyman.gitignore import GitIgnoreSpec, load_gitignore
 from tallyman.paths import canonical_case, relative_posix
-from tallyman.tui.setup_app import run_setup
 from tallyman.walker import WalkStats, inside_auto_spec_dir, walk_project
+
+if TYPE_CHECKING:  # Textual is imported only when setup runs: see run_setup()
+    from tallyman.tui.setup_app import SetupResult
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -116,7 +118,44 @@ def _pattern_spec(root: Path, layers: list[PatternLayer]) -> GitIgnoreSpec:
     return spec
 
 
+def run_setup(
+    root: Path,
+    gitignore_spec: GitIgnoreSpec,
+    existing_exclusions: set[str],
+    existing_specs: set[str],
+    *,
+    existing_non_specs: Optional[set[str]] = None,
+    root_auto_spec: bool = False,
+    inherited: Optional[TallyConfig] = None,
+    exclude_patterns: Optional[GitIgnoreSpec] = None,
+) -> Optional[SetupResult]:
+    """Launch the setup TUI (tui.setup_app.run_setup). Textual is imported here, so a plain run never loads it."""
+    from tallyman.tui.setup_app import run_setup as launch
+
+    return launch(
+        root,
+        gitignore_spec,
+        existing_exclusions,
+        existing_specs,
+        existing_non_specs=existing_non_specs,
+        root_auto_spec=root_auto_spec,
+        inherited=inherited,
+        exclude_patterns=exclude_patterns,
+    )
+
+
+def _tolerate_unencodable_stdout() -> None:
+    """Print '?' for characters stdout's encoding can't represent, instead of crashing.
+
+    Directory names, language display names and the image path can hold any character; a cp1252 or ascii
+    stdout can't show them all. stderr needs nothing: Python already opens it with errors='backslashreplace'.
+    """
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(errors='replace')
+
+
 def main() -> None:
+    _tolerate_unencodable_stdout()
     parser = build_parser()
     args = parser.parse_args()
     root = canonical_case(Path(args.path).resolve())
@@ -155,18 +194,15 @@ def main() -> None:
         # First run or --setup: launch TUI. --setup is how a broken config gets repaired, so skip
         # a malformed one with a warning rather than refuse.
         chain = load_config_chain(config_paths, root, on_error=_warn_and_skip(root))
-        # Nested configs' patterns are registered up front so the TUI sees them; the walker skips repeats
-        nested_layers: list[PatternLayer] = []
-        nested = discover_nested_configs(root, nested_layers)
-        exclude_patterns = _pattern_spec(root, chain.pattern_layers + nested_layers)
+        # The TUI reads nested configs as it builds its tree, adding their patterns to this same spec
+        exclude_patterns = _pattern_spec(root, chain.pattern_layers)
         # Parent and nested configs are shown locked; they stay in their own files, which are read on every run
         result = run_setup(
             root,
             gitignore_spec,
             chain.local.excluded_dirs,
             chain.local.spec_dirs,
-            chain.local.non_spec_dirs,
-            nested=nested,
+            existing_non_specs=chain.local.non_spec_dirs,
             inherited=chain.inherited,
             root_auto_spec=root_auto_spec,
             exclude_patterns=exclude_patterns,
@@ -174,8 +210,7 @@ def main() -> None:
         if result is None:
             print('Setup cancelled.')
             sys.exit(0)
-        # Older versions copied parent settings into a new config; drop those copies so each lives in one file
-        local = without_inherited(TallyConfig(*result), chain.inherited)
+        local = TallyConfig(*result)  # only the scan root's own settings: setup drops copies of the others
         try:
             # Setup doesn't edit patterns: keep the scan-root config's own, as written and in order
             save_config(

@@ -8,6 +8,14 @@ paths blur that distinction, which matters once several ``.gitignore`` files
 and ``!`` negations combine, so the patterns are compiled here following
 gitignore(5).
 
+Repositories nest. Nested repositories, submodules and worktrees inside the
+tree are walked with their own rules, as if git were run inside each: the
+enclosing repo's rules stop at a nested repo's root, while the nested repo's
+own directory entry is still judged by them, so one the enclosing repo ignores
+stays out. ``info/exclude`` is found the way git finds it: in the ``.git``
+directory, or through a ``.git`` file's ``gitdir:`` and that git directory's
+``commondir`` (so a worktree uses its main repo's ``info/exclude``).
+
 Known differences from git:
 
 - Matching is always case-sensitive; git on a case-insensitive filesystem
@@ -16,6 +24,23 @@ Known differences from git:
   ``?`` does not match a multi-byte character such as ``é`` there.
 - Git never ignores a file it already tracks. Tallyman can't see the index, so
   a force-added file under an ignored pattern is skipped.
+- Only the repo's own ignore files are read: ``info/exclude`` and the
+  ``.gitignore`` files. The global excludes file (``core.excludesFile``,
+  by default ``~/.config/git/ignore``) is not, so counts don't depend on the
+  machine. Nor are the ``GIT_DIR`` and ``GIT_COMMON_DIR`` environment
+  variables, which git honours (inside hooks, for example); the git directory
+  is always found from ``.git``.
+- Any ``.git`` (directory or file) marks a repository root, the same test
+  :func:`find_git_root` uses. Git requires a valid repository, so to git an
+  empty ``.git`` directory or a ``.git`` file pointing nowhere is an ordinary
+  directory and the enclosing rules continue inside it; here they stop.
+- A ``.gitignore`` or ``info/exclude`` that isn't a regular file (or a symlink
+  to one) is treated as absent; git opens it, and blocks on a FIFO.
+- A ``.gitignore`` that is a symlink to a regular file is read. Git (since
+  2.32) won't follow a symlinked ``.gitignore`` in the working tree and treats
+  it as absent, with a warning; a symlinked ``info/exclude`` it does follow.
+- A worktree whose ``commondir`` file can't be read uses the ``info/exclude``
+  in its own git directory; git refuses to run there.
 """
 
 from __future__ import annotations
@@ -35,12 +60,78 @@ def find_git_root(start: Path) -> Optional[Path]:
     """
     current = start.resolve()
     while True:
-        if (current / '.git').exists():
+        if _has_git(current):
             return current
         parent = current.parent
         if parent == current:
             return None
         current = parent
+
+
+def _has_git(directory: Path) -> bool:
+    """True if *directory* is a repository root: it holds a ``.git`` directory or file, valid or not."""
+    return (directory / '.git').exists()
+
+
+_MAX_PATH_FILE = 1 << 20  # git refuses a .git file larger than this
+
+
+def _read_path_file(path: Path) -> Optional[str]:
+    """The contents of a one-line file holding a path, without git's trailing ``\\n``/``\\r``, or None.
+
+    Only a regular file of at most 1 MB is read, so a FIFO or a huge file can't stall the scan.
+    Bytes that aren't UTF-8 are kept as surrogates, so the path still opens on POSIX.
+    """
+    try:
+        if not path.is_file():
+            return None
+        with path.open('rb') as f:
+            raw = f.read(_MAX_PATH_FILE + 1)
+    except OSError:
+        return None
+    if len(raw) > _MAX_PATH_FILE:
+        return None
+    return raw.decode('utf-8', errors='surrogateescape').rstrip('\r\n')
+
+
+def _git_dir(repo_root: Path) -> Optional[Path]:
+    """The git directory of the repository at *repo_root*, or None if there is none to be found.
+
+    ``.git`` is either that directory or, in worktrees and submodules, a file holding
+    ``gitdir: <path>``, relative to *repo_root* unless absolute. A ``.git`` file without
+    that exact prefix, over 1 MB, or naming a directory with no ``HEAD`` (the cheapest
+    part of git's own check; ``gitdir: ..`` would otherwise read an ``info/exclude`` outside
+    the repo) gives None. Git refuses to run in such a checkout. A ``.git`` directory is
+    taken as it is, as :func:`find_git_root` takes any ``.git``.
+    """
+    dot_git = repo_root / '.git'
+    if dot_git.is_dir():
+        return dot_git
+    contents = _read_path_file(dot_git)
+    if contents is None or not contents.startswith('gitdir: '):
+        return None  # git's prefix is case-sensitive, and the space is required
+    target = contents.removeprefix('gitdir: ')
+    if not target:
+        return None
+    git_dir = repo_root / target
+    return git_dir if (git_dir / 'HEAD').exists() else None
+
+
+def _info_exclude(repo_root: Path) -> Optional[Path]:
+    """The ``info/exclude`` git reads for the repository at *repo_root*, or None.
+
+    It lives in the common directory: the git directory itself, or, when that holds a
+    ``commondir`` file, the directory named there (relative to the git directory unless
+    absolute). Worktrees share the main repo's ``info/exclude`` that way, and git doesn't
+    read one in a worktree's own git directory (checked against git 2.54). An unreadable
+    ``commondir`` falls back to the git directory; git refuses to run then.
+    """
+    git_dir = _git_dir(repo_root)
+    if git_dir is None:
+        return None
+    commondir = _read_path_file(git_dir / 'commondir')
+    common = git_dir / commondir if commondir is not None else git_dir
+    return common / 'info' / 'exclude'
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +256,9 @@ def _glob_to_regex(glob: str) -> Optional[str]:
                 return None
             regex, i = translated
             out.append(regex)
-        elif c == '\\' and i + 1 < len(glob):
+        elif c == '\\':
+            if i + 1 == len(glob):
+                return None  # a trailing unescaped backslash makes the whole pattern invalid in git
             out.append(re.escape(glob[i + 1]))
             i += 2
         else:
@@ -174,12 +267,35 @@ def _glob_to_regex(glob: str) -> Optional[str]:
     return ''.join(out)
 
 
+def _trim_trailing_spaces(line: str) -> str:
+    """Drop trailing spaces that aren't escaped, following git's ``trim_trailing_spaces()``.
+
+    A backslash escapes exactly the next character, so in ``c\\\\ `` (an escaped backslash,
+    then a space) the space is trailing and goes, while ``foo\\ `` keeps its escaped space.
+    A line ending in a lone backslash is returned as it is; the glob then rejects it.
+    """
+    run_start: Optional[int] = None  # where the current run of unescaped spaces began
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if c == ' ':
+            if run_start is None:
+                run_start = i
+        else:
+            if c == '\\':
+                i += 1
+                if i == len(line):
+                    return line
+            run_start = None
+        i += 1
+    return line if run_start is None else line[:run_start]
+
+
 def _parse_line(line: str) -> Optional[_Pattern]:
     """Compile one .gitignore line, or return None for blanks, comments and patterns that can never match."""
     if not line or line.startswith('#'):
         return None
-    while line.endswith(' ') and not line.endswith('\\ '):
-        line = line[:-1]  # trailing spaces are ignored unless escaped
+    line = _trim_trailing_spaces(line)
 
     negate = line.startswith('!')
     if negate:
@@ -228,7 +344,7 @@ class GitIgnoreSpec:
     Each ignore file applies only to entries beneath the directory that owns it,
     and its patterns are matched relative to that directory. When several files
     have an opinion on an entry, the deepest one wins, so a nested ``!pattern``
-    can re-include what a parent ignored. ``.git/info/exclude`` ranks below every
+    can re-include what a parent ignored. ``info/exclude`` ranks below every
     ``.gitignore``, as in git.
 
     Callers pass paths relative to the analysis root, with a trailing ``/`` for
@@ -238,6 +354,15 @@ class GitIgnoreSpec:
     descend into an ignored directory. ``.gitignore`` files below the analysis
     root are registered with :meth:`add_directory` as the tree is walked, so an
     instance is bound to one analysis root and must not be reused for another.
+
+    Repository boundaries: :meth:`add_directory` also notices nested git
+    repositories (submodules and worktrees included). Inside one, only its own
+    ``info/exclude`` and ``.gitignore`` files apply, so the enclosing repo's
+    rules, its ``!`` negations included, stop at its root. The nested repo's own
+    directory entry belongs to the enclosing tree and is judged by the enclosing
+    rules, so an ignored nested repo is never entered. ``[exclude] patterns``
+    specs (:meth:`for_patterns`) never call :meth:`add_directory`, so they never
+    see repository boundaries: they are tallyman settings, not git rules.
     """
 
     def __init__(self, prefix: str = '', anchor: Optional[Path] = None) -> None:
@@ -248,13 +373,17 @@ class GitIgnoreSpec:
         self._files: list[tuple[str, _IgnoreFile]] = []
         self._loaded: set[tuple[str, str]] = set()
         self._ignore_all = False
+        # Bases (relative to the anchor) of nested repositories found below the analysis root. The repo
+        # for_root() found, or the analysis root outside a repo, owns everything else and isn't listed.
+        self._repo_roots: set[str] = set()
 
     @classmethod
     def for_root(cls, root: Path) -> GitIgnoreSpec:
         """Build the rules that apply at *root*, traversing up to find the git repo root.
 
         Registers, in increasing precedence:
-        - ``<git-root>/.git/info/exclude``
+        - The repo's ``info/exclude`` (found through a ``.git`` file's ``gitdir:`` and
+          ``commondir`` in worktrees and submodules)
         - ``<git-root>/.gitignore``
         - Any ``.gitignore`` in directories between the git root and *root*
 
@@ -272,7 +401,8 @@ class GitIgnoreSpec:
             return spec
 
         spec = cls(relative_posix(resolved_root, git_root), git_root)
-        spec._add_file('', git_root / '.git' / 'info' / 'exclude')
+        if (exclude := _info_exclude(git_root)) is not None:
+            spec._add_file('', exclude)
         spec._add_file('', git_root / '.gitignore')
 
         current = git_root
@@ -307,6 +437,8 @@ class GitIgnoreSpec:
         analysis root, a directory above it inside the repo, or one below it.
         Registering the same directory twice is a no-op, and a directory outside
         the repo (or, outside a repo, outside the analysis root) is ignored.
+        Pattern layers apply across nested repositories, since they are tallyman
+        settings, not git rules.
         """
         if self._anchor is None:
             raise ValueError('add_rules() needs a spec from GitIgnoreSpec.for_patterns() or for_root()')
@@ -318,9 +450,18 @@ class GitIgnoreSpec:
     def add_directory(self, rel_dir: str, dir_path: Path) -> None:
         """Register ``dir_path/.gitignore``, where *rel_dir* is its path relative to the analysis root.
 
+        If *dir_path* is the root of a nested git repository (it has a ``.git`` directory or file), it
+        starts a new set of rules: inside it, only its own ``info/exclude`` and ``.gitignore`` files apply,
+        as if git were run there. The directory's own entry was already judged by the enclosing rules.
+
         Missing or unreadable files are skipped, and registering the same directory twice is a no-op.
         """
         base = '/'.join(part for part in (self._prefix, rel_dir) if part)
+        # The analysis root's own repo is set up by for_root(); only directories below it can start a new one
+        if rel_dir and base not in self._repo_roots and _has_git(dir_path):
+            self._repo_roots.add(base)
+            if (exclude := _info_exclude(dir_path)) is not None:
+                self._add_file(base, exclude)
         self._add_file(base, dir_path / '.gitignore')
 
     def match_file(self, path: str) -> bool:
@@ -333,9 +474,16 @@ class GitIgnoreSpec:
         return self._is_ignored(full, is_dir)
 
     def _add_file(self, base: str, ignore_file: Path) -> None:
-        """Register *ignore_file*, scoped to *base* (relative to the git root)."""
+        """Register *ignore_file*, scoped to *base* (relative to the git root).
+
+        Only a regular file is read (``is_file()``, which follows a symlink), so a FIFO
+        named ``.gitignore`` or ``info/exclude`` can't block the walk.
+        """
         if (base, ignore_file.name) in self._loaded:
             return
+        if not ignore_file.is_file():
+            self._loaded.add((base, ignore_file.name))
+            return  # missing, or not a regular file: treated as absent
         try:
             lines = _split_lines(ignore_file.read_bytes().decode('utf-8-sig', errors='replace'))
         except OSError:
@@ -350,15 +498,29 @@ class GitIgnoreSpec:
             return
         self._loaded.add(key)
         self._files.append((base, _IgnoreFile(lines)))
-        # Shallowest first; the sort is stable, so info/exclude stays ahead of the root .gitignore.
+        # Shallowest first; the sort is stable, so info/exclude stays ahead of the root .gitignore. That holds
+        # for a nested repo too: add_directory() registers its info/exclude before its .gitignore, at one base.
         self._files.sort(key=lambda item: item[0].count('/') + 1 if item[0] else 0)
+
+    def _owner(self, full: str) -> str:
+        """The deepest nested repository root strictly above *full*, or ``''`` for the analysis root's repo."""
+        end = full.rfind('/')
+        while end > 0:
+            if (prefix := full[:end]) in self._repo_roots:
+                return prefix
+            end = full.rfind('/', 0, end)
+        return ''
 
     def _is_ignored(self, full: str, is_dir: bool) -> bool:
         """Judge one entry, given as a path relative to the git root."""
         if self._ignore_all:
             return True
+        # Inside a nested repository only its own layers count: those based at its root or below it
+        owner = self._owner(full) if self._repo_roots else ''
         ignored = False
         for base, ignore_file in self._files:
+            if owner and base != owner and not base.startswith(owner + '/'):
+                continue
             if base:
                 if not full.startswith(base + '/'):
                     continue

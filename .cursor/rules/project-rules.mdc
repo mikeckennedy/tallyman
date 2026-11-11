@@ -21,11 +21,12 @@ Linear pipeline - each stage feeds the next:
 
 ```
 cli.main()
-  → Load/create .tally-config.toml (or launch TUI)
+  → Load every .tally-config.toml from the git root down (or launch TUI)
   → walker.walk_project()    yields (path, Language) tuples
   → counter.count_lines()    returns FileCount per file
   → aggregator.aggregate()   produces TallyResult
   → display.display_results() renders to terminal
+  → image.generate_image()   optional PNG (--image / --image-light)
 ```
 
 ### Repository Structure
@@ -47,15 +48,19 @@ tallyman                    # analyze current directory
 tallyman /path/to/project   # analyze specific path
 tallyman --setup            # re-run interactive TUI setup
 tallyman --no-color         # disable colors
+tallyman --with-spaces      # totals and bar use total lines, not effective lines
+tallyman --image            # PNG summary card on the Desktop (--image-light for the light theme)
 
 # Tests
 pytest                      # all tests
 pytest -v                   # verbose
 pytest tests/test_walker.py # single module
 
-# Lint & Format
+# Lint, format, type check (all must be clean)
 ruff check src/ tests/
 ruff format src/ tests/
+uvx ty check
+uvx pyrefly check
 ```
 
 ## Module Map and Test Structure
@@ -69,7 +74,7 @@ See `CLAUDE.md`, which is kept current: module map, data structures, design deci
 - No other env vars needed
 - Entry point defined in `pyproject.toml`: `tallyman = "tallyman.cli:main"`
 - Auto-detected spec dirs: `specs/`, `plans/`, `specifications/`, `agents/` - detected even without config, unless listed in `[specs] ignore`
-- Gitignore follows git: `.git/info/exclude` and every `.gitignore` in the tree, each scoped to its own directory (`gitignore.py`)
+- Gitignore follows git: `info/exclude` (also in worktrees and submodules) and every `.gitignore` in the tree, each scoped to its own directory; a nested repo uses only its own rules (`gitignore.py`)
 
 ## History of Changes and Motivation
 
@@ -87,7 +92,7 @@ Remember to update the plan document when progress is made so we can understand 
 
 ### Adding a New Language
 
-Add a `Language(...)` instance to `languages.py` and include it in the `LANGUAGES` tuple. The `EXTENSION_MAP` is built automatically. Add tests in `test_languages.py`.
+Add a `Language(...)` instance to `languages.py` and include it in the `LANGUAGES` tuple. The `EXTENSION_MAP` is built automatically. Then follow the checklist in `CLAUDE.md` ("When Adding a New Language"): lowercase extensions that don't collide, an unshared colour, `spec_color` for a docs language, the README tables and counts, and tests in `test_languages.py`.
 
 ### Adding a New Category
 
@@ -98,4 +103,4 @@ Update `aggregator.py` category ordering, `display.py` rendering, and ensure wal
 1. Plan in `/plans` if it's a large feature
 2. Implement in the appropriate module(s)
 3. Add tests in `tests/`
-4. Run `pytest` and `ruff check src/ tests/` before considering it done
+4. Run `pytest`, `ruff check src/ tests/`, `ruff format --check src/ tests/`, `uvx ty check` and `uvx pyrefly check` before considering it done

@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and never resets (see `CLAUDE.md`).
 
-## 0.4.3 - UNRELEASED
+## 0.4.3 - 2026-11-11
 
 ### Added
 - New `[exclude] patterns = [...]` config key: gitignore-style patterns, matched relative to the directory of the config that declares them, for files a directory exclude can't reach, such as Rust's `src/routing/tests.rs` beside `src/routing.rs` (issue #6). A pattern without a slash matches at any depth, a trailing `/` matches directories, and a deeper config's `!pattern` can bring back what a shallower config's pattern excluded. Patterns never bring back gitignored files, excluded or hidden directories, or the default skips, and a parent config's patterns never exclude the scanned directory itself. Setup shows directories a pattern excludes as locked and keeps the patterns, in order, when it rewrites the config.
@@ -22,6 +22,31 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - Plan: `plans/005-hardening/phase-03-spec-overrides-and-tui.plan.md`
 
 ### Changed
+- The image card's legend marks each entry with a square swatch in its bar segment's colour, so a language can be matched to its block by colour rather than by position. The `·` separators are gone; the terminal legend already coloured each label and is unchanged.
+- Files: `src/tallyman/image.py`, `tests/test_image.py`, `README.md`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
+- The language list on each category line (the first three, then `, etc`) comes from one function in the shared report model, `category_language_list()`, instead of a copy in each output. Output unchanged.
+- Files: `src/tallyman/aggregator.py`, `src/tallyman/display.py`, `src/tallyman/image.py`, `tests/test_aggregator.py`, `CLAUDE.md`, `.cursor/rules/coding-guidelines.mdc`, `plans/006-tallyman-architect.plan.md`
+- Every optional type hint is `Optional[X]`, and `tests/test_conventions.py` fails the suite on any `X | None`, `None | X` or `Union[..., None]` annotation, including quoted ones. Ruff's whole `ANN` rule set is on for `src/` and `tests/`, so every function, each test included, has full annotations, and Pyrefly treats `unnecessary-type-conversion` as an error. Annotations only; nothing a user sees changes.
+- Files: `ruff.toml`, `pyrefly.toml`, `src/tallyman/image.py`, `src/tallyman/languages.py`, `src/tallyman/walker.py`, `tests/`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
+- Plan: `plans/012-housekeeping/phase-01-type-hints.plan.md`
+- R's extension list drops `.R`, which never matched anything because lookup lowercases the suffix; `analysis.R` still counts as R, and a test keeps every registered extension lowercase. The README says extensions match in any case and spells out when first-run setup launches (no config in the scanned directory or above it, and a terminal), and a test checks that a parent config alone skips setup. `CLAUDE.md` and `.cursor/rules/` describe the current code again.
+- Files: `src/tallyman/languages.py`, `tests/test_languages.py`, `tests/test_cli.py`, `README.md`, `CLAUDE.md`, `.cursor/rules/`, `plans/006-tallyman-architect.plan.md`
+- Plan: `plans/012-housekeeping/phase-02-docs-and-recount.plan.md`
+- A plain run no longer imports Textual; only setup loads it. That roughly halves start-up: importing `tallyman.cli` went from about 75 ms to about 33 ms. A test checks that a plain run, with or without a config, loads neither Textual nor Pillow.
+- Files: `src/tallyman/cli.py`, `tests/test_cli.py`, `CLAUDE.md`
+- Plan: `plans/011-setup-tui/phase-01-lazy-textual-and-text-labels.plan.md`
+- Setup reads nested configs only where the walker would: not inside gitignored, pattern-excluded or hidden directories, or ones a parent or nested config excludes. It still reads the ones beneath the scanned directory's own exclusions, since those can be lifted in setup. It no longer walks the whole tree first to find them, so setup on a project with a large gitignored `node_modules` opens without that extra walk (about 0.3 s on 12,000 ignored directories). A config the walker never reads can no longer make setup drop a scan-root entry as a copy of it.
+- Directories excluded by a parent or nested config are shown in setup without their contents.
+- Files: `src/tallyman/tui/setup_app.py`, `src/tallyman/config.py`, `src/tallyman/cli.py`, `tests/test_setup_app.py`, `tests/test_config.py`, `tests/test_cli.py`, `README.md`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
+- Plan: `plans/011-setup-tui/phase-03-nested-configs-in-populate.plan.md`
+- Nested git repositories, including submodules and worktrees inside the tree, are still counted, but now with their own rules: inside one, only its own `.gitignore` files and `info/exclude` apply, as if git were run there, and the outer repository's patterns stop at its root. A nested repository the outer one ignores stays out. When the scanned folder isn't itself a repository, its .gitignore likewise stops at each repository inside it. `[exclude]` and `[specs]` settings apply across repository boundaries as before.
+- Files: `src/tallyman/gitignore.py`, `src/tallyman/walker.py`, `src/tallyman/tui/setup_app.py`, `tests/test_gitignore.py`, `tests/test_walker.py`, `tests/test_setup_app.py`, `tests/test_cli.py`, `CLAUDE.md`
+- Plan: `plans/010-git-fidelity/phase-02-nested-repos.plan.md`
+- The image card's bar now folds languages past the fifth into Other, as its legend already did, so every coloured block on the card has a legend entry.
+- A legend share that isn't zero but rounds to 0% reads `<1%`, and one that rounds to 100% while something else is listed reads `>99%`, in the terminal and on the image.
+- The terminal report and the image card now get their categories, totals, bar segments, legend labels and segment widths from one report model in `aggregator.py` (`active_categories()`, `bar_segments()`, `segment_widths()`, `percent_label()`), so they can't disagree; a test checks that they don't. The image no longer imports from `display.py`.
+- Files: `src/tallyman/aggregator.py`, `src/tallyman/languages.py`, `src/tallyman/display.py`, `src/tallyman/image.py`, `tests/test_aggregator.py`, `tests/test_display.py`, `tests/test_image.py`, `CLAUDE.md`
+- Plan: `plans/008-output-hardening/phase-01-shared-report-model.plan.md`
 - The image card's attribution footer links to mkennedy.codes/tools/tallyman.
 - Files: `src/tallyman/image.py`
 - Removed the `pathspec` dependency; tallyman now compiles gitignore patterns itself (`src/tallyman/gitignore.py`).
@@ -36,8 +61,44 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - In setup, `x` now works on a directory whose spec setting comes from a nested config; only exclusions set in another config are locked. The walker already honoured such an exclusion.
 - Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/walker.py`, `src/tallyman/tui/setup_app.py`, `tests/test_config.py`, `tests/test_cli.py`, `tests/test_walker.py`, `tests/test_setup_app.py`
 - Plan: `plans/007-exclude-patterns/phase-01-merge-config-chain.plan.md`
+- README, `CLAUDE.md` and `gitignore.py`'s docstring describe worktrees, submodules and nested repositories. The README has a new "Git repositories inside your project" section listing the differences users meet, including the global excludes file and symlinked `.gitignore` files (tallyman reads them; git skips them). The docstring has the full list, including the `GIT_DIR` and `GIT_COMMON_DIR` environment variables.
+- Files: `README.md`, `CLAUDE.md`, `src/tallyman/gitignore.py`, `plans/006-tallyman-architect.plan.md`
+- Plan: `plans/010-git-fidelity/phase-03-docs.plan.md`
 
 ### Fixed
+- An image card legend too long for one row, such as five long names like `reStructuredText (specs)`, wraps onto more rows instead of running off the card's right edge, and the card grows to fit. A category line whose language list is too wide is shortened with an ellipsis, as the title already was.
+- The image card's bar is `BAR_HEIGHT` (28) px tall, not 29, with 2 px gaps between segments, not 1, and it now ends flush with the content's right edge instead of 2 px short of the legend and footer. The separator line above `Total:` no longer runs 1 px past that edge. Pillow's rectangle and line corners are inclusive, and the old coordinates weren't.
+- Files: `src/tallyman/image.py`, `tests/test_image.py`, `README.md`, `CLAUDE.md`
+- Setup shows directory names exactly as they are on disk. A directory named `:rocket:` no longer turns into an emoji, and a name ending in a backslash is no longer doubled, in the tree and on the root. The labels are built as Rich `Text`, never markup.
+- Files: `src/tallyman/tui/setup_app.py`, `tests/test_setup_app.py`
+- Plan: `plans/011-setup-tui/phase-01-lazy-textual-and-text-labels.plan.md`
+- Setup drops scan-root copies of nested config settings, as it already did for parent settings, and now does both when it opens as well as on save. Earlier versions wrote these copies, and they could never be removed in setup, so removing the nested setting later left the directory excluded. A copy is the same directory in the same list; a scan-root entry that overrides a parent's, or that a nested config overrides, stays. No message: the dropped settings still apply from their own files, so the counts don't change.
+- A directory a config excludes is labelled as excluded by that config (`✗ name`), even when gitignore or a pattern also matches it, matching the walker, which checks config exclusions first. A redundant scan-root exclusion there can now be toggled off, after which the label reads "(gitignored)" or "(excluded by pattern)".
+- `--setup` no longer hangs when the scanned directory's `.tally-config.toml` is a named pipe (FIFO) or another non-regular file: saving refuses it with the usual "could not save" warning and counts with the chosen settings for that run. A dangling symlink there is refused the same way, rather than creating its target wherever it points.
+- Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/tui/setup_app.py`, `tests/conftest.py`, `tests/test_config.py`, `tests/test_setup_app.py`, `tests/test_cli.py`, `README.md`, `CLAUDE.md`
+- Plan: `plans/011-setup-tui/phase-02-precedence-and-copies.plan.md`
+- A project with no effective lines (only comments and blanks) no longer prints an empty bar and legend under the totals, and the image no longer leaves a blank band where the bar would be. The totals still say `0 lines`. With `--with-spaces` the bar is drawn as before.
+- A small "Other" always gets at least one cell of the terminal bar. Python 496, Rust 496 and Go 8 lines used to give Python and Rust 30 cells each and leave Other, still listed in the legend, with none. Bar widths are now split by largest remainder, in both outputs, and always fill the bar exactly.
+- `--image` no longer crashes with `ValueError: x1 must be greater than or equal to x0` when "Other" is under about 0.1% of the lines; every image segment is at least 4 px wide.
+- Files: `src/tallyman/aggregator.py`, `src/tallyman/languages.py`, `src/tallyman/display.py`, `src/tallyman/image.py`, `tests/test_aggregator.py`, `tests/test_display.py`, `tests/test_image.py`, `CLAUDE.md`
+- Plan: `plans/008-output-hardening/phase-01-shared-report-model.plan.md`
+- A named pipe (FIFO) with a source-file extension, or named `.gitignore`, no longer hangs the scan. Only regular files are read: FIFOs, sockets and devices are skipped like symlinks, and a `.gitignore` or `.git/info/exclude` that isn't a regular file, or a symlink to one, is treated as absent.
+- Files: `src/tallyman/walker.py`, `src/tallyman/gitignore.py`, `tests/conftest.py`, `tests/test_walker.py`, `tests/test_gitignore.py`, `README.md`, `CLAUDE.md`
+- Plan: `plans/008-output-hardening/phase-02-files-stdout-config.plan.md`
+- A terminal whose encoding can't show a character (Windows cp1252, `PYTHONIOENCODING=ascii`) gets `?` instead of a crash, and the legend separator falls back to `|` with the rest of the ASCII output. An encoding with box drawing but no `·` (such as cp852) now gets the ASCII report too.
+- Files: `src/tallyman/cli.py`, `src/tallyman/display.py`, `tests/test_cli.py`, `tests/test_display.py`, `CLAUDE.md`
+- Plan: `plans/008-output-hardening/phase-02-files-stdout-config.plan.md`
+- A `.tally-config.toml` saved with a byte-order mark loads instead of failing with "Invalid statement". A UTF-8, UTF-16 or UTF-32 mark picks the encoding, as it does for source files; `--setup` rewrites the file as UTF-8 without one.
+- Files: `src/tallyman/config.py`, `tests/test_config.py`, `tests/test_cli.py`, `README.md`, `CLAUDE.md`
+- Plan: `plans/008-output-hardening/phase-02-files-stdout-config.plan.md`
+- Spec and docs Markdown no longer merge into one block in the composition bar. Spec variants of docs languages now have their own colour (Markdown violet, reStructuredText dark sea green), in every terminal colour mode and on the image card.
+- The bar's "Other" segment is now dark grey (`grey37`). It no longer merges with TOML, or with Markdown on 16-colour terminals.
+- Files: `src/tallyman/languages.py`, `tests/test_languages.py`, `tests/test_display.py`, `tests/test_image.py`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
+- Plan: `plans/009-spec-colours.plan.md`
+- `.git/info/exclude` is now honoured in git worktrees and submodules, where `.git` is a file pointing at the real git directory. Worktrees use the main repository's `info/exclude`, as git does. A `.git` file that is malformed, over 1 MB, or points at a directory with no `HEAD` (such as `gitdir: ..`) means no `info/exclude`, never an error; git refuses to run in such a checkout.
+- A gitignore or `[exclude]` pattern ending in a lone backslash (`a\`) now matches nothing, as in git, instead of matching a name ending in `\`; `!a\` no longer re-includes anything. An escaped backslash before trailing spaces (`a\\ `) no longer keeps the spaces.
+- Files: `src/tallyman/gitignore.py`, `tests/test_gitignore.py`, `CLAUDE.md`, `plans/006-tallyman-architect.plan.md`
+- Plan: `plans/010-git-fidelity/phase-01-gitdir-and-escapes.plan.md`
 - An empty `NO_COLOR` no longer disables colour; per no-color.org only a non-empty value does.
 - Solidity's colour changed from `bright_cyan`, which SQL also uses, to `slate_blue1`, so the two are distinguishable in the bar.
 - README and `CLAUDE.md` describe the current behaviour: config search and rebasing, `[specs] ignore`, `"."`, no-terminal runs, what is never counted, and the language count (43, not 41).
@@ -64,7 +125,6 @@ and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and 
 - If setup can't save the config, tallyman warns and still counts with the chosen settings instead of crashing. A closed stdin no longer crashes, and a path typed in the wrong case on macOS (`proj/SRC`) no longer defeats config matching.
 - Files: `src/tallyman/config.py`, `src/tallyman/cli.py`, `src/tallyman/walker.py`, `tests/test_config.py`, `tests/test_cli.py`
 - Plan: `plans/005-hardening/phase-02-config-handling.plan.md`
-
 - Gitignore handling rewritten to follow git's rules, in the walker and the setup TUI alike:
   - `.gitignore` files below the scanned directory are honoured, including the `*` file uv and virtualenv write inside a venv.
   - Each file's patterns are anchored to the directory it lives in, and a deeper file wins, so `!pattern` can re-include.

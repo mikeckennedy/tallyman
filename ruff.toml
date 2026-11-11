@@ -3,8 +3,9 @@ line-length = 120
 src = ["src"]
 format.quote-style = "single"
 
-# pycodestyle errors (E) and warnings (W), Pyflakes (F), isort (I)
-lint.select = ["E", "F", "W", "I"]
+# pycodestyle errors (E) and warnings (W), Pyflakes (F), isort (I), annotations (ANN), tests included.
+# No UP: UP045 rewrites Optional[X] to X | None, the opposite of CLAUDE.md; tests/test_conventions.py enforces Optional.
+lint.select = ["E", "F", "W", "I", "ANN"]
 lint.ignore = []
 
 # Exclude a variety of commonly ignored directories.

@@ -9,20 +9,30 @@ from rich.console import Console
 from rich.text import Text
 
 from tallyman import __version__
-from tallyman.aggregator import CATEGORY_DISPLAY_NAMES, TallyResult, language_percentages
+from tallyman.aggregator import (
+    BarSegment,
+    TallyResult,
+    active_categories,
+    bar_segments,
+    category_language_list,
+    language_display_names,
+    percent_label,
+    segment_widths,
+)
 from tallyman.languages import Language
 from tallyman.walker import WalkStats
 
 
 def _can_encode_unicode() -> bool:
-    """Check whether stdout can handle Unicode box-drawing characters.
+    """Check whether stdout can encode every non-ASCII character the report draws: rule, bar block and legend dot.
 
     On Windows with Git Bash (cp1252 encoding), the box-drawing and block
-    characters cause UnicodeEncodeError.  Fall back to ASCII in that case.
+    characters cause UnicodeEncodeError. Fall back to ASCII for all of them in
+    that case, so the report never mixes the two.
     """
     encoding = getattr(sys.stdout, 'encoding', None) or 'ascii'
     try:
-        '─█'.encode(encoding)
+        '─█·'.encode(encoding)
         return True
     except UnicodeEncodeError, LookupError:
         return False
@@ -33,7 +43,7 @@ HORIZONTAL_RULE = '─' if _USE_UNICODE else '-'
 BLOCK_CHAR = '█' if _USE_UNICODE else '#'
 
 BAR_WIDTH = 60
-SMALL_LANGUAGE_THRESHOLD = 2.0  # Percentage below which languages are grouped as "Other"
+LEGEND_SEPARATOR = '  ·  ' if _USE_UNICODE else '  |  '
 
 
 def display_results(
@@ -60,12 +70,10 @@ def display_results(
         _display_pattern_note(console, stats)
         return
 
-    display_names = _language_display_names(result)
-
-    _display_languages(console, result, display_names)
+    _display_languages(console, result, language_display_names(result))
     _display_separator(console)
     _display_category_totals(console, result, with_spaces=with_spaces)
-    _display_percentage_bar(console, result, display_names, with_spaces=with_spaces)
+    _display_percentage_bar(console, result, with_spaces=with_spaces)
     _display_pattern_note(console, stats)
 
 
@@ -114,22 +122,6 @@ def _language_header(name: str, color: str) -> str:
     return f'[{color}]{HORIZONTAL_RULE * left}{label}{HORIZONTAL_RULE * right}[/{color}]'
 
 
-def _language_display_names(result: TallyResult) -> dict[Language, str]:
-    """Build display names, appending category when a language name appears in multiple categories."""
-    name_categories: dict[str, set[str]] = {}
-    for stats in result.by_language:
-        name_categories.setdefault(stats.language.name, set()).add(stats.language.category)
-
-    display_names: dict[Language, str] = {}
-    for stats in result.by_language:
-        if len(name_categories[stats.language.name]) > 1:
-            cat_label = CATEGORY_DISPLAY_NAMES.get(stats.language.category, stats.language.category)
-            display_names[stats.language] = f'{stats.language.name} ({cat_label.lower()})'
-        else:
-            display_names[stats.language] = stats.language.name
-    return display_names
-
-
 def _display_languages(console: Console, result: TallyResult, display_names: dict[Language, str]) -> None:
     for stats in result.by_language:
         lang = stats.language
@@ -138,15 +130,14 @@ def _display_languages(console: Console, result: TallyResult, display_names: dic
         console.print(_language_header(name, lang.color))
 
         total_str = f'{stats.total_lines:,}'
+        effective_str = f'{stats.effective_lines:,}'
 
         if lang.single_line_comment is not None:
-            effective_str = f'{stats.non_blank_non_comment:,}'
             console.print(f'  {total_str:>10} lines of code')
             console.print(f'  {effective_str:>10} excluding comments and blank lines')
         else:
-            non_blank_str = f'{stats.non_blank:,}'
             console.print(f'  {total_str:>10} lines')
-            console.print(f'  {non_blank_str:>10} excluding blank lines')
+            console.print(f'  {effective_str:>10} excluding blank lines')
 
 
 def _display_separator(console: Console) -> None:
@@ -154,75 +145,43 @@ def _display_separator(console: Console) -> None:
 
 
 def _display_category_totals(console: Console, result: TallyResult, *, with_spaces: bool = False) -> None:
-    active_categories = sorted(
-        (c for c in result.by_category if c.total_lines > 0),
-        key=lambda c: c.total_lines if with_spaces else c.effective_lines,
-        reverse=True,
-    )
-    if not active_categories:
+    categories = active_categories(result, with_spaces=with_spaces)
+    if not categories:
         return
 
     console.print('  [bold]Totals:[/bold]')
 
-    max_name_len = max(max(len(c.name) for c in active_categories), len('Combined'))
+    max_name_len = max(max(len(c.name) for c in categories), len('Combined'))
 
-    for cat in active_categories:
-        # Build the parenthetical language list
-        if len(cat.languages) <= 3:
-            lang_list = ' + '.join(cat.languages)
-        else:
-            lang_list = ' + '.join(cat.languages[:3]) + ', etc'
-
-        lines = cat.total_lines if with_spaces else cat.effective_lines
+    for cat in categories:
+        lines = cat.shown_lines(with_spaces=with_spaces)
         padded_name = f'{cat.name}:'
-        console.print(f'  {padded_name:<{max_name_len + 1}} {lines:>10,} lines ({lang_list})')
+        console.print(f'  {padded_name:<{max_name_len + 1}} {lines:>10,} lines ({category_language_list(cat)})')
 
-    combined = sum(c.total_lines if with_spaces else c.effective_lines for c in active_categories)
+    combined = sum(c.shown_lines(with_spaces=with_spaces) for c in categories)
     console.print(f'  [bold]{"Combined:":<{max_name_len + 1}} {combined:>10,} lines[/bold]')
 
 
-def _display_percentage_bar(
-    console: Console, result: TallyResult, display_names: dict[Language, str], *, with_spaces: bool = False
-) -> None:
-    if result.grand_total_lines == 0:
+def _display_percentage_bar(console: Console, result: TallyResult, *, with_spaces: bool = False) -> None:
+    segments = bar_segments(result, with_spaces=with_spaces)
+    if not segments:  # nothing to share out (no effective lines): no blank line, bar or legend
         return
 
     console.print()
-
-    percentages = language_percentages(result, with_spaces=with_spaces)
-
-    # Group small languages into "Other"
-    main_langs: list[tuple[Language | None, float]] = [
-        (lang, pct) for lang, pct in percentages if pct >= SMALL_LANGUAGE_THRESHOLD
-    ]
-    other_pct = sum(pct for _, pct in percentages if pct < SMALL_LANGUAGE_THRESHOLD)
-    if other_pct > 0:
-        main_langs.append((None, other_pct))
-
-    # Build the colored bar
-    bar = Text()
-    chars_used = 0
-    for i, (lang, pct) in enumerate(main_langs):
-        color = lang.color if lang else 'grey50'
-        if i == len(main_langs) - 1:
-            segment_width = BAR_WIDTH - chars_used
-        else:
-            segment_width = max(1, round(pct / 100 * BAR_WIDTH))
-            segment_width = min(segment_width, BAR_WIDTH - chars_used)
-        if segment_width > 0:
-            bar.append(BLOCK_CHAR * segment_width, style=color)
-            chars_used += segment_width
-
     console.print('  ', end='')
-    console.print(bar)
+    console.print(_bar_text(segments))
+    console.print(f'  {_legend_text(segments)}')
 
-    # Legend line
-    legend_parts = []
-    for lang, pct in main_langs:
-        if lang is None:
-            legend_parts.append(f'[grey50]Other[/grey50] {pct:.0f}%')
-        else:
-            name = display_names.get(lang, lang.name)
-            legend_parts.append(f'[{lang.color}]{name}[/{lang.color}] {pct:.0f}%')
-    legend = '  ·  '.join(legend_parts)
-    console.print(f'  {legend}')
+
+def _bar_text(segments: list[BarSegment]) -> Text:
+    """The coloured bar, BAR_WIDTH cells wide, with at least one cell for every segment."""
+    bar = Text()
+    widths = segment_widths([s.percent for s in segments], BAR_WIDTH, 1)
+    for segment, width in zip(segments, widths):
+        bar.append(BLOCK_CHAR * width, style=segment.color)
+    return bar
+
+
+def _legend_text(segments: list[BarSegment]) -> str:
+    """The legend under the bar, as Rich markup: each segment's coloured label and its percentage."""
+    return LEGEND_SEPARATOR.join(f'[{s.color}]{s.label}[/{s.color}] {percent_label(s.percent)}' for s in segments)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -100,6 +101,19 @@ def _is_binary(path: Path) -> bool:
     return b'\x00' in chunk and not has_wide_bom(chunk)
 
 
+def _is_regular_file(path: Path) -> bool:
+    """True for a regular file that is not a symlink, from one lstat().
+
+    FIFOs, sockets and devices are skipped: opening a FIFO blocks until something writes to it.
+    Symlinks are skipped too: the walk doesn't follow linked directories either, and a link to a
+    file in the tree would count that file twice.
+    """
+    try:
+        return stat.S_ISREG(path.lstat().st_mode)
+    except OSError:
+        return False  # vanished or unreadable mid-walk
+
+
 @dataclass(slots=True)
 class WalkStats:
     """What ``[exclude] patterns`` removed from a walk, for the report.
@@ -116,7 +130,7 @@ class WalkStats:
 def walk_project(
     root: Path,
     excluded_dirs: set[str],
-    gitignore_spec: GitIgnoreSpec | None = None,
+    gitignore_spec: Optional[GitIgnoreSpec] = None,
     spec_dirs: Optional[set[str]] = None,
     non_spec_dirs: Optional[set[str]] = None,
     exclude_patterns: Optional[GitIgnoreSpec] = None,
@@ -128,7 +142,9 @@ def walk_project(
         root: Project root directory.
         excluded_dirs: Relative directory paths to skip (e.g. {'static/external'}).
         gitignore_spec: Pre-loaded gitignore patterns. Loaded from root if None. ``.gitignore``
-            files found while walking are registered on it as each directory is entered.
+            files found while walking are registered on it as each directory is entered. A nested
+            git repository found while walking starts its own rules (see
+            :meth:`GitIgnoreSpec.add_directory`).
         spec_dirs: Relative directory paths designated as spec directories. ``'.'`` marks *root*
             itself, so docs files at every level count as specs.
         non_spec_dirs: Relative directory paths that are never specs (``[specs] ignore``).
@@ -149,7 +165,8 @@ def walk_project(
         dirpath = Path(dirpath_str)
         rel_dir_str = relative_posix(dirpath, root)
 
-        # This directory's own .gitignore governs its children, so load it before filtering them
+        # This directory's own .gitignore governs its children, so load it before filtering them. If the
+        # directory is a nested git repo, this is also where its own rules start and the outer ones stop.
         gitignore_spec.add_directory(rel_dir_str, dirpath)
 
         # Discover nested config files in subdirectories
@@ -201,9 +218,9 @@ def walk_project(
             if gitignore_spec.match_file(file_rel):
                 continue
 
-            # Skip generated files, and symlinks: the walk doesn't follow linked directories either,
-            # and a link to a file in the tree would count that file twice
-            if _is_generated(filename) or file_path.is_symlink():
+            # Skip generated files, and anything but a regular file. This comes before the pattern
+            # check, whose stats path opens the file.
+            if _is_generated(filename) or not _is_regular_file(file_path):
                 continue
 
             if exclude_patterns.match_file(file_rel):
