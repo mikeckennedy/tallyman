@@ -9,7 +9,7 @@ from typing import Optional
 
 import pytest
 from rich.text import Text
-from textual.widgets import Static
+from textual.widgets import Button, Static
 from textual.widgets.tree import TreeNode
 
 from tallyman import walker
@@ -1064,3 +1064,30 @@ def test_rust_detection_agrees_with_the_walker(tmp_path: Path, files: dict[str, 
     session.run([])
     walked = any(lang is RUST for _, lang in walk_project(tmp_path, set(), load_gitignore(tmp_path)))
     assert (session.app.has_rust or session.app.has_nested_rust) is walked
+
+
+class TestNoSave:
+    """--no-save: the screen says the choices apply to this run only; what it returns doesn't change."""
+
+    @pytest.mark.parametrize(('save', 'label'), [(True, 'Save & Run'), (False, 'Run')])
+    def test_button_subtitle_and_result(self, tmp_path: Path, save: bool, label: str) -> None:
+        (tmp_path / 'vendor').mkdir()
+        (tmp_path / 'vendor' / 'v.py').write_text('x = 1\n')
+        app = SetupApp(tmp_path, load_gitignore(tmp_path), set(), set(), save=save)
+        seen: dict[str, str] = {}
+
+        async def go() -> None:
+            async with app.run_test(size=(100, 50)) as pilot:
+                tree = app.query_one(SetupTree)
+                tree.focus()
+                tree.move_cursor(_find(tree.root, 'vendor'))
+                await pilot.press('x')
+                await pilot.pause()
+                seen['label'] = str(app.query_one('#save', Button).label)
+                seen['sub_title'] = app.sub_title
+                await pilot.click('#save')
+
+        asyncio.run(go())
+        assert seen['label'] == label
+        assert ('this run only' in seen['sub_title']) is not save
+        assert app.return_value == SetupResult({'vendor'}, set(), set(), None)

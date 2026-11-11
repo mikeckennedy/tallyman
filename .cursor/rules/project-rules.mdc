@@ -47,6 +47,7 @@ uv pip install -e ".[dev]"
 tallyman                    # analyze current directory
 tallyman /path/to/project   # analyze specific path
 tallyman --setup            # re-run interactive TUI setup
+tallyman --no-save          # setup's choices for this run only; never writes .tally-config.toml
 tallyman --no-color         # disable colors
 tallyman --with-spaces      # totals and bar use total lines, not effective lines
 tallyman --exclude 'tests/' # leave out files matching a pattern, this run only (repeatable, never saved)

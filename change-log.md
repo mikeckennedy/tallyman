@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions are `MAJOR.MINOR.BUILD`, where the last number counts releases and never resets (see `CLAUDE.md`).
 
+## 0.7.6 - UNRELEASED
+
+### Added
+- New `--no-save` runs Tallyman without leaving a `.tally-config.toml` behind (issue #5). Setup opens as usual on a first run, or with `--setup`. Its button reads **Run** instead of **Save & Run**, a subtitle says nothing is saved, and the choices apply to that run only, so the next run opens setup again. Configs that already apply are still read and never changed, so `tallyman --setup --no-save` tries other settings without touching the config. A malformed config there is skipped with a warning, as `--setup` does, and left as it is.
+- Files: `src/tallyman/cli.py`, `src/tallyman/tui/setup_app.py`, `tests/test_cli.py`, `tests/test_setup_app.py`, `README.md`, `CLAUDE.md`, `.cursor/rules/coding-guidelines.mdc`, `.cursor/rules/project-rules.mdc`, `plans/006-tallyman-architect.plan.md`, `pyproject.toml`, `uv.lock`
+- Plan: `plans/015-no-save.plan.md`
+
 ## 0.6.5 - UNRELEASED
 
 ### Added
