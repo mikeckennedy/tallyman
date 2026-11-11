@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from typing import Optional
 
 import pytest
 from rich.console import Console
@@ -9,6 +10,7 @@ from tallyman.aggregator import aggregate
 from tallyman.counter import FileCount
 from tallyman.display import BAR_WIDTH, BLOCK_CHAR, display_results
 from tallyman.languages import EXTENSION_MAP, as_spec
+from tallyman.walker import WalkStats
 
 
 def _render(directory: str) -> str:
@@ -125,3 +127,36 @@ class TestPercentageBar:
         assert 'Other' in legend
         assert 'Rust' not in legend
         assert 'Go' not in legend
+
+
+def _render_with_stats(stats: Optional[WalkStats], files: bool = True) -> str:
+    out = io.StringIO()
+    entries = [(EXTENSION_MAP['.py'], FileCount(total_lines=1, code_lines=1))] if files else []
+    display_results(aggregate(entries), 'proj', console=Console(file=out, no_color=True, width=100), stats=stats)
+    return out.getvalue()
+
+
+class TestPatternNote:
+    @pytest.mark.parametrize('stats', [None, WalkStats()])
+    def test_nothing_removed_prints_nothing(self, stats: Optional[WalkStats]):
+        assert 'Excluded by' not in _render_with_stats(stats)
+
+    @pytest.mark.parametrize(
+        ('stats', 'line'),
+        [
+            (WalkStats(12, 1), 'Excluded by [exclude] patterns: 12 files, 1 directory'),
+            (WalkStats(1, 0), 'Excluded by [exclude] patterns: 1 file'),
+            (WalkStats(0, 2), 'Excluded by [exclude] patterns: 2 directories'),
+            (WalkStats(1234, 0), 'Excluded by [exclude] patterns: 1,234 files'),
+        ],
+    )
+    def test_wording(self, stats: WalkStats, line: str):
+        """The literal '[exclude]' must survive: printed as markup, Rich would swallow it."""
+        out = _render_with_stats(stats)
+        assert f'\n  {line}\n' in out
+        assert out.rstrip().endswith(line)  # the last line of the report
+
+    def test_printed_even_when_nothing_was_counted(self):
+        out = _render_with_stats(WalkStats(3, 0), files=False)
+        assert 'No recognized source files found.' in out
+        assert 'Excluded by [exclude] patterns: 3 files' in out

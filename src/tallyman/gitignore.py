@@ -240,9 +240,11 @@ class GitIgnoreSpec:
     instance is bound to one analysis root and must not be reused for another.
     """
 
-    def __init__(self, prefix: str = '') -> None:
+    def __init__(self, prefix: str = '', anchor: Optional[Path] = None) -> None:
         # Analysis root relative to the git root (POSIX), or '' when they are the same.
         self._prefix = prefix
+        # The directory layer bases are relative to: the git root, or the analysis root outside a repo
+        self._anchor = anchor
         self._files: list[tuple[str, _IgnoreFile]] = []
         self._loaded: set[tuple[str, str]] = set()
         self._ignore_all = False
@@ -265,11 +267,11 @@ class GitIgnoreSpec:
         git_root = find_git_root(resolved_root)
 
         if git_root is None:
-            spec = cls()
+            spec = cls(anchor=resolved_root)
             spec._add_file('', resolved_root / '.gitignore')
             return spec
 
-        spec = cls(relative_posix(resolved_root, git_root))
+        spec = cls(relative_posix(resolved_root, git_root), git_root)
         spec._add_file('', git_root / '.git' / 'info' / 'exclude')
         spec._add_file('', git_root / '.gitignore')
 
@@ -284,6 +286,35 @@ class GitIgnoreSpec:
 
         return spec
 
+    @classmethod
+    def for_patterns(cls, root: Path) -> GitIgnoreSpec:
+        """An empty spec for ``[exclude] patterns`` at *root*, filled with :meth:`add_rules`.
+
+        It is kept apart from the gitignore spec, so a ``!pattern`` can only undo
+        another config pattern. Nothing above *root* is ever checked, so a parent
+        config's pattern can't exclude the directory the user asked to scan.
+        """
+        resolved_root = root.resolve()
+        git_root = find_git_root(resolved_root)
+        if git_root is None:
+            return cls(anchor=resolved_root)
+        return cls(relative_posix(resolved_root, git_root), git_root)
+
+    def add_rules(self, config_dir: Path, lines: list[str]) -> None:
+        """Register *lines* as one layer of rules scoped to *config_dir*, the way a .gitignore there would be.
+
+        *config_dir* is the directory of the config that declares them: the
+        analysis root, a directory above it inside the repo, or one below it.
+        Registering the same directory twice is a no-op, and a directory outside
+        the repo (or, outside a repo, outside the analysis root) is ignored.
+        """
+        if self._anchor is None:
+            raise ValueError('add_rules() needs a spec from GitIgnoreSpec.for_patterns() or for_root()')
+        resolved = config_dir.resolve()
+        if not resolved.is_relative_to(self._anchor):
+            return
+        self._add_lines(relative_posix(resolved, self._anchor), '<config>', lines)
+
     def add_directory(self, rel_dir: str, dir_path: Path) -> None:
         """Register ``dir_path/.gitignore``, where *rel_dir* is its path relative to the analysis root.
 
@@ -294,6 +325,8 @@ class GitIgnoreSpec:
 
     def match_file(self, path: str) -> bool:
         """Return True if the entry at *path* (relative to the analysis root) is ignored."""
+        if not self._files and not self._ignore_all:
+            return False  # nothing registered, the usual case for [exclude] patterns
         is_dir = path.endswith('/')
         rel = path.rstrip('/')
         full = f'{self._prefix}/{rel}' if self._prefix else rel
@@ -301,14 +334,21 @@ class GitIgnoreSpec:
 
     def _add_file(self, base: str, ignore_file: Path) -> None:
         """Register *ignore_file*, scoped to *base* (relative to the git root)."""
-        key = (base, ignore_file.name)
-        if key in self._loaded:
+        if (base, ignore_file.name) in self._loaded:
             return
-        self._loaded.add(key)
         try:
             lines = _split_lines(ignore_file.read_bytes().decode('utf-8-sig', errors='replace'))
         except OSError:
+            self._loaded.add((base, ignore_file.name))
             return  # missing or unreadable: git treats it as absent too
+        self._add_lines(base, ignore_file.name, lines)
+
+    def _add_lines(self, base: str, source: str, lines: list[str]) -> None:
+        """Register *lines* from *source* as one layer scoped to *base* (relative to the git root)."""
+        key = (base, source)
+        if key in self._loaded:
+            return
+        self._loaded.add(key)
         self._files.append((base, _IgnoreFile(lines)))
         # Shallowest first; the sort is stable, so info/exclude stays ahead of the root .gitignore.
         self._files.sort(key=lambda item: item[0].count('/') + 1 if item[0] else 0)

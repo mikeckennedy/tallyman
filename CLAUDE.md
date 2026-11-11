@@ -29,7 +29,7 @@ tallyman --with-spaces      # totals and bar use total lines, not effective line
 tallyman --image            # PNG summary card on the Desktop (--image-light for the light theme)
 
 # Tests
-pytest                      # all 400 tests (about 15 s, mostly the Textual pilot tests)
+pytest                      # all 474 tests (about 15 s, mostly the Textual pilot tests)
 pytest -v                   # verbose
 pytest tests/test_walker.py # single module
 
@@ -56,7 +56,7 @@ Linear pipeline  -  each stage feeds the next:
 
 ```
 cli.main()
-  → Load/create .tally-config.toml (or launch TUI)
+  → Load every .tally-config.toml from the git root down (or launch TUI)
   → walker.walk_project()    yields (path, Language) tuples
   → counter.count_lines()    returns FileCount per file
   → aggregator.aggregate()   produces TallyResult
@@ -70,14 +70,14 @@ cli.main()
 |---|---|
 | `src/tallyman/cli.py` | Entry point. Arg parsing, config loading and errors, no-terminal handling, orchestrates the pipeline |
 | `src/tallyman/languages.py` | Language registry (40+ languages). Frozen dataclasses with name, category, color, comment marker, extensions. `EXTENSION_MAP` for O(1) lookup |
-| `src/tallyman/walker.py` | Directory traversal. Respects gitignore + config exclusions. Detects spec dirs. Yields `(Path, Language)` |
-| `src/tallyman/gitignore.py` | Gitignore rules (`GitIgnoreSpec`, `load_gitignore`, `find_git_root`). Own pattern compiler that follows gitignore(5) |
+| `src/tallyman/walker.py` | Directory traversal. Respects gitignore, config exclusions and `[exclude] patterns`. Detects spec dirs. Yields `(Path, Language)`; fills `WalkStats` |
+| `src/tallyman/gitignore.py` | Gitignore rules (`GitIgnoreSpec`, `load_gitignore`, `find_git_root`). Own pattern compiler that follows gitignore(5). `GitIgnoreSpec.for_patterns()` + `add_rules()` hold `[exclude] patterns` |
 | `src/tallyman/encoding.py` | BOM detection: `text_encoding()`, `has_wide_bom()`. Shared by walker (binary check) and counter |
 | `src/tallyman/paths.py` | `relative_posix()`: `/`-separated relative paths, safe on Windows |
 | `src/tallyman/counter.py` | Reads files, classifies lines as code/comment/blank. Returns `FileCount` |
 | `src/tallyman/aggregator.py` | Accumulates FileCount into LanguageStats, groups by category. Produces `TallyResult` |
-| `src/tallyman/display.py` | Rich-based rendering. Per-language stats, category totals, percentage bar |
-| `src/tallyman/config.py` | `.tally-config.toml` find (up to the git root), load with validation and normalisation, rebase onto the scan root, save with TOML escaping. `ConfigError` for unreadable configs |
+| `src/tallyman/display.py` | Rich-based rendering. Per-language stats, category totals, percentage bar, the "Excluded by [exclude] patterns" line |
+| `src/tallyman/config.py` | `.tally-config.toml` find (every one up to the git root), load with validation and normalisation, merge the chain and rebase onto the scan root (`ConfigChain`), save with TOML escaping. `ConfigError` (with `.path`) for unreadable configs |
 | `src/tallyman/image.py` | Pillow PNG summary card, themes, output path (Desktop or cwd, slug capped at 100 chars) |
 | `src/tallyman/fonts/` | Bundled JetBrains Mono for the image |
 | `src/tallyman/tui/setup_app.py` | Textual App for interactive directory selection (exclude/spec marking) |
@@ -94,7 +94,10 @@ FileCount                     # total_lines, code_lines, comment_lines, blank_li
 LanguageStats                 # language, file_count, total_lines, code_lines, comment_lines, blank_lines
 CategoryStats                 # name, total_lines, effective_lines, languages
 TallyResult                   # by_language, by_category, grand_total_lines
-TallyConfig                   # excluded_dirs, spec_dirs, non_spec_dirs ([specs] ignore): set[str]; '.' = this dir
+TallyConfig                   # excluded_dirs, spec_dirs, non_spec_dirs ([specs] ignore): set[str]; '.' = this dir;
+                              # patterns: list[str], raw, in file order, relative to the config's own directory
+ConfigChain                   # inherited (configs above the scan root, merged + rebased), local, paths, pattern_layers
+WalkStats                     # pattern_files, pattern_dirs: what [exclude] patterns removed, for the report
 SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's spec status (walker.spec_state)
 ```
 
@@ -108,11 +111,13 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 
 4. **Binary detection** checks the first 8KB for a `\x00` byte, unless the file starts with a UTF-16/32 BOM. Lines end only at `\n`, `\r\n` or a lone `\r`, and a final line without a newline counts. BOMs pick the encoding (`encoding.py`). Tallyman's own config, npm/pnpm lockfiles, `*.min.js`/`*.min.css` and symlinked files are never counted.
 
-5. **Config search stops at the git root, and parent configs are rebased.** `find_config()` returns the nearest `.tally-config.toml` from the scan root up to the git repo root (outside a repo, only the scan root itself). `rebase_config()` translates its entries to be relative to the scan root. Entries are normalised on load. In `[specs] directories` and `[specs] ignore`, `"."` means the config's own directory. With no config and no terminal, tallyman runs with defaults and writes nothing.
+5. **Every config from the git root down to the scan root applies.** `find_configs()` lists them shallowest first (outside a repo, only the scan root's). `load_config_chain()` folds the ones above the scan root with `merge_configs()` (exclusions add up; the deeper config wins on the same path) and rebases the result onto the scan root with `rebase_config()`: that is `ConfigChain.inherited`. The scan root's own config is `local`, and the walker uses `effective`. Nested configs below the scan root merge the same way as the walk descends. Setup edits only `local`: parent and nested settings are shown locked and never copied (`without_inherited()` drops old copies on save). A malformed config at or above the scan root exits 1 naming the file; `--setup` skips it with a warning. A malformed nested config is skipped silently, since it is often third-party code. Entries are normalised on load. In `[specs] directories` and `[specs] ignore`, `"."` means the config's own directory. With no config and no terminal, tallyman runs with defaults and writes nothing.
 
 6. **Auto-detected spec dirs:** `specs/`, `plans/`, `specifications/`, `agents/`  -  detected even without config, at any depth, unless listed (or beneath a directory listed) in `[specs] ignore`. The deepest explicit setting wins. `walker.spec_state()` is the one rule; the walker and the setup TUI both call it. Scanning from inside one (`tallyman plans/sub`) still counts specs, but a repo that is itself named `agents` does not.
 
 7. **Gitignore follows git, entry by entry.** `.git/info/exclude`, then every `.gitignore` from the repo root down, each scoped to its own directory; the deepest opinion wins. Nested files load lazily as the walker and TUI descend, and nothing inside an ignored directory is ever looked at. Callers pass directory paths with a trailing `/`. `tests/test_gitignore.py` checks parity with real `git`; its pattern-compiler table runs without git.
+
+8. **`[exclude] patterns` are a second `GitIgnoreSpec`.** `GitIgnoreSpec.for_patterns(root)` holds one `add_rules()` layer per config, scoped to that config's directory, so patterns layer like nested `.gitignore` files and a deeper `!` wins. It is separate from the gitignore spec, and the walker checks it last, so `!` never brings back gitignored, hidden, excluded or generated entries. The scan root and its ancestors are never checked, so a parent's pattern can't exclude the scan root. Patterns are kept raw and never rebased, merged or sorted; they travel as `ConfigChain.pattern_layers`, and `--setup` writes `local.patterns` back verbatim. The TUI shows matched directories as "(excluded by pattern)" and locks them.
 
 ## Test Structure
 
@@ -120,15 +125,15 @@ SpecState(NamedTuple)         # is_spec, detection_suppressed: one directory's s
 |---|---|---|
 | `tests/test_counter.py` | 29 | Line counting, line endings, BOMs and wide encodings |
 | `tests/test_languages.py` | 58 | Language registry, extension map, Docker/Compose variants, valid and unshared colours, `as_spec` |
-| `tests/test_display.py` | 17 | Terminal rendering: header escaping, wording, labels, bar width |
+| `tests/test_display.py` | 24 | Terminal rendering: header escaping, wording, labels, bar width, pattern note |
 | `tests/test_image.py` | 20 | Slugs, image paths, themes, PNG generation, title fitting |
-| `tests/test_walker.py` | 42 | Walking, exclusions, spec detection, nested configs |
-| `tests/test_gitignore.py` | 93 | Git root, gitignore loading and scoping, negation, TUI agreement, parity with `git` |
+| `tests/test_walker.py` | 52 | Walking, exclusions, spec detection, nested configs, exclude patterns, `WalkStats` |
+| `tests/test_gitignore.py` | 100 | Git root, gitignore loading and scoping, negation, TUI agreement, parity with `git`, config pattern layers |
 | `tests/test_paths.py` | 6 | POSIX relative paths, canonical case |
 | `tests/test_aggregator.py` | 12 | Stats aggregation, categories, percentages |
-| `tests/test_config.py` | 58 | Config find/load/save, `[specs] ignore`, normalisation, rebasing, escaping, directory cleanup |
-| `tests/test_setup_app.py` | 39 | Setup TUI via Textual pilot: toggles, labels, agreement with the walker |
-| `tests/test_cli.py` | 26 | End-to-end CLI: parent configs, errors, no-terminal runs, setup pre-fill, flags, colour |
+| `tests/test_config.py` | 83 | Config find/load/save, `[specs] ignore`, `[exclude] patterns`, normalisation, rebasing, chain merging, escaping, directory cleanup |
+| `tests/test_setup_app.py` | 51 | Setup TUI via Textual pilot: toggles, labels, parent/nested locks, patterns, agreement with the walker |
+| `tests/test_cli.py` | 39 | End-to-end CLI: config chain, errors, no-terminal runs, setup pre-fill and pattern preservation, flags, colour |
 
 Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` create test Language instances.
 
@@ -137,6 +142,7 @@ Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` creat
 - Single quotes for strings (Ruff enforced)
 - `from __future__ import annotations` in every module
 - Type hints on all function signatures
+- Use `Optional[X]` from `typing` for optional types, not `X | None`
 - `_prefixed` for module-private functions
 - 120-char line length
 - Frozen dataclasses for immutable values, mutable ones for accumulators
@@ -146,7 +152,7 @@ Tests use `tmp_path` fixtures extensively. Helper functions like `_lang()` creat
 Add a `Language(...)` instance to `languages.py` and include it in the `LANGUAGES` tuple. The `EXTENSION_MAP` is built automatically. Then:
 
 - Check the extensions don't collide with an existing language.
-- Pick a colour no other language uses. `test_languages.py` checks every colour parses and that no new colour is shared (three existing pairs are allowlisted).
+- Pick a colour no other language uses. `test_languages.py` checks every colour parses and that no new colour is shared (only C and its header may share one).
 - Update the README's category table, the per-language extension table, and both "N languages" counts. Recount them against `LANGUAGES`.
 - Add tests in `test_languages.py`.
 
@@ -163,4 +169,4 @@ Update `aggregator.py` category ordering, `display.py` rendering, and ensure wal
 
 ## Planning Documents
 
-`plans/` contains structured planning docs organized by feature number. `plans/agents/` has AI agent prompts. `plans/planning-rules.md` has project planning guidelines. Consult these when implementing new features.
+`plans/` contains structured planning docs organized by feature number. `plans/agents/` has other AI agent prompts. Architect reviews (including the per-phase reviews plans call for) use the `architect-tallyman` sub-agent, `.claude/agents/architect-tallyman.md` (gitignored; plan 006 holds a copy). `plans/planning-rules.md` has project planning guidelines. Consult these when implementing new features.

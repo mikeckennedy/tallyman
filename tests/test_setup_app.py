@@ -7,8 +7,8 @@ from typing import Optional
 import pytest
 from textual.widgets.tree import TreeNode
 
-from tallyman.config import TallyConfig, discover_nested_configs
-from tallyman.gitignore import load_gitignore
+from tallyman.config import TallyConfig, discover_nested_configs, merge_configs
+from tallyman.gitignore import GitIgnoreSpec, load_gitignore
 from tallyman.tui.setup_app import NodeInfo, SetupApp, SetupResult, SetupTree
 from tallyman.walker import SpecState, root_spec_state, spec_state, walk_project
 
@@ -47,12 +47,25 @@ class Session:
         non_specs: Optional[set[str]] = None,
         nested: Optional[TallyConfig] = None,
         root_auto_spec: bool = False,
+        inherited: Optional[TallyConfig] = None,
+        patterns: Optional[list[str]] = None,
     ) -> None:
+        exclude_patterns = GitIgnoreSpec.for_patterns(root)
+        exclude_patterns.add_rules(root, patterns or [])
         self.app = SetupApp(
-            root, load_gitignore(root), excluded or set(), specs or set(), non_specs, nested, root_auto_spec
+            root,
+            load_gitignore(root),
+            excluded or set(),
+            specs or set(),
+            non_specs,
+            nested,
+            root_auto_spec,
+            inherited,
+            exclude_patterns,
         )
         self.labels: dict[str, str] = {}
         self.flags: dict[str, bool] = {}
+        self.root_label = ''
 
     def run(self, actions: list[tuple[str, str]], save: bool = True) -> Optional[SetupResult]:
         """*actions* are (directory path, key); '' is the root. Records labels just before saving."""
@@ -72,6 +85,8 @@ class Session:
         return self.app.return_value
 
     def _record(self, node: TreeNode[NodeInfo]) -> None:
+        if node.data and not node.data.path:
+            self.root_label = str(node.label)
         if node.data and node.data.path:
             path = str(node.data.path)
             self.labels[path] = str(node.label)
@@ -262,6 +277,131 @@ class TestNestedConfigs:
         assert result is not None
         walked = _walk_categories(tree, result)
         assert {d for d, cat in walked.items() if cat == 'specs'} == {d for d in walked if session.flags[d]}
+
+
+class TestNestedConfigPrecedence:
+    def test_deeper_nested_config_wins_and_tui_matches_walker(self, tmp_path: Path):
+        """lib/ marks notes as specs; lib/notes/ ignores itself. The deeper config wins in the TUI too."""
+        _make_tree(tmp_path, ['lib/notes'])
+        (tmp_path / 'lib' / '.tally-config.toml').write_text('[specs]\ndirectories = ["notes"]\n')
+        (tmp_path / 'lib' / 'notes' / '.tally-config.toml').write_text('[specs]\nignore = ["."]\n')
+        session = Session(tmp_path, nested=discover_nested_configs(tmp_path))
+        result = session.run([])
+        assert result is not None
+        assert session.labels['lib/notes'] == '✓ notes (not specs) (set in a nested config)'
+        walked = _walk_categories(tmp_path, result)
+        assert walked['lib/notes'] == 'docs'
+        assert {d for d, cat in walked.items() if cat == 'specs'} == {d for d in walked if session.flags[d]}
+
+    def test_excluding_a_dir_whose_spec_setting_is_nested_drops_the_credit(self, tmp_path: Path):
+        _make_tree(tmp_path, ['lib/l'])
+        (tmp_path / 'lib' / '.tally-config.toml').write_text('[specs]\ndirectories = ["."]\n')
+        session = Session(tmp_path, nested=discover_nested_configs(tmp_path))
+        assert session.run([('lib', 'x')]) == ({'lib'}, set(), set())
+        assert session.labels['lib'] == '✗ lib'
+
+
+class TestParentConfigs:
+    """Settings inherited from configs above the scan root are shown locked and never saved."""
+
+    def test_inherited_exclusion_is_locked(self, tmp_path: Path):
+        _make_tree(tmp_path)
+        session = Session(tmp_path, inherited=TallyConfig({'src/vendor'}))
+        result = session.run([('src/vendor', 'x'), ('src/vendor', 's')])
+        assert result == (set(), set(), set())
+        assert session.labels['src/vendor'] == '✗ vendor (set in a parent config)'
+
+    def test_child_of_an_inherited_exclusion_is_excluded(self, tmp_path: Path):
+        _make_tree(tmp_path)
+        session = Session(tmp_path, inherited=TallyConfig({'src'}))
+        session.run([('src/vendor', 'x')])
+        assert session.labels['src/vendor'] == '✗ vendor'
+
+    def test_inherited_spec_settings_are_locked(self, tmp_path: Path):
+        _make_tree(tmp_path)
+        session = Session(tmp_path, inherited=TallyConfig(spec_dirs={'docs'}, non_spec_dirs={'plans'}))
+        result = session.run([('docs', 's'), ('plans', 's')])
+        assert result == (set(), set(), set())
+        assert session.labels['docs'] == 'S docs (set in a parent config)'
+        assert session.labels['plans'] == '✓ plans (not specs) (set in a parent config)'
+        assert session.labels['plans/sub'] == '✓ sub'
+
+    def test_inherited_root_spec_is_shown_on_the_root(self, tmp_path: Path):
+        _make_tree(tmp_path, ['docs'])
+        session = Session(tmp_path, inherited=TallyConfig(spec_dirs={'.'}))
+        session.run([('', 's')])
+        assert session.root_label == f'{tmp_path.name} (specs) (set in a parent config)'
+        assert session.labels['docs'] == 'S docs (specs)'
+
+    def test_a_local_override_of_a_parent_setting_stays_editable(self, tmp_path: Path):
+        """The parent marks docs as specs, the local config ignores it: the local entry is the user's to change."""
+        _make_tree(tmp_path, ['docs'])
+        session = Session(tmp_path, non_specs={'docs'}, inherited=TallyConfig(spec_dirs={'docs'}))
+        result = session.run([('docs', 's')])
+        assert result == (set(), set(), set())  # dropping the override lets the parent's setting apply
+        assert session.labels['docs'] == 'S docs'
+
+    def test_nested_config_beats_an_inherited_setting(self, tmp_path: Path):
+        _make_tree(tmp_path, ['lib/l'])
+        (tmp_path / 'lib' / '.tally-config.toml').write_text('[specs]\nignore = ["."]\n')
+        session = Session(tmp_path, nested=discover_nested_configs(tmp_path), inherited=TallyConfig(spec_dirs={'lib'}))
+        session.run([])
+        assert session.labels['lib'] == '✓ lib (not specs) (set in a nested config)'
+
+    def test_tui_and_walker_agree_with_parent_configs(self, tmp_path: Path):
+        _make_tree(tmp_path)
+        inherited = TallyConfig({'lib'}, {'docs'}, {'src/agents'})
+        session = Session(tmp_path, inherited=inherited)
+        result = session.run([('plans', 's')])
+        assert result is not None
+        excluded, specs, non_specs = result
+        effective = merge_configs(inherited, TallyConfig(excluded, specs, non_specs))
+        walked = _walk_categories(tmp_path, (effective.excluded_dirs, effective.spec_dirs, effective.non_spec_dirs))
+        assert 'lib' not in walked
+        assert {d for d, cat in walked.items() if cat == 'specs'} == {d for d in walked if session.flags[d]}
+
+
+class TestPatternExclusions:
+    def test_pattern_excluded_directory_is_shown_locked(self, tmp_path: Path):
+        _make_tree(tmp_path, ['src/fixtures/deep', 'lib'])
+        session = Session(tmp_path, patterns=['fixtures/'])
+        result = session.run([('src/fixtures', 'x'), ('src/fixtures', 's')])
+        assert result == (set(), set(), set())
+        assert session.labels['src/fixtures'] == 'fixtures (excluded by pattern)'
+        assert 'src/fixtures/deep' not in session.labels  # the walker never enters it either
+
+    def test_tui_and_walker_agree_with_patterns(self, tmp_path: Path):
+        _make_tree(tmp_path, ['plans/sub', 'src/fixtures', 'docs'])
+        session = Session(tmp_path, patterns=['fixtures/', '/plans/sub/'])
+        result = session.run([])
+        assert result is not None
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path, ['fixtures/', '/plans/sub/'])
+        walked = {
+            p.parent.relative_to(tmp_path).as_posix()
+            for p, _ in walk_project(tmp_path, set(), load_gitignore(tmp_path), exclude_patterns=spec)
+        }
+        shown = {d for d, label in session.labels.items() if 'excluded by pattern' not in label}
+        assert walked == shown
+
+
+class TestNestedPatternLayers:
+    def test_tui_and_walker_agree_with_nested_patterns(self, tmp_path: Path):
+        _make_tree(tmp_path, ['crate/gen', 'crate/src', 'gen'])
+        (tmp_path / 'crate' / '.tally-config.toml').write_text('[exclude]\npatterns = ["/gen/"]\n')
+        layers: list[tuple[Path, list[str]]] = []
+        nested = discover_nested_configs(tmp_path, layers)
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        for config_dir, patterns in layers:
+            spec.add_rules(config_dir, patterns)
+        app = SetupApp(tmp_path, load_gitignore(tmp_path), set(), set(), None, nested, False, None, spec)
+        session = Session(tmp_path)
+        session.app = app
+        session.run([])
+        assert session.labels['crate/gen'] == 'gen (excluded by pattern)'
+        walked = {p.parent.relative_to(tmp_path).as_posix() for p, _ in walk_project(tmp_path, set())}
+        shown = {d for d, label in session.labels.items() if 'excluded by pattern' not in label}
+        assert walked == shown
 
 
 class TestLabels2:

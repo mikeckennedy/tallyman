@@ -10,7 +10,7 @@ from typing import Optional
 
 import pytest
 
-from tallyman.gitignore import find_git_root, load_gitignore
+from tallyman.gitignore import GitIgnoreSpec, find_git_root, load_gitignore
 from tallyman.tui.setup_app import SetupApp, SetupTree
 from tallyman.walker import walk_project
 
@@ -478,3 +478,57 @@ def test_tui_shows_every_directory_as_spec_when_root_is_spec(tmp_path: Path):
             return [str(root.children[0].label), str(root.children[0].children[0].label)]
 
     assert all(label.startswith('S ') for label in asyncio.run(labels()))
+
+
+class TestConfigPatterns:
+    """[exclude] patterns: a second GitIgnoreSpec, one layer per config, scoped to that config's directory."""
+
+    def test_patterns_at_the_scan_root(self, tmp_path: Path):
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path, ['tests.rs', '/top.rs', 'fixtures/'])
+        assert spec.match_file('tests.rs')
+        assert spec.match_file('src/routing/tests.rs')  # no slash: any depth
+        assert spec.match_file('top.rs')
+        assert not spec.match_file('src/top.rs')  # leading slash: only beside the config
+        assert spec.match_file('src/fixtures/')
+        assert not spec.match_file('src/fixtures')  # trailing slash: directories only
+
+    def test_ancestor_layer_is_anchored_to_its_own_directory(self, tmp_path: Path):
+        (tmp_path / '.git').mkdir()
+        (tmp_path / 'app' / 'src').mkdir(parents=True)
+        spec = GitIgnoreSpec.for_patterns(tmp_path / 'app')
+        spec.add_rules(tmp_path, ['/app/gen/', 'app'])
+        assert spec.match_file('gen/')  # repo/app/gen, written relative to the repo root
+        assert not spec.match_file('src/gen/')
+        assert spec.match_file('src/app')  # 'app' matches below the scan root, but never the scan root itself
+
+    def test_deeper_layer_can_re_include(self, tmp_path: Path):
+        (tmp_path / 'crate').mkdir()
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path / 'crate', ['!tests.rs'])
+        spec.add_rules(tmp_path, ['tests.rs'])  # registration order doesn't matter: depth does
+        assert spec.match_file('other/tests.rs')
+        assert not spec.match_file('crate/src/tests.rs')
+
+    def test_registering_a_directory_twice_is_a_no_op(self, tmp_path: Path):
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path, ['a.rs'])
+        spec.add_rules(tmp_path, ['!a.rs'])
+        assert spec.match_file('a.rs')
+
+    def test_directory_outside_the_anchor_is_ignored(self, tmp_path: Path):
+        (tmp_path / 'scan').mkdir()
+        spec = GitIgnoreSpec.for_patterns(tmp_path / 'scan')  # no repo: the scan root is the anchor
+        spec.add_rules(tmp_path, ['*'])
+        assert not spec.match_file('a.rs')
+
+    def test_patterns_do_not_mix_with_gitignore(self, tmp_path: Path):
+        """A pattern's '!' can't bring back a gitignored file."""
+        _make(tmp_path, {'.gitignore': 'gen.py\n', 'gen.py': X, 'a.py': X})
+        spec = GitIgnoreSpec.for_patterns(tmp_path)
+        spec.add_rules(tmp_path, ['!gen.py'])
+        assert {p.name for p, _ in walk_project(tmp_path, set(), exclude_patterns=spec)} == {'a.py'}
+
+    def test_add_rules_needs_an_anchored_spec(self, tmp_path: Path):
+        with pytest.raises(ValueError):
+            GitIgnoreSpec().add_rules(tmp_path, ['a.rs'])
