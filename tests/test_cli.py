@@ -1177,6 +1177,112 @@ class TestRustTestCode:
         assert _rust_lines(tally) == 11
         assert load_config(tmp_path / 'crate' / CONFIG_FILENAME).rust_exclude_test_modules is False
 
+    def test_flag_turns_it_on_for_one_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        config = '[exclude]\ndirectories = []\n'
+        _make(tmp_path, {CONFIG_FILENAME: config, 'src/lib.rs': RUST_LIB})
+        tally = _run(monkeypatch, str(tmp_path), '--exclude-rust-tests')
+        assert _rust_lines(tally) == 4
+        assert tally is not None
+        assert (tally.rust_test_lines, tally.rust_test_files) == (7, 1)
+        assert (tmp_path / CONFIG_FILENAME).read_text() == config  # never saved
+        assert _rust_lines(_run(monkeypatch, str(tmp_path))) == 11
+
+    def test_no_flag_turns_it_off_for_one_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        _make(tmp_path, {CONFIG_FILENAME: RUST_ON, 'src/lib.rs': RUST_LIB})
+        tally = _run(monkeypatch, str(tmp_path), '--no-exclude-rust-tests')
+        assert _rust_lines(tally) == 11
+        assert tally is not None
+        assert tally.rust_test_lines == 0  # so the report has no Rust note
+        assert (tmp_path / CONFIG_FILENAME).read_text() == RUST_ON
+        assert _rust_lines(_run(monkeypatch, str(tmp_path))) == 4
+
+    @pytest.mark.parametrize(('flag', 'lines'), [('--exclude-rust-tests', 4 + 4), ('--no-exclude-rust-tests', 11 + 11)])
+    def test_flag_beats_a_nested_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str, lines: int
+    ) -> None:
+        """A parent's true and a crate's false: the flag decides for both."""
+        (tmp_path / '.git').mkdir()
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: RUST_ON,
+                'crate/.tally-config.toml': '[rust]\nexclude_test_modules = false\n',
+                'crate/lib.rs': RUST_LIB,
+                'lib.rs': RUST_LIB,
+            },
+        )
+        assert _rust_lines(_run(monkeypatch, str(tmp_path))) == 4 + 11
+        assert _rust_lines(_run(monkeypatch, str(tmp_path), flag)) == lines
+
+    def test_the_last_flag_wins(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """argparse's usual rule, pinned so it stays deliberate."""
+        _make(tmp_path, {'lib.rs': RUST_LIB})
+        assert _rust_lines(_run(monkeypatch, str(tmp_path), '--exclude-rust-tests', '--no-exclude-rust-tests')) == 11
+        assert _rust_lines(_run(monkeypatch, str(tmp_path), '--no-exclude-rust-tests', '--exclude-rust-tests')) == 4
+
+    @pytest.mark.parametrize(
+        ('config', 'flag', 'press', 'saved', 'lines'),
+        [
+            (False, '--exclude-rust-tests', False, False, 4),
+            (True, '--no-exclude-rust-tests', False, True, 11),
+            (False, '--no-exclude-rust-tests', True, True, 11),  # 'r' toggles the config's false, not the flag's
+            (None, '--exclude-rust-tests', False, None, 4),  # first-run setup: nothing to show, nothing saved
+            (None, '--no-exclude-rust-tests', True, True, 11),  # first-run setup, 'r' pressed
+        ],
+    )
+    def test_setup_ignores_the_flag(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        config: Optional[bool],
+        flag: str,
+        press: bool,
+        saved: Optional[bool],
+        lines: int,
+    ) -> None:
+        """Setup shows and saves the config's value ('r' toggles that); the count after setup uses the flag.
+
+        Each case's flag disagrees with what setup should see, so a setup handed the flag's value fails it.
+        """
+        _make(tmp_path, {'lib.rs': RUST_LIB})
+        if config is not None:
+            (tmp_path / CONFIG_FILENAME).write_text(f'[rust]\nexclude_test_modules = {str(config).lower()}\n')
+        real = _real_setup([('', 'r')] if press else [])  # before _run() replaces cli.run_setup
+        seen: list[Optional[bool]] = []
+
+        def setup(*args: object, existing_rust: Optional[bool] = None, **kwargs: object) -> object:
+            seen.append(existing_rust)
+            return real(*args, existing_rust=existing_rust, **kwargs)
+
+        argv = (['--setup'] if config is not None else []) + [str(tmp_path), flag]
+        tally = _run(monkeypatch, *argv, interactive=True, setup=setup)
+        assert seen == [config]  # the config's value, which setup's line shows
+        assert load_config(tmp_path / CONFIG_FILENAME).rust_exclude_test_modules is saved
+        assert _rust_lines(tally) == lines
+
+    @pytest.mark.parametrize(
+        ('argv', 'exclude', 'rust'),
+        [
+            (['--exclude', 'x'], ['x'], None),
+            (['--exclude=x'], ['x'], None),
+            (['--exclude-rust-tests'], [], True),
+            (['--exclude-rust', '--exclude', 'x'], ['x'], True),  # abbreviations stay on (allow_abbrev)
+            (['--no-exclude-rust-tests'], [], False),
+        ],
+    )
+    def test_exclude_and_the_rust_flag_parse_apart(
+        self, argv: list[str], exclude: list[str], rust: Optional[bool]
+    ) -> None:
+        """--exclude is a prefix of --exclude-rust-tests: an exact match must still win."""
+        args = cli.build_parser().parse_args(argv)
+        assert (args.exclude, args.exclude_rust_tests) == (exclude, rust)
+
+    def test_help_lists_the_flags(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+        monkeypatch.setattr(sys, 'argv', ['tallyman', '--help'])
+        with pytest.raises(SystemExit):
+            cli.main()
+        assert '--exclude-rust-tests, --no-exclude-rust-tests' in capsys.readouterr().out
+
     def test_malformed_rust_table_exits_naming_the_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:

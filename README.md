@@ -27,6 +27,7 @@ tallyman --image            # save a PNG summary card to Desktop
 tallyman --image-light      # light-themed PNG variant
 tallyman --with-spaces      # use total lines (incl. comments/blanks) for totals
 tallyman --exclude 'tests/' # leave out files matching a pattern, for this run only
+tallyman --exclude-rust-tests  # leave out Rust #[cfg(test)] code, for this run only (--no-... counts it)
 ```
 
 ## Why Tallyman?
@@ -55,7 +56,7 @@ A few things that set it apart:
 - **Realistic metrics** - Only counts files *you* wrote, not third-party dependencies or generated code
 - **Persistent config** - Your setup choices are saved to `.tally-config.toml` and reused on every run
 - **File patterns** - Gitignore-style `[exclude] patterns` for files a directory exclude can't reach, such as Rust tests beside the code they test, and `--exclude PATTERN` to leave files out of one run without touching the config
-- **Rust test code** - Opt in with `[rust] exclude_test_modules` to leave inline `#[cfg(test)]` modules and helpers out of the count
+- **Rust test code** - Opt in with `[rust] exclude_test_modules` to leave inline `#[cfg(test)]` modules and helpers out of the count, or `--exclude-rust-tests` for one run
 - **Image export** - Generate a shareable PNG summary card with `--image` (dark) or `--image-light` (light theme)
 - **Interactive TUI setup** - Visual directory tree for configuring exclusions and spec directories, powered by [Textual](https://github.com/Textualize/textual)
 
@@ -320,6 +321,7 @@ mod tests {
   - Integration tests in `tests/`, benches and examples: exclude those directories.
 - **Where it applies.** It applies by directory, like every other setting. A config in a crate's directory can turn it on or off for that crate, and `false` overrides a parent's `true`.
 - **Setup.** When the project has Rust code, `--setup` shows a `Rust test code: counted` (or `excluded`) line under the tree, and `r` switches it. Pressing `r` saves the setting only when it differs from what parent configs give, so pressing it twice leaves the config as it was; untouched, the config's value is kept as written. Rust in a directory whose own config sets `[rust]` follows that config: the line says so, and `r` changes only the rest. Without Rust code the line and the key don't appear.
+- **For one run.** `--exclude-rust-tests` leaves test code out and `--no-exclude-rust-tests` counts it, whatever the configs say, nested crate configs included. Neither is saved, and setup ignores them: its line shows, and `r` changes, the config's value, while the count after setup uses the flag. Given both, the last one wins.
 - When something is left out, the report ends with a line such as `Excluded Rust test code: 2,412 lines in 37 files`. It counts every line left out, blank and comment lines included, so the totals, which leave those out by default, drop by less. A file that was all test code isn't counted as a Rust file.
 - If Tallyman can't follow a file (an unterminated string, brackets that don't balance), it counts the whole file. It may miss some test code, but it never leaves out real code.
 

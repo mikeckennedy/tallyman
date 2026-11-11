@@ -81,6 +81,13 @@ def build_parser() -> argparse.ArgumentParser:
         'for this run only (repeatable; overrides config patterns; never saved)',
     )
     parser.add_argument(
+        '--exclude-rust-tests',
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help='Leave Rust #[cfg(test)] code out of this run; the --no- form counts it. Overrides '
+        '[rust] exclude_test_modules in every config; never saved',
+    )
+    parser.add_argument(
         '--version',
         action='version',
         version=f'%(prog)s {__version__}',
@@ -312,6 +319,8 @@ def main() -> None:
         exclude_patterns=exclude_patterns,
         stats=stats,
         exclude_rust_tests=exclude_rust_tests,
+        # The flag beats every config's [rust], nested ones included; setup above saw only the configs
+        rust_tests_override=args.exclude_rust_tests,
     ):
         counts = count_lines(source.path, source.language, source.exclude_rust_tests)
         file_results.append((source.language, counts))

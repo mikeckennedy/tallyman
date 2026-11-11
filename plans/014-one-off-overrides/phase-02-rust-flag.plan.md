@@ -63,3 +63,12 @@ Alternative considered: have the CLI pass `exclude_rust_tests=flag` and add a se
 ## Done when
 
 All checks in "Rules for every phase" are clean, the architect review (this time over the whole branch, `main...one-off-overrides`) has its valid findings addressed and recorded below, and the phase is committed: `Plan 014 phase 2: one-off Rust test-code flags`.
+
+## Review findings (phase 2 and whole branch, 2026-11-11)
+
+The architect checked the override against an independent count on a tree with a parent `true`, a crate `false`, a nested-nested `true` and a nested repo with its own `false` and a pattern: no flag 36 effective lines, `--exclude-rust-tests` 15, `--no-exclude-rust-tests` 50, all as expected, the nested repo's pattern still applied, and no config file changed. Every `main()` path counts with the flag, setup saw and saved the config's value on all four setup paths, and a plain run is byte-identical to `main`. Mutations: applying the override only at the root (M1) and ignoring it on the setup paths (M4) were caught.
+
+Fixed:
+- **Must fix: `test_setup_ignores_the_flag` couldn't fail.** Its flag agreed with the config, so a setup handed the flag's value (M2, M3) passed. It now runs five cases where the flag disagrees with what setup should see, first-run setup included; under M2, four fail (the fifth checks `r` toggles the config's value).
+- **Abbreviations.** With `allow_abbrev` on, `--no` (which meant `--no-color` on `main`) and `--excl` are now ambiguous, and `tallyman --exclude-r tests/` parses as the Rust flag plus the path `tests/`. Kept abbreviations on (turning them off would break `--no-col`, `--with` and the like) and recorded the change under `### Changed` in the 0.6.5 changelog. A test pins that `--exclude` and `--exclude=x` parse exactly next to `--exclude-rust-tests`. Flagged in the PR for Michael.
+- `--help` no longer breaks `--no-exclude-rust-tests` at a hyphen; the README feature bullet and usage line mention the flags; the walker's root/nested branches are one `if`; the walker override test covers a nested-nested config and a nested repo.

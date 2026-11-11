@@ -50,6 +50,7 @@ tallyman --setup            # re-run interactive TUI setup
 tallyman --no-color         # disable colors
 tallyman --with-spaces      # totals and bar use total lines, not effective lines
 tallyman --exclude 'tests/' # leave out files matching a pattern, this run only (repeatable, never saved)
+tallyman --exclude-rust-tests  # leave out Rust test code this run (--no-exclude-rust-tests counts it)
 tallyman --image            # PNG summary card on the Desktop (--image-light for the light theme)
 
 # Tests
