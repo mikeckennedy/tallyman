@@ -34,6 +34,13 @@ Plan 013 (issue #8) added `[rust] exclude_test_modules` and left `mod tests;` fi
 10. **Setup ignores the Rust flag too.** The setup line shows, and `r` edits, the config's value; the saved value is the config's. The count after setup uses the flag.
 11. **Version 0.6.5.** A new MINOR, with its own `## 0.6.5 - UNRELEASED` changelog section above `0.5.4 - UNRELEASED`.
 
+### Confirmed after the reviews (2026-11-11)
+
+12. **Abbreviations stay on.** With the new names, `--no` and `--excl` are ambiguous errors (noted under `### Changed`), and a typo such as `--exclude-r tests/` parses as the Rust flag plus a path. Turning `allow_abbrev` off would break shortcuts that work on `main`.
+13. **Dead paths are errors with hints** (decision 7 extended): an empty, `.` or `..` path segment (`./src/gen/` suggests `/src/gen/`) and an absolute path into the scan root (suggests the relative form). No silent rewriting.
+14. **No Windows backslash hint.** `src\gen` follows gitignore syntax, as in config patterns.
+15. **Whitespace-only values are blank,** tabs included, though gitignore would read a tab as a name.
+
 ## Phases
 
 | Phase | File | Covers |
