@@ -41,6 +41,7 @@ def _run(
     pattern_calls: Optional[list[GitIgnoreSpec]] = None,
     setup: Optional[Callable[..., object]] = None,
     stats: Optional[list[WalkStats]] = None,
+    save_calls: Optional[list[bool]] = None,
 ) -> Optional[TallyResult]:
     """Run tallyman's main() with *argv*; return the result it would have displayed (None if it exited first).
 
@@ -48,7 +49,7 @@ def _run(
     (excluded, specs, non-specs) it was pre-filled with in *setup_calls*, and the locked parent settings it
     was given in *inherited_calls*, then returns *setup_result*: such a tuple, ECHO to save the pre-fill
     unchanged, or None to fail the test because setup should not have launched. The WalkStats the report
-    was given go in *stats*.
+    was given go in *stats*, and the fake's *save* argument (False with --no-save) in *save_calls*.
     """
     captured: list[TallyResult] = []
     monkeypatch.setattr(sys, 'argv', ['tallyman', *argv])
@@ -71,9 +72,12 @@ def _run(
         inherited: Optional[TallyConfig] = None,
         exclude_patterns: Optional[GitIgnoreSpec] = None,
         existing_rust: Optional[bool] = None,
+        save: bool = True,
         **_kwargs: object,
     ) -> object:
         prefill = (set(excluded), set(specs), set(existing_non_specs or ()))
+        if save_calls is not None:
+            save_calls.append(save)
         if setup_calls is not None:
             setup_calls.append(prefill)
         if inherited_calls is not None:
@@ -109,6 +113,7 @@ def _real_setup(actions: Sequence[tuple[str, str]] = ()) -> Callable[..., object
         inherited: Optional[TallyConfig] = None,
         exclude_patterns: Optional[GitIgnoreSpec] = None,
         existing_rust: Optional[bool] = None,
+        save: bool = True,
     ) -> object:
         from tallyman.tui.setup_app import SetupApp, SetupTree
 
@@ -122,6 +127,7 @@ def _real_setup(actions: Sequence[tuple[str, str]] = ()) -> Callable[..., object
             inherited=inherited,
             exclude_patterns=exclude_patterns,
             existing_rust=existing_rust,
+            save=save,
         )
 
         async def drive() -> None:
@@ -286,6 +292,115 @@ class TestNestedRepo:
         assert tally is not None
         markdown = [s for s in tally.by_language if s.language.name == 'Markdown']
         assert [(s.file_count, s.total_lines) for s in markdown] == [(1, 3)]  # sub/README.md; top.md stays ignored
+
+
+class TestNoSave:
+    """--no-save (issue #5): setup's choices count for this run and are never written."""
+
+    @pytest.mark.parametrize('no_save', [True, False])
+    def test_first_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_save: bool) -> None:
+        _make(tmp_path, {'a.py': 'x = 1\n', 'vendor/v.py': 'x = 1\n'})
+        saves: list[bool] = []
+        argv = ['--no-save'] if no_save else []
+        tally = _run(
+            monkeypatch,
+            *argv,
+            str(tmp_path),
+            interactive=True,
+            setup_result=({'vendor'}, set(), set()),
+            save_calls=saves,
+        )
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}  # the choice applied either way
+        assert saves == [not no_save]  # the TUI is told, so it can say so
+        assert (tmp_path / CONFIG_FILENAME).exists() is not no_save
+
+    def test_setup_leaves_an_existing_config_alone(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        original = '# mine\n[exclude]\ndirectories = ["docs"]\npatterns = ["*.log"]\n'
+        _make(
+            tmp_path,
+            {
+                CONFIG_FILENAME: original,
+                'a.py': 'x = 1\n',
+                'docs/d.py': 'x = 1\n',
+                'vendor/v.py': 'x\n',
+                'x.log': 'a\n',
+            },
+        )
+        prefills: list[tuple[set[str], set[str], set[str]]] = []
+        tally = _run(
+            monkeypatch,
+            '--setup',
+            '--no-save',
+            str(tmp_path),
+            interactive=True,
+            setup_calls=prefills,
+            setup_result=({'vendor'}, set(), set()),  # docs back in, vendor out
+        )
+        assert tally is not None
+        assert prefills == [({'docs'}, set(), set())]  # pre-filled from the config, as --setup always is
+        # a.py and docs/d.py: the run used the new choices, and the config's own *.log pattern still applied
+        assert _files_by_category(tally) == {'Python/code': 2}
+        assert (tmp_path / CONFIG_FILENAME).read_text() == original
+
+    def test_an_existing_config_still_applies_without_setup(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original = '[exclude]\ndirectories = ["vendor"]\n'
+        _make(tmp_path, {CONFIG_FILENAME: original, 'a.py': 'x = 1\n', 'vendor/v.py': 'x = 1\n'})
+        tally = _run(monkeypatch, '--no-save', str(tmp_path), interactive=True)  # the fake fails the test if it runs
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+        assert (tmp_path / CONFIG_FILENAME).read_text() == original
+
+    def test_cancel_still_exits(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _make(tmp_path, {'a.py': 'x = 1\n'})
+        with pytest.raises(SystemExit) as exc:
+            _run(monkeypatch, '--no-save', str(tmp_path), interactive=True, setup=lambda *a, **kw: None)
+        assert exc.value.code == 0
+        assert 'Setup cancelled.' in capsys.readouterr().out
+        assert not (tmp_path / CONFIG_FILENAME).exists()
+
+    def test_setup_leaves_a_malformed_config_alone(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The warning must not promise a new config: with --no-save the broken file stays, byte for byte."""
+        _make(tmp_path, {CONFIG_FILENAME: '[exclude\n', 'a.py': 'x = 1\n', 'vendor/v.py': 'x = 1\n'})
+        tally = _run(
+            monkeypatch,
+            '--setup',
+            '--no-save',
+            str(tmp_path),
+            interactive=True,
+            setup_result=({'vendor'}, set(), set()),
+        )
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+        assert (tmp_path / CONFIG_FILENAME).read_text() == '[exclude\n'
+        err = capsys.readouterr().err
+        assert 'it is left as it is' in err
+        assert 'write a new config' not in err
+
+    def test_no_terminal_writes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _make(tmp_path, {'a.py': 'x = 1\n'})
+        tally = _run(monkeypatch, '--no-save', str(tmp_path))
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+        assert not (tmp_path / CONFIG_FILENAME).exists()
+        assert 'default settings' in capsys.readouterr().err
+
+    def test_the_real_setup_tui(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """End to end through the real TUI: a toggle applies to the count, and nothing is written."""
+        _make(tmp_path, {'a.py': 'x = 1\n', 'vendor/v.py': 'x = 1\n'})
+        real = _real_setup([('vendor', 'x')])  # before _run() replaces cli.run_setup, whose signature it checks
+        tally = _run(monkeypatch, '--no-save', str(tmp_path), interactive=True, setup=real)
+        assert tally is not None
+        assert _files_by_category(tally) == {'Python/code': 1}
+        assert sorted(path.name for path in tmp_path.iterdir()) == ['a.py', 'vendor']  # no config written
 
 
 class TestSetupRecovery:

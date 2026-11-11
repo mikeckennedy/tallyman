@@ -28,7 +28,7 @@ from tallyman.walker import SpecState, root_spec_state, spec_state
 
 
 class SetupResult(NamedTuple):
-    """The scan root's own settings, chosen in setup, to save in its config."""
+    """The scan root's own settings, chosen in setup, to save in its config (or, with ``save=False``, to use once)."""
 
     excluded_dirs: set[str]
     spec_dirs: set[str]
@@ -120,6 +120,7 @@ class SetupApp(App[Optional[SetupResult]]):
         inherited: Optional[TallyConfig] = None,
         exclude_patterns: Optional[GitIgnoreSpec] = None,
         existing_rust: Optional[bool] = None,
+        save: bool = True,
     ) -> None:
         """*existing_** are the editable settings saved at the scan root (*existing_rust* is its
         ``[rust] exclude_test_modules``, offered with 'r' only when the tree holds Rust code). *inherited* holds
@@ -131,10 +132,14 @@ class SetupApp(App[Optional[SetupResult]]):
         inside an auto-detected spec directory (see walker.inside_auto_spec_dir). *exclude_patterns* holds the
         ``[exclude] patterns`` of the configs at and above the scan root (see GitIgnoreSpec.for_patterns); nested
         configs' patterns are added to it as the tree is built. Directories they match are shown excluded and
-        locked, since setup doesn't edit patterns."""
+        locked, since setup doesn't edit patterns. With *save* False (``--no-save``) the choices are used for one run
+        and never written, and the screen says so."""
         super().__init__()
         self.root = root
         self.title = f'Setup Tallyman for {root.name}'
+        self.save = save
+        if not save:
+            self.sub_title = 'Not saved: this run only'  # short: the header cuts it off at 80 columns
         self.gitignore_spec = gitignore_spec
         self.user_excluded: set[str] = set(existing_exclusions)
         self.user_spec_dirs: set[str] = set(existing_specs)
@@ -174,7 +179,7 @@ class SetupApp(App[Optional[SetupResult]]):
         if self.has_rust or self.has_nested_rust:
             yield Static(self._rust_label(), id='rust')
         with Horizontal(id='buttons'):
-            yield Button('Save & Run', id='save', variant='primary')
+            yield Button('Save & Run' if self.save else 'Run', id='save', variant='primary')
             yield Button('Cancel', id='cancel')
         yield Footer()
 
@@ -535,11 +540,13 @@ def run_setup(
     inherited: Optional[TallyConfig] = None,
     exclude_patterns: Optional[GitIgnoreSpec] = None,
     existing_rust: Optional[bool] = None,
+    save: bool = True,
 ) -> Optional[SetupResult]:
     """Launch the TUI setup app.
 
     Returns the settings to save at the scan root (a :class:`SetupResult`), or None if the user
-    quit without saving. Settings from parent and nested configs are never included, not even as copies an
+    quit without saving. With *save* False the screen says the choices apply to this run only; the caller
+    then doesn't write them. Settings from parent and nested configs are never included, not even as copies an
     earlier version wrote into the scan root's config: those files keep them. Nested configs are read by the
     TUI itself (see SetupApp).
     """
@@ -553,5 +560,6 @@ def run_setup(
         inherited=inherited,
         exclude_patterns=exclude_patterns,
         existing_rust=existing_rust,
+        save=save,
     )
     return app.run()

@@ -22,6 +22,7 @@ Then just point it at a project:
 tallyman                    # analyze current directory
 tallyman /path/to/project   # analyze a specific path
 tallyman --setup            # re-run the interactive setup
+tallyman --no-save          # use setup's choices for this run only, without writing a config
 tallyman --no-color         # disable colored output
 tallyman --image            # save a PNG summary card to Desktop
 tallyman --image-light      # light-themed PNG variant
@@ -54,7 +55,7 @@ A few things that set it apart:
 - **43 languages** - From Python and Rust to Solidity, Terraform, and Docker, with full template support for HTML (Jinja, Nunjucks, Handlebars, and more)
 - **Beautiful output** - Colored, formatted results with a language composition bar, powered by [Rich](https://github.com/Textualize/rich)
 - **Realistic metrics** - Only counts files *you* wrote, not third-party dependencies or generated code
-- **Persistent config** - Your setup choices are saved to `.tally-config.toml` and reused on every run
+- **Persistent config** - Your setup choices are saved to `.tally-config.toml` and reused on every run, or used once and never written with `--no-save`
 - **File patterns** - Gitignore-style `[exclude] patterns` for files a directory exclude can't reach, such as Rust tests beside the code they test, and `--exclude PATTERN` to leave files out of one run without touching the config
 - **Rust test code** - Opt in with `[rust] exclude_test_modules` to leave inline `#[cfg(test)]` modules and helpers out of the count, or `--exclude-rust-tests` for one run
 - **Image export** - Generate a shareable PNG summary card with `--image` (dark) or `--image-light` (light theme)
@@ -239,6 +240,8 @@ ignore = ["src/myapp/agents"]      # never specs, even if named plans/, agents/,
 - If your home directory is itself a Git repository, as some dotfiles setups are, a `~/.tally-config.toml` applies to every directory below it that isn't in its own repository.
 - Configs in subdirectories are merged in as Tallyman walks into them. They can add exclusions but can't re-include a directory excluded above. Their spec settings follow the same deeper-wins rules, so a subdirectory's `ignore = ["."]` turns specs off for that subtree.
 - A broken config at or above the directory you scan stops the run with a message naming the file. A broken config in a subdirectory is skipped without a message, so scanning from the repo root and scanning from inside that subdirectory can differ.
+
+**Without a config file.** To keep `.tally-config.toml` out of a project you only measure now and then, pass `--no-save`. Setup opens as usual, its button reads **Run** instead of **Save & Run**, and your choices apply to that run only. Nothing is written, so the next run opens setup again. Configs that already apply are still read, and `tallyman --setup --no-save` tries other settings without changing the config. For one-off tweaks without setup, see `--exclude` and `--exclude-rust-tests` below.
 
 **Without a terminal**, such as in CI or a pipe, a first run counts with default settings, writes no config, and prints a one-line note. `--setup` needs an interactive terminal.
 

@@ -53,6 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
         help='Re-run the setup TUI even if .tally-config.toml exists',
     )
     parser.add_argument(
+        '--no-save',
+        action='store_true',
+        help='Use the setup choices for this run only, never writing .tally-config.toml '
+        '(setup still opens on a first run, or with --setup; existing configs are still read)',
+    )
+    parser.add_argument(
         '--no-color',
         action='store_true',
         help='Disable colored output',
@@ -113,12 +119,17 @@ def _load_chain_or_exit(config_paths: list[Path], root: Path) -> ConfigChain:
         sys.exit(1)
 
 
-def _warn_and_skip(root: Path) -> Callable[[ConfigError], None]:
-    """An error handler for --setup: report a broken config and carry on without it."""
+def _warn_and_skip(root: Path, *, save: bool = True) -> Callable[[ConfigError], None]:
+    """An error handler for --setup: report a broken config and carry on without it.
+
+    With *save* False (``--no-save``) the scan root's broken config is left as it is, and the warning says so.
+    """
 
     def warn(e: ConfigError) -> None:
         if e.path is not None and e.path.parent == root:
-            consequence = 'setup will write a new config'
+            consequence = (
+                'setup will write a new config' if save else "it is left as it is; this run uses setup's choices"
+            )
         else:
             consequence = 'its settings are skipped until it is fixed'
         print(f'Warning: ignoring {e.path} ({e}); {consequence}.', file=sys.stderr)
@@ -184,6 +195,7 @@ def run_setup(
     inherited: Optional[TallyConfig] = None,
     exclude_patterns: Optional[GitIgnoreSpec] = None,
     existing_rust: Optional[bool] = None,
+    save: bool = True,
 ) -> Optional[SetupResult]:
     """Launch the setup TUI (tui.setup_app.run_setup). Textual is imported here, so a plain run never loads it."""
     from tallyman.tui.setup_app import run_setup as launch
@@ -198,7 +210,25 @@ def run_setup(
         inherited=inherited,
         exclude_patterns=exclude_patterns,
         existing_rust=existing_rust,
+        save=save,
     )
+
+
+def _save_setup(config_path: Path, local: TallyConfig, patterns: list[str], rust: Optional[bool]) -> None:
+    """Write setup's choices to the scan root's config; on failure, warn and let the run use them anyway."""
+    try:
+        # Setup doesn't edit patterns: keep the scan-root config's own, as written and in order
+        save_config(
+            config_path,
+            local.excluded_dirs,
+            local.spec_dirs,
+            local.non_spec_dirs,
+            patterns=patterns,
+            rust_exclude_test_modules=rust,
+        )
+    except (OSError, UnicodeEncodeError) as e:
+        # Don't throw away the user's selections: warn, then count with them anyway
+        print(f'Warning: could not save {config_path} ({e}); using this run only.', file=sys.stderr)
 
 
 def _tolerate_unencodable_stdout() -> None:
@@ -256,8 +286,8 @@ def main() -> None:
         exclude_rust_tests = False
     else:
         # First run or --setup: launch TUI. --setup is how a broken config gets repaired, so skip
-        # a malformed one with a warning rather than refuse.
-        chain = load_config_chain(config_paths, root, on_error=_warn_and_skip(root))
+        # a malformed one with a warning rather than refuse. With --no-save its choices are used once, never written.
+        chain = load_config_chain(config_paths, root, on_error=_warn_and_skip(root, save=not args.no_save))
         # The TUI reads nested configs as it builds its tree, adding their patterns to this same spec
         exclude_patterns = _pattern_spec(root, chain.pattern_layers)
         # Parent and nested configs are shown locked; they stay in their own files, which are read on every run
@@ -271,6 +301,7 @@ def main() -> None:
             root_auto_spec=root_auto_spec,
             exclude_patterns=exclude_patterns,
             existing_rust=chain.local.rust_exclude_test_modules,
+            save=not args.no_save,
         )
         if result is None:
             print('Setup cancelled.')
@@ -278,19 +309,8 @@ def main() -> None:
         # Only the scan root's own settings: setup drops copies of the others
         local = TallyConfig(result.excluded_dirs, result.spec_dirs, result.non_spec_dirs)
         local_rust = result.rust_exclude_test_modules
-        try:
-            # Setup doesn't edit patterns: keep the scan-root config's own, as written and in order
-            save_config(
-                config_path,
-                local.excluded_dirs,
-                local.spec_dirs,
-                local.non_spec_dirs,
-                patterns=chain.local.patterns,
-                rust_exclude_test_modules=local_rust,
-            )
-        except (OSError, UnicodeEncodeError) as e:
-            # Don't throw away the user's selections: warn, then count with them anyway
-            print(f'Warning: could not save {config_path} ({e}); using this run only.', file=sys.stderr)
+        if not args.no_save:
+            _save_setup(config_path, local, chain.local.patterns, local_rust)
         config = merge_configs(chain.inherited, local)
         # The scan root's value from setup, else the parents'
         exclude_rust_tests = rust_setting(local_rust, chain.inherited.rust_exclude_test_modules)
